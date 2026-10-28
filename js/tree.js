@@ -23,3 +23,189 @@ export function generateTree(paths) {
 
     return print(tree);
 }
+
+/**
+ * Builds an interactive HTML DOM tree with selection checkboxes from a list of file nodes.
+ */
+export function renderInteractiveTree(nodes, container, onSelectionChange) {
+    container.innerHTML = '';
+
+    // Build hierarchy
+    const root = { name: '', isDir: true, children: {}, path: '' };
+
+    for (const node of nodes) {
+        const parts = node.path.split('/');
+        let current = root;
+        let currPath = '';
+
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            currPath = currPath ? `${currPath}/${part}` : part;
+            const isLast = i === parts.length - 1;
+
+            if (isLast && node.type === 'blob') {
+                current.children[part] = {
+                    name: part,
+                    isDir: false,
+                    path: node.path,
+                    size: node.size || 0,
+                    node: node
+                };
+            } else {
+                if (!current.children[part]) {
+                    current.children[part] = {
+                        name: part,
+                        isDir: true,
+                        path: currPath,
+                        children: {}
+                    };
+                }
+                current = current.children[part];
+            }
+        }
+    }
+
+    const selectedPaths = new Set(nodes.map(n => n.path));
+
+    function createTreeNodeDOM(item) {
+        const li = document.createElement('li');
+        li.className = 'tree-item';
+
+        const row = document.createElement('div');
+        row.className = 'tree-row';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = true;
+        checkbox.className = 'tree-checkbox';
+
+        const label = document.createElement('span');
+        label.className = item.isDir ? 'tree-folder-label' : 'tree-file-label';
+        label.textContent = item.isDir ? `📁 ${item.name}` : `📄 ${item.name}`;
+
+        row.appendChild(checkbox);
+        row.appendChild(label);
+        li.appendChild(row);
+
+        if (item.isDir) {
+            const ul = document.createElement('ul');
+            ul.className = 'tree-children';
+
+            const childKeys = Object.keys(item.children).sort((a, b) => {
+                const aIsDir = item.children[a].isDir;
+                const bIsDir = item.children[b].isDir;
+                if (aIsDir !== bIsDir) return aIsDir ? -1 : 1;
+                return a.localeCompare(b);
+            });
+
+            const childElements = [];
+            for (const key of childKeys) {
+                const childItem = item.children[key];
+                const childDOM = createTreeNodeDOM(childItem);
+                ul.appendChild(childDOM.li);
+                childElements.push(childDOM);
+            }
+
+            li.appendChild(ul);
+
+            checkbox.addEventListener('change', () => {
+                const isChecked = checkbox.checked;
+                for (const child of childElements) {
+                    child.setSubtreeChecked(isChecked);
+                }
+                updateSelectionState();
+            });
+
+            return {
+                li,
+                checkbox,
+                setSubtreeChecked(val) {
+                    checkbox.checked = val;
+                    for (const child of childElements) {
+                        child.setSubtreeChecked(val);
+                    }
+                },
+                updateStateFromChildren() {
+                    let allChecked = true;
+                    let noneChecked = true;
+                    for (const child of childElements) {
+                        child.updateStateFromChildren();
+                        if (child.checkbox.checked) noneChecked = false;
+                        else allChecked = false;
+                    }
+                    checkbox.checked = !noneChecked;
+                    checkbox.indeterminate = !allChecked && !noneChecked;
+                },
+                collectSelectedFiles(acc) {
+                    for (const child of childElements) {
+                        child.collectSelectedFiles(acc);
+                    }
+                }
+            };
+        } else {
+            checkbox.addEventListener('change', () => {
+                updateSelectionState();
+            });
+
+            return {
+                li,
+                checkbox,
+                setSubtreeChecked(val) {
+                    checkbox.checked = val;
+                },
+                updateStateFromChildren() {},
+                collectSelectedFiles(acc) {
+                    if (checkbox.checked) {
+                        acc.push(item.node);
+                    }
+                }
+            };
+        }
+    }
+
+    const rootUl = document.createElement('ul');
+    rootUl.className = 'tree-root';
+
+    const rootChildKeys = Object.keys(root.children).sort((a, b) => {
+        const aIsDir = root.children[a].isDir;
+        const bIsDir = root.children[b].isDir;
+        if (aIsDir !== bIsDir) return aIsDir ? -1 : 1;
+        return a.localeCompare(b);
+    });
+
+    const rootNodes = [];
+    for (const key of rootChildKeys) {
+        const childDOM = createTreeNodeDOM(root.children[key]);
+        rootUl.appendChild(childDOM.li);
+        rootNodes.push(childDOM);
+    }
+
+    container.appendChild(rootUl);
+
+    function getSelectedNodes() {
+        const selected = [];
+        for (const rn of rootNodes) {
+            rn.collectSelectedFiles(selected);
+        }
+        return selected;
+    }
+
+    function updateSelectionState() {
+        for (const rn of rootNodes) {
+            rn.updateStateFromChildren();
+        }
+        if (onSelectionChange) {
+            onSelectionChange(getSelectedNodes());
+        }
+    }
+
+    return {
+        getSelectedNodes,
+        selectAll(val) {
+            for (const rn of rootNodes) {
+                rn.setSubtreeChecked(val);
+            }
+            updateSelectionState();
+        }
+    };
+}

@@ -21,9 +21,17 @@ export function extractRateLimitHeaders(response) {
     };
 }
 
+function getAuthHeader(pat) {
+    if (!pat) return {};
+    const token = pat.trim();
+    if (token.startsWith('github_pat_') || token.startsWith('gho_') || token.startsWith('ghu_') || token.startsWith('ghs_')) {
+        return { 'Authorization': `Bearer ${token}` };
+    }
+    return { 'Authorization': `token ${token}` };
+}
+
 export async function fetchRateLimit(pat = '') {
-    const headers = { 'Accept': 'application/vnd.github.v3+json' };
-    if (pat) headers['Authorization'] = `token ${pat}`;
+    const headers = { 'Accept': 'application/vnd.github.v3+json', ...getAuthHeader(pat) };
 
     const res = await fetch(`${GITHUB_API_BASE}/rate_limit`, { headers });
     if (!res.ok) throw new Error('Failed to retrieve rate limit info');
@@ -37,8 +45,7 @@ export async function fetchRateLimit(pat = '') {
 }
 
 export async function resolveDefaultBranch(owner, repo, pat, signal, onHeaders) {
-    const headers = { 'Accept': 'application/vnd.github.v3+json' };
-    if (pat) headers['Authorization'] = `token ${pat}`;
+    const headers = { 'Accept': 'application/vnd.github.v3+json', ...getAuthHeader(pat) };
 
     const res = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}`, { headers, signal });
     if (onHeaders) onHeaders(extractRateLimitHeaders(res));
@@ -51,8 +58,7 @@ export async function resolveDefaultBranch(owner, repo, pat, signal, onHeaders) 
 }
 
 export async function fetchRepoTree(owner, repo, branch, pat, signal, onHeaders) {
-    const headers = { 'Accept': 'application/vnd.github.v3+json' };
-    if (pat) headers['Authorization'] = `token ${pat}`;
+    const headers = { 'Accept': 'application/vnd.github.v3+json', ...getAuthHeader(pat) };
 
     const res = await fetch(
         `${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
@@ -76,7 +82,7 @@ export async function fetchFileContent(owner, repo, branch, path, pat, signal, o
     if (pat) {
         const headers = {
             'Accept': 'application/vnd.github.raw+json',
-            'Authorization': `token ${pat}`
+            ...getAuthHeader(pat)
         };
         const res = await fetch(
             `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${path}?ref=${branch}`,
