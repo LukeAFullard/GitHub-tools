@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GitHub Repo Context Packer</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>📦 GitHub Repo Context Packer</h1>
+        <p>Direct browser-to-GitHub packaging. Zero middleman servers, 100% client-side privacy, strict API limits compliance.</p>
+    </header>
+
+    <!-- Configuration Card -->
+    <div class="card">
+        <div class="grid-2">
+            <div class="field">
+                <label for="repoUrl">GitHub Repository</label>
+                <input type="text" id="repoUrl" placeholder="owner/repo or https://github.com/owner/repo" value="">
+            </div>
+            <div class="field">
+                <label for="branch">Branch / Tag (Optional)</label>
+                <input type="text" id="branch" placeholder="Defaults to main/master">
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <div class="field">
+                <label for="pat">GitHub Token (Optional)</label>
+                <input type="password" id="pat" placeholder="ghp_... (Elevates limits from 60 to 5,000 req/hr; stays in browser)">
+            </div>
+            <div class="field">
+                <label>GitHub API Quota Status</label>
+                <div class="rate-limit-badge">
+                    <span>Remaining: <b id="quotaVal" class="rate-status rate-normal">-- / --</b></span>
+                    <span>Reset: <span id="resetVal">--:--</span></span>
+                </div>
+            </div>
+        </div>
+
+        <details>
+            <summary class="details-summary">Advanced Settings &amp; Compliance Safeguards</summary>
+            <div class="advanced-grid">
+                <div class="grid-2">
+                    <div class="field">
+                        <label for="format">Output Format Schema</label>
+                        <select id="format">
+                            <option value="claude-xml">Anthropic Claude XML (&lt;documents&gt; standard)</option>
+                            <option value="markdown">Markdown Codeblocks</option>
+                            <option value="generic-xml">Generic XML (&lt;files&gt; CDATA)</option>
+                            <option value="json">Structured JSON</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="maxKb">Max File Size (KB)</label>
+                        <input type="number" id="maxKb" value="150" min="5" max="2000">
+                    </div>
+                </div>
+
+                <div class="grid-2">
+                    <div class="field">
+                        <label for="throttleMs">Pacing Delay Between Fetches (ms)</label>
+                        <input type="number" id="throttleMs" value="80" min="20" max="2000">
+                    </div>
+                    <div class="field">
+                        <label for="ignoreExt">Ignore File Extensions</label>
+                        <input type="text" id="ignoreExt" value="png, jpg, jpeg, svg, gif, zip, pdf, lock, min.js, ico, webp">
+                    </div>
+                </div>
+            </div>
+        </details>
+
+        <div class="btn-group">
+            <button id="packBtn" class="primary">🚀 Fetch &amp; Pack Repository</button>
+            <button id="abortBtn" class="danger" style="display: none;">Cancel</button>
+        </div>
+
+        <div class="progress-track" id="progressTrack">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div id="log"></div>
+    </div>
+
+    <!-- Output Card -->
+    <div class="card" id="outputCard">
+        <div class="output-meta">
+            <span>Included Files: <b id="statFiles">0</b></span>
+            <span>Est. BPE Tokens: <b id="statTokens">0</b> <span class="badge">Tiktoken / Claude calibrated</span></span>
+            <span>Raw Characters: <b id="statChars">0</b></span>
+        </div>
+
+        <div class="btn-group">
+            <button id="downloadBtn" class="primary">📥 Download File</button>
+            <button id="copyBtn" class="secondary">📋 Copy to Clipboard</button>
+        </div>
+
+        <textarea id="previewArea" class="preview" readonly></textarea>
+    </div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
