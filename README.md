@@ -6,6 +6,7 @@ A zero-install, 100% client-side web application that fetches, filters, and form
 
 - **100% Client-Side Privacy:** Direct browser-to-GitHub API connection. No backend server or proxy involved. Personal Access Tokens (PAT) remain strictly in memory in your browser.
 - **Interactive File Selection:** Renders an interactive file tree to easily select, deselect, or filter files before packing.
+- **Code Minification & Whitespace Stripping:** Optional code minification (Basic: whitespace & blank line cleanup; Aggressive: language-aware comment removal and full blank-line stripping) to maximize token efficiency.
 - **Token Estimation:** BPE regex-based heuristic estimator matching Tiktoken / Claude token densities for immediate size feedback.
 - **Multiple Output Formats:**
   - **Claude XML (`<documents>`)**: Optimized for Claude prompts.
@@ -58,6 +59,7 @@ Navigate to `http://localhost:8000` in your web browser.
     ├── config.js       # Global constants, default ignore lists, API endpoints
     ├── formatters.js   # LLM context output formatters (XML, MD, JSON)
     ├── github-api.js   # GitHub API fetch logic & rate-limit handling
+    ├── minifier.js     # Code minification & comment stripping engine
     ├── tokenizer.js    # BPE regex token estimator
     └── tree.js         # File tree rendering & selection state management
 ```

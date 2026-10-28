@@ -70,6 +70,17 @@
                         <input type="text" id="ignoreExt" value="png, jpg, jpeg, svg, gif, zip, pdf, lock, min.js, ico, webp">
                     </div>
                 </div>
+
+                <div class="grid-2">
+                    <div class="field">
+                        <label for="minifyMode">Minify Code &amp; Strip Comments</label>
+                        <select id="minifyMode">
+                            <option value="none">None (Preserve Original Source)</option>
+                            <option value="basic">Basic (Strip Trailing Whitespace &amp; Extra Blank Lines)</option>
+                            <option value="aggressive">Aggressive (Remove Comments &amp; All Blank Lines)</option>
+                        </select>
+                    </div>
+                </div>
             </div>
         </details>
 

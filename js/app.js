@@ -5,6 +5,7 @@ import { IGNORED_DIRS, IGNORED_FILES } from './config.js';
 import { estimateTokens } from './tokenizer.js';
 import { generateTree } from './tree.js';
 import { buildContextOutput } from './formatters.js';
+import { minifyCode } from './minifier.js';
 import {
     parseRepoInput,
     fetchRateLimit,
@@ -29,6 +30,7 @@ const dom = {
     maxKb: document.getElementById('maxKb'),
     throttleMs: document.getElementById('throttleMs'),
     ignoreExt: document.getElementById('ignoreExt'),
+    minifyMode: document.getElementById('minifyMode'),
     packBtn: document.getElementById('packBtn'),
     abortBtn: document.getElementById('abortBtn'),
     progressTrack: document.getElementById('progressTrack'),
@@ -84,6 +86,7 @@ dom.packBtn.addEventListener('click', async () => {
     const pat = dom.pat.value.trim();
     const maxKb = parseInt(dom.maxKb.value, 10) || 150;
     const throttleMs = parseInt(dom.throttleMs.value, 10) || 80;
+    const minifyMode = dom.minifyMode ? dom.minifyMode.value : 'none';
     const customIgnoredExts = new Set(
         dom.ignoreExt.value.split(',').map(s => s.trim().toLowerCase().replace(/^\./, ''))
     );
@@ -163,7 +166,8 @@ dom.packBtn.addEventListener('click', async () => {
             }
 
             if (result.content) {
-                collectedFiles.push({ path: node.path, content: result.content });
+                const processedContent = minifyCode(result.content, node.path, minifyMode);
+                collectedFiles.push({ path: node.path, content: processedContent });
             }
 
             dom.progressFill.style.width = `${Math.round(((i + 1) / processable.length) * 100)}%`;
