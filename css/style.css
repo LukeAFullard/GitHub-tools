@@ -279,3 +279,57 @@ textarea.preview {
     font-family: var(--font-mono);
     color: var(--accent);
 }
+
+/* Help Tooltips */
+.help-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background-color: var(--surface-border);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: bold;
+    cursor: help;
+    margin-left: 5px;
+    position: relative;
+    vertical-align: middle;
+}
+
+.help-icon:hover {
+    background-color: var(--primary);
+    color: #fff;
+}
+
+.help-icon::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 125%;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #0b0f15;
+    color: var(--text-main);
+    border: 1px solid var(--surface-border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 0.75rem;
+    font-weight: normal;
+    text-transform: none;
+    letter-spacing: normal;
+    white-space: normal;
+    width: max-content;
+    max-width: 240px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.15s ease, visibility 0.15s ease;
+    z-index: 100;
+}
+
+.help-icon:hover::after {
+    opacity: 1;
+    visibility: visible;
+}

@@ -18,22 +18,22 @@
     <div class="card">
         <div class="grid-2">
             <div class="field">
-                <label for="repoUrl">GitHub Repository</label>
+                <label for="repoUrl">GitHub Repository <span class="help-icon" data-tooltip="Enter the repository owner/name or URL (e.g. facebook/react).">?</span></label>
                 <input type="text" id="repoUrl" placeholder="owner/repo or https://github.com/owner/repo" value="">
             </div>
             <div class="field">
-                <label for="branch">Branch / Tag (Optional)</label>
+                <label for="branch">Branch / Tag (Optional) <span class="help-icon" data-tooltip="Specify a Git branch or tag name. Defaults to main or master if blank.">?</span></label>
                 <input type="text" id="branch" placeholder="Defaults to main/master">
             </div>
         </div>
 
         <div class="grid-2">
             <div class="field">
-                <label for="pat">GitHub Token (Optional)</label>
+                <label for="pat">GitHub Token (Optional) <span class="help-icon" data-tooltip="Optional Personal Access Token (PAT or Fine-Grained Token) to increase API rate limit to 5,000 req/hr. Stays 100% in transient browser memory.">?</span></label>
                 <input type="password" id="pat" placeholder="ghp_... (Elevates limits from 60 to 5,000 req/hr; stays in browser)">
             </div>
             <div class="field">
-                <label>GitHub API Quota Status</label>
+                <label>GitHub API Quota Status <span class="help-icon" data-tooltip="Shows your current remaining GitHub API rate limit quota and reset time.">?</span></label>
                 <div class="rate-limit-badge">
                     <span>Remaining: <b id="quotaVal" class="rate-status rate-normal">-- / --</b></span>
                     <span>Reset: <span id="resetVal">--:--</span></span>
@@ -42,11 +42,11 @@
         </div>
 
         <details>
-            <summary class="details-summary">Advanced Settings &amp; Compliance Safeguards</summary>
+            <summary class="details-summary">Advanced Settings &amp; Compliance Safeguards <span class="help-icon" data-tooltip="Click to customize output schema, file filters, request pacing, code minification, and token limit chunking.">?</span></summary>
             <div class="advanced-grid">
                 <div class="grid-2">
                     <div class="field">
-                        <label for="format">Output Format Schema</label>
+                        <label for="format">Output Format Schema <span class="help-icon" data-tooltip="Choose your desired LLM prompt structure (Claude XML, Markdown, Generic XML, or JSON).">?</span></label>
                         <select id="format">
                             <option value="claude-xml">Anthropic Claude XML (&lt;documents&gt; standard)</option>
                             <option value="markdown">Markdown Codeblocks</option>
@@ -55,25 +55,25 @@
                         </select>
                     </div>
                     <div class="field">
-                        <label for="maxKb">Max File Size (KB)</label>
+                        <label for="maxKb">Max File Size (KB) <span class="help-icon" data-tooltip="Files larger than this limit in kilobytes will be skipped automatically during fetch.">?</span></label>
                         <input type="number" id="maxKb" value="150" min="5" max="2000">
                     </div>
                 </div>
 
                 <div class="grid-2">
                     <div class="field">
-                        <label for="throttleMs">Pacing Delay Between Fetches (ms)</label>
+                        <label for="throttleMs">Pacing Delay Between Fetches (ms) <span class="help-icon" data-tooltip="Sequential delay in milliseconds between file content downloads to respect secondary rate limits.">?</span></label>
                         <input type="number" id="throttleMs" value="80" min="20" max="2000">
                     </div>
                     <div class="field">
-                        <label for="ignoreExt">Ignore File Extensions</label>
+                        <label for="ignoreExt">Ignore File Extensions <span class="help-icon" data-tooltip="Comma-separated file extensions to exclude from source fetching (e.g. images, lockfiles, pdfs).">?</span></label>
                         <input type="text" id="ignoreExt" value="png, jpg, jpeg, svg, gif, zip, pdf, lock, min.js, ico, webp">
                     </div>
                 </div>
 
                 <div class="grid-2">
                     <div class="field">
-                        <label for="minifyMode">Minify Code &amp; Strip Comments</label>
+                        <label for="minifyMode">Minify Code &amp; Strip Comments <span class="help-icon" data-tooltip="Optionally strip extra blank lines and language comments to optimize LLM token consumption.">?</span></label>
                         <select id="minifyMode">
                             <option value="none">None (Preserve Original Source)</option>
                             <option value="basic">Basic (Strip Trailing Whitespace &amp; Extra Blank Lines)</option>
@@ -81,7 +81,7 @@
                         </select>
                     </div>
                     <div class="field">
-                        <label for="chunkLimit">Chunk Token Limit (0 = Single File)</label>
+                        <label for="chunkLimit">Chunk Token Limit (0 = Single File) <span class="help-icon" data-tooltip="Splits output into sequential multi-part context files if total tokens exceed this limit (e.g. 100,000 tokens). Set to 0 for a single file.">?</span></label>
                         <input type="number" id="chunkLimit" value="0" min="0" step="10000" placeholder="e.g. 100000 for 100k token limits">
                     </div>
                 </div>
