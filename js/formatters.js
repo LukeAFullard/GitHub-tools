@@ -67,6 +67,34 @@ export function formatJson(repoInfo, branch, treeText, files) {
     };
 }
 
+export function chunkContextOutput(format, repoInfo, branch, treeText, files, chunkTokenLimit, estimateTokensFn) {
+    if (!chunkTokenLimit || chunkTokenLimit <= 0) {
+        return [buildContextOutput(format, repoInfo, branch, treeText, files)];
+    }
+
+    const chunks = [];
+    let currentFiles = [];
+
+    for (let i = 0; i < files.length; i++) {
+        const candidateFiles = [...currentFiles, files[i]];
+        const candidateOutput = buildContextOutput(format, repoInfo, branch, treeText, candidateFiles);
+        const est = estimateTokensFn(candidateOutput.text);
+
+        if (est > chunkTokenLimit && currentFiles.length > 0) {
+            chunks.push(buildContextOutput(format, repoInfo, branch, treeText, currentFiles));
+            currentFiles = [files[i]];
+        } else {
+            currentFiles.push(files[i]);
+        }
+    }
+
+    if (currentFiles.length > 0) {
+        chunks.push(buildContextOutput(format, repoInfo, branch, treeText, currentFiles));
+    }
+
+    return chunks;
+}
+
 export function buildContextOutput(format, repoInfo, branch, treeText, files) {
     switch (format) {
         case 'claude-xml':

@@ -2,6 +2,37 @@
  * Client-Side BPE Token Estimator
  * Calibrated against Tiktoken (cl100k_base / o200k_base) and Anthropic Claude Tokenizer
  */
+let worker = null;
+let msgId = 0;
+const callbacks = new Map();
+
+export function estimateTokensAsync(text) {
+    return new Promise((resolve) => {
+        if (typeof Worker === 'undefined') {
+            resolve(estimateTokens(text));
+            return;
+        }
+        if (!worker) {
+            try {
+                worker = new Worker(new URL('./tokenizer.worker.js', import.meta.url), { type: 'module' });
+                worker.onmessage = (e) => {
+                    const { id, tokens } = e.data;
+                    if (callbacks.has(id)) {
+                        callbacks.get(id)(tokens);
+                        callbacks.delete(id);
+                    }
+                };
+            } catch (_) {
+                resolve(estimateTokens(text));
+                return;
+            }
+        }
+        const currentId = ++msgId;
+        callbacks.set(currentId, resolve);
+        worker.postMessage({ id: currentId, text });
+    });
+}
+
 export function estimateTokens(text) {
     if (!text) return 0;
 

@@ -4,8 +4,10 @@ A zero-install, 100% client-side web application that fetches, filters, and form
 
 ## Features
 
-- **100% Client-Side Privacy:** Direct browser-to-GitHub API connection. No backend server or proxy involved. Personal Access Tokens (PAT) remain strictly in memory in your browser.
-- **Interactive File Selection:** Renders an interactive file tree to easily select, deselect, or filter files before packing.
+- **100% Client-Side Privacy:** Direct browser-to-GitHub API connection. Personal Access Tokens (PATs) and fine-grained PATs (`github_pat_`) remain strictly in memory.
+- **Interactive File Selection:** Renders an interactive pre-download directory tree to select or deselect files and folders before fetching contents.
+- **Context Chunking & Token Splitting:** Automatically splits large output context bundles into sequential multi-part chunks when exceeding a specified token limit (e.g. 100k tokens).
+- **Background Web Worker Tokenization:** Offloads BPE token estimation to a Web Worker thread for seamless background processing.
 - **Code Minification & Whitespace Stripping:** Optional code minification (Basic: whitespace & blank line cleanup; Aggressive: language-aware comment removal and full blank-line stripping) to maximize token efficiency.
 - **Token Estimation:** BPE regex-based heuristic estimator matching Tiktoken / Claude token densities for immediate size feedback.
 - **Multiple Output Formats:**
@@ -61,6 +63,7 @@ Navigate to `http://localhost:8000` in your web browser.
     ├── github-api.js   # GitHub API fetch logic & rate-limit handling
     ├── minifier.js     # Code minification & comment stripping engine
     ├── tokenizer.js    # BPE regex token estimator
+    ├── tokenizer.worker.js # Web Worker background tokenization
     └── tree.js         # File tree rendering & selection state management
 ```
 

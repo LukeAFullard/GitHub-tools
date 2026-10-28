@@ -80,6 +80,10 @@
                             <option value="aggressive">Aggressive (Remove Comments &amp; All Blank Lines)</option>
                         </select>
                     </div>
+                    <div class="field">
+                        <label for="chunkLimit">Chunk Token Limit (0 = Single File)</label>
+                        <input type="number" id="chunkLimit" value="0" min="0" step="10000" placeholder="e.g. 100000 for 100k token limits">
+                    </div>
                 </div>
             </div>
         </details>
@@ -95,16 +99,34 @@
         <div id="log"></div>
     </div>
 
+    <!-- Interactive Tree Selection Card -->
+    <div class="card" id="treeCard">
+        <div class="output-meta">
+            <span>Manifest Total: <b id="manifestCount">0</b> files</span>
+            <span>Selected for Download: <b id="selectedCount">0</b> files</span>
+        </div>
+        <div class="tree-actions">
+            <button id="selectAllBtn" class="secondary">Select All</button>
+            <button id="deselectAllBtn" class="secondary">Deselect All</button>
+            <button id="startDownloadBtn" class="primary">⚡ Pack Selected Files</button>
+        </div>
+        <div class="tree-container-box" id="treeContainer"></div>
+    </div>
+
     <!-- Output Card -->
     <div class="card" id="outputCard">
         <div class="output-meta">
             <span>Included Files: <b id="statFiles">0</b></span>
             <span>Est. BPE Tokens: <b id="statTokens">0</b> <span class="badge">Tiktoken / Claude calibrated</span></span>
             <span>Raw Characters: <b id="statChars">0</b></span>
+            <span>Chunk Count: <b id="statChunks">1</b></span>
         </div>
 
         <div class="btn-group">
+            <label for="chunkSelect" id="chunkSelectLabel" style="display:none; font-size: 0.85rem; font-weight: bold;">Select Chunk:</label>
+            <select id="chunkSelect" style="display:none; padding: 0.4rem;"></select>
             <button id="downloadBtn" class="primary">📥 Download File</button>
+            <button id="downloadAllBtn" class="secondary" style="display:none;">📦 Download All Chunks</button>
             <button id="copyBtn" class="secondary">📋 Copy to Clipboard</button>
         </div>
 
