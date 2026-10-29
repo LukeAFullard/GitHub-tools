@@ -210,7 +210,7 @@ export async function fetchFileContent(owner, repo, branch, path, pat, signal, o
                 const text = await res.text();
                 return { success: true, content: text, status: res.status, isPrivate: false };
             }
-            if (res.status === 429) {
+            if (res.status === 429 || res.status === 403) {
                 return { success: false, backoff: 60, status: res.status, isPrivate: false };
             }
         } catch (err) {
@@ -232,14 +232,14 @@ export async function fetchFileContent(owner, repo, branch, path, pat, signal, o
         const headersMeta = extractRateLimitHeaders(res);
         if (isRateLimitResponse(res, headersMeta)) {
             const retryAfter = headersMeta.retryAfter || 60;
-            return { success: false, backoff: retryAfter, status: res.status, isPrivate: currentIsPrivate };
+            return { success: false, backoff: retryAfter, status: res.status, isPrivate };
         }
         if (res.ok) {
             const text = await res.text();
-            return { success: true, content: text, status: res.status, isPrivate: currentIsPrivate };
+            return { success: true, content: text, status: res.status, isPrivate };
         }
-        return { success: false, error: `HTTP ${res.status}: ${res.statusText}`, status: res.status, isPrivate: currentIsPrivate };
+        return { success: false, error: `HTTP ${res.status}: ${res.statusText}`, status: res.status, isPrivate };
     }
 
-    return { success: false, error: `HTTP 404: File not found`, status: 404, isPrivate: currentIsPrivate };
+    return { success: false, error: `HTTP 404: File not found`, status: 404, isPrivate };
 }

@@ -244,3 +244,53 @@ test('minifier: HTML textarea content is preserved during aggressive minificatio
     const minified = minifyCode(code, 'index.html', 'aggressive');
     assert.ok(minified.includes('line 1\n\n  line 2'));
 });
+
+test('github-api: fetchFileContent with mock fetch (public raw OK, raw 404 REST fallback, 429 backoff)', async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+        // Case 1: Public raw fetch OK
+        globalThis.fetch = async (url) => {
+            if (url.includes('raw.githubusercontent.com')) {
+                return { ok: true, status: 200, text: async () => 'hello world' };
+            }
+            return { ok: false, status: 404 };
+        };
+        const { fetchFileContent } = await import('../js/github-api.js');
+        const res1 = await fetchFileContent('owner', 'repo', 'main', 'index.js', '');
+        assert.equal(res1.success, true);
+        assert.equal(res1.content, 'hello world');
+
+        // Case 2: Public raw 404 + PAT -> REST fallback OK
+        globalThis.fetch = async (url) => {
+            if (url.includes('raw.githubusercontent.com')) {
+                return { ok: false, status: 404, statusText: 'Not Found' };
+            }
+            if (url.includes('api.github.com')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    headers: new Map(),
+                    text: async () => 'rest content'
+                };
+            }
+            return { ok: false, status: 404 };
+        };
+        const res2 = await fetchFileContent('owner', 'repo', 'main', 'secret.txt', 'ghp_token');
+        assert.equal(res2.success, true);
+        assert.equal(res2.content, 'rest content');
+
+        // Case 3: Raw 429 rate limit
+        globalThis.fetch = async (url) => {
+            if (url.includes('raw.githubusercontent.com')) {
+                return { ok: false, status: 429 };
+            }
+            return { ok: false, status: 429 };
+        };
+        const res3 = await fetchFileContent('owner', 'repo', 'main', 'file.js', '');
+        assert.equal(res3.success, false);
+        assert.equal(res3.backoff, 60);
+
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
