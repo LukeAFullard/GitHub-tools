@@ -15,7 +15,7 @@ import {
 import { minifyCode } from '../js/minifier.js';
 import { parseRepoInput, extractRateLimitHeaders, fetchRepoZipball } from '../js/github-api.js';
 import { estimateTokens } from '../js/tokenizer.js';
-import { generateTree, renderInteractiveTree } from '../js/tree.js';
+import { generateTree } from '../js/tree.js';
 
 test('formatters: escapeXml', () => {
     assert.equal(escapeXml('<script>alert("xss & ' + "'" + '")</script>'), '&lt;script&gt;alert(&quot;xss &amp; &apos;&quot;)&lt;/script&gt;');
@@ -283,7 +283,6 @@ test('github-api: parseRepoInput override branch honors explicit branch over URL
 test('github-api: fetchFileContent with mock fetch (public raw OK, raw 404 REST fallback, 429 backoff)', async () => {
     const originalFetch = globalThis.fetch;
     try {
-        // Case 1: Public raw fetch OK
         globalThis.fetch = async (url) => {
             if (url.includes('raw.githubusercontent.com')) {
                 return { ok: true, status: 200, text: async () => 'hello world' };
@@ -295,7 +294,6 @@ test('github-api: fetchFileContent with mock fetch (public raw OK, raw 404 REST 
         assert.equal(res1.success, true);
         assert.equal(res1.content, 'hello world');
 
-        // Case 2: Public raw 404 + PAT -> REST fallback OK
         globalThis.fetch = async (url) => {
             if (url.includes('raw.githubusercontent.com')) {
                 return { ok: false, status: 404, statusText: 'Not Found' };
@@ -314,7 +312,6 @@ test('github-api: fetchFileContent with mock fetch (public raw OK, raw 404 REST 
         assert.equal(res2.success, true);
         assert.equal(res2.content, 'rest content');
 
-        // Case 3: Raw 429 rate limit
         globalThis.fetch = async (url) => {
             if (url.includes('raw.githubusercontent.com')) {
                 return { ok: false, status: 429 };
@@ -325,7 +322,6 @@ test('github-api: fetchFileContent with mock fetch (public raw OK, raw 404 REST 
         assert.equal(res3.success, false);
         assert.equal(res3.backoff, 60);
 
-        // Case 4: Raw 500 server error triggers 5s backoff
         globalThis.fetch = async (url) => {
             return { ok: false, status: 500, statusText: 'Internal Server Error' };
         };

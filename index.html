@@ -172,7 +172,7 @@
     <!-- Main Workspace Panes (Files | Output) -->
     <main class="workspace-panes">
         <!-- Files Pane -->
-        <section class="pane active-mobile" id="treeCard">
+        <section class="pane active-mobile" id="treeCard" role="tabpanel" aria-labelledby="tabFilesBtn">
             <div class="pane-header">
                 <span class="pane-title">Files</span>
                 <span id="selectedTokensBadge" class="badge" style="font-family: var(--font-mono); font-size: 0.78125rem; color: var(--ink-soft);">~0 tokens selected</span>
@@ -218,7 +218,7 @@
         </section>
 
         <!-- Output Pane -->
-        <section class="pane" id="outputCard">
+        <section class="pane" id="outputCard" role="tabpanel" aria-labelledby="tabOutputBtn">
             <div class="pane-header">
                 <div style="display: flex; align-items: center; gap: 0.5rem;">
                     <span class="pane-title">Output</span>

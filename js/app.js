@@ -45,6 +45,7 @@ let activeFetchCount = 0;
 
 let currentBudgetWindow = 200000;
 let currentAppState = 'empty'; // 'empty' | 'loaded' | 'built'
+let totalTokensAllChunks = 0;
 
 const dom = {
     repoUrl: document.getElementById('repoUrl'),
@@ -138,12 +139,14 @@ function showInlineError(msg) {
     }
 }
 
-// --- Theme Management ---
+// --- Theme Management (Guarded for strict/blocked localStorage) ---
 function initTheme() {
-    const savedTheme = localStorage.getItem('app_theme');
-    if (savedTheme === 'dark' || savedTheme === 'light') {
-        document.documentElement.setAttribute('data-theme', savedTheme);
-    }
+    try {
+        const savedTheme = localStorage.getItem('app_theme');
+        if (savedTheme === 'dark' || savedTheme === 'light') {
+            document.documentElement.setAttribute('data-theme', savedTheme);
+        }
+    } catch (_) {}
 }
 
 if (dom.themeToggleBtn) {
@@ -157,7 +160,9 @@ if (dom.themeToggleBtn) {
             next = isDarkSystem ? 'light' : 'dark';
         }
         document.documentElement.setAttribute('data-theme', next);
-        localStorage.setItem('app_theme', next);
+        try {
+            localStorage.setItem('app_theme', next);
+        } catch (_) {}
     });
 }
 initTheme();
@@ -198,7 +203,6 @@ function saveSettings() {
                 const val = parseInt(dom.chunkLimit.value, 10) || 0;
                 if (val > 0) {
                     currentBudgetWindow = val;
-                    updateBudgetMeterUI(parseInt(dom.statTokens.textContent.replace(/,/g, ''), 10) || 0);
                 }
             }
         });
@@ -235,6 +239,12 @@ if (dom.logHeader) {
     });
 }
 
+function updateProgressBar(percent) {
+    const val = Math.min(100, Math.max(0, Math.round(percent)));
+    if (dom.progressFill) dom.progressFill.style.width = `${val}%`;
+    if (dom.progressTrack) dom.progressTrack.setAttribute('aria-valuenow', val.toString());
+}
+
 function log(msg) {
     if (dom.log) {
         dom.log.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
@@ -247,7 +257,7 @@ function log(msg) {
 }
 
 // --- App State & Sequence Steps ---
-function setAppState(state) {
+function setAppState(state, note = '') {
     currentAppState = state;
     if (dom.step1) dom.step1.classList.toggle('active', state === 'empty');
     if (dom.step2) dom.step2.classList.toggle('active', state === 'loaded');
@@ -257,27 +267,53 @@ function setAppState(state) {
         if (state === 'empty') {
             dom.mobilePrimaryBtn.textContent = 'Load files';
         } else if (state === 'loaded') {
-            dom.mobilePrimaryBtn.textContent = 'Build context';
+            dom.mobilePrimaryBtn.textContent = note ? note : 'Build context';
         } else if (state === 'built') {
             dom.mobilePrimaryBtn.textContent = 'Copy context';
         }
     }
+    if (dom.startDownloadBtn) {
+        if (state === 'loaded' && note) {
+            dom.startDownloadBtn.textContent = note;
+        } else {
+            dom.startDownloadBtn.textContent = 'Build context';
+        }
+    }
 }
 
-// --- Mobile Tab Switching ---
+// --- Mobile Tab Switching & Accessible Tabs ---
+function switchTab(activeTabBtn, inactiveTabBtn, activeCard, inactiveCard) {
+    activeTabBtn.classList.add('active');
+    activeTabBtn.setAttribute('aria-selected', 'true');
+    activeTabBtn.setAttribute('tabindex', '0');
+
+    inactiveTabBtn.classList.remove('active');
+    inactiveTabBtn.setAttribute('aria-selected', 'false');
+    inactiveTabBtn.setAttribute('tabindex', '-1');
+
+    activeCard.classList.add('active-mobile');
+    inactiveCard.classList.remove('active-mobile');
+}
+
 if (dom.tabFilesBtn && dom.tabOutputBtn) {
     dom.tabFilesBtn.addEventListener('click', () => {
-        dom.tabFilesBtn.classList.add('active');
-        dom.tabOutputBtn.classList.remove('active');
-        if (dom.treeCard) dom.treeCard.classList.add('active-mobile');
-        if (dom.outputCard) dom.outputCard.classList.remove('active-mobile');
+        switchTab(dom.tabFilesBtn, dom.tabOutputBtn, dom.treeCard, dom.outputCard);
     });
 
     dom.tabOutputBtn.addEventListener('click', () => {
-        dom.tabOutputBtn.classList.add('active');
-        dom.tabFilesBtn.classList.remove('active');
-        if (dom.outputCard) dom.outputCard.classList.add('active-mobile');
-        if (dom.treeCard) dom.treeCard.classList.remove('active-mobile');
+        switchTab(dom.tabOutputBtn, dom.tabFilesBtn, dom.outputCard, dom.treeCard);
+    });
+
+    const tabs = [dom.tabFilesBtn, dom.tabOutputBtn];
+    tabs.forEach((tab, index) => {
+        tab.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                e.preventDefault();
+                const nextIndex = (index + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+                tabs[nextIndex].focus();
+                tabs[nextIndex].click();
+            }
+        });
     });
 }
 
@@ -310,26 +346,32 @@ if (dom.wrapToggleBtn && dom.previewArea) {
     });
 }
 
-// Budget Meter Presets
+// Budget Meter Presets (P1 fix: dispatch change to repack immediately)
 document.querySelectorAll('.preset-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         const val = parseInt(btn.getAttribute('data-preset'), 10);
         if (val) {
             currentBudgetWindow = val;
-            if (dom.chunkLimit) dom.chunkLimit.value = val.toString();
+            if (dom.chunkLimit) {
+                dom.chunkLimit.value = val.toString();
+                dom.chunkLimit.dispatchEvent(new Event('change', { bubbles: true }));
+            }
             saveSettings();
-            updateBudgetMeterUI(parseInt(dom.statTokens.textContent.replace(/,/g, ''), 10) || 0);
         }
     });
 });
 
-function updateBudgetMeterUI(tokenCount) {
+function updateBudgetMeterUI(totalTokens, numChunks = 1, isPreBuild = false) {
     if (dom.targetBudgetDisplay) {
-        dom.targetBudgetDisplay.textContent = `of ${currentBudgetWindow.toLocaleString()} estimated tokens`;
+        dom.targetBudgetDisplay.textContent = `of ${currentBudgetWindow.toLocaleString()} estimated tokens${isPreBuild ? ' (pre-build estimate)' : ''}`;
     }
 
-    const ratio = currentBudgetWindow > 0 ? (tokenCount / currentBudgetWindow) : 0;
-    const pct = Math.min(Math.round(ratio * 100), 100);
+    const chunkLimitVal = parseInt(dom.chunkLimit ? dom.chunkLimit.value : '0', 10) || 0;
+    const isSplit = numChunks > 1 || (chunkLimitVal > 0 && totalTokens > chunkLimitVal);
+    const evaluatedTokens = isSplit && chunkLimitVal > 0 ? Math.min(totalTokens, chunkLimitVal) : totalTokens;
+
+    const ratio = currentBudgetWindow > 0 ? (evaluatedTokens / currentBudgetWindow) : 0;
+    const pct = Math.min(Math.round((totalTokens / currentBudgetWindow) * 100), 100);
 
     if (dom.budgetFill) {
         dom.budgetFill.style.width = `${pct}%`;
@@ -339,14 +381,17 @@ function updateBudgetMeterUI(tokenCount) {
     }
 
     if (dom.budgetStatusText) {
-        if (ratio <= 0.85) {
+        if (isSplit && numChunks > 1) {
+            dom.budgetStatusText.textContent = `Split into ${numChunks} parts (${Math.round(totalTokens / numChunks).toLocaleString()} tok/part) - fits target window`;
+            dom.budgetStatusText.className = 'budget-status-text status-fits';
+        } else if (ratio <= 0.85) {
             dom.budgetStatusText.textContent = 'Fits context window';
             dom.budgetStatusText.className = 'budget-status-text status-fits';
         } else if (ratio <= 1.0) {
             dom.budgetStatusText.textContent = 'Near context limit';
             dom.budgetStatusText.className = 'budget-status-text status-near';
         } else {
-            const overTokens = (tokenCount - currentBudgetWindow).toLocaleString();
+            const overTokens = (totalTokens - currentBudgetWindow).toLocaleString();
             dom.budgetStatusText.textContent = `Over by ${overTokens} tokens. Split into parts or deselect files.`;
             dom.budgetStatusText.className = 'budget-status-text status-over';
         }
@@ -391,6 +436,7 @@ function clearOutputState() {
     generatedChunks = [];
     activeChunkIndex = 0;
     packedOutputText = "";
+    totalTokensAllChunks = 0;
     if (dom.previewArea) dom.previewArea.value = "";
     if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'flex';
     if (dom.previewNotice) dom.previewNotice.style.display = 'none';
@@ -405,7 +451,7 @@ function clearOutputState() {
     if (dom.chunkSelect) dom.chunkSelect.innerHTML = '';
     if (dom.downloadBtn) dom.downloadBtn.disabled = true;
     if (dom.copyBtn) dom.copyBtn.disabled = true;
-    updateBudgetMeterUI(0);
+    updateBudgetMeterUI(0, 1, false);
 }
 
 function updateRateLimitUI(meta) {
@@ -414,7 +460,7 @@ function updateRateLimitUI(meta) {
         const limit = typeof meta.limit === 'number' ? meta.limit : parseInt(meta.limit, 10);
         if (!Number.isNaN(remaining) && !Number.isNaN(limit)) {
             dom.quotaVal.textContent = `${remaining} / ${limit}`;
-            dom.quotaVal.className = (
+            dom.quotaVal.className = 'rate-status ' + (
                 remaining < 5 ? 'rate-critical' : remaining < 20 ? 'rate-warning' : 'rate-normal'
             );
         }
@@ -523,24 +569,6 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
         estimateTokens
     );
 
-    let singleFileExceeded = false;
-    let overheadExceeded = false;
-    for (const chunk of newChunks) {
-        if (chunk.exceedsLimit) {
-            const oversizedFile = processedFiles.find(f => estimateTokens(f.content) > chunkLimitVal);
-            if (oversizedFile) {
-                singleFileExceeded = true;
-            } else {
-                overheadExceeded = true;
-            }
-        }
-    }
-    if (singleFileExceeded) {
-        log(`[WARN] Warning: One or more single files exceed your requested split limit of ${chunkLimitVal} tokens.`);
-    } else if (overheadExceeded) {
-        log(`[WARN] Warning: Context structure exceeds your requested split limit of ${chunkLimitVal} tokens.`);
-    }
-
     const firstChunk = newChunks[0];
     const newPackedOutputText = firstChunk.text;
 
@@ -558,14 +586,14 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
 
     const totalChars = newChunks.reduce((acc, c) => acc + c.text.length, 0);
     const chunkTokensPromises = newChunks.map(c => estimateTokensAsync(c.text));
-    const totalTokens = (await Promise.all(chunkTokensPromises)).reduce((a, b) => a + b, 0);
+    totalTokensAllChunks = (await Promise.all(chunkTokensPromises)).reduce((a, b) => a + b, 0);
 
     dom.statFiles.textContent = processedFiles.length;
     dom.statChars.textContent = totalChars.toLocaleString();
-    dom.statTokens.textContent = totalTokens.toLocaleString();
+    dom.statTokens.textContent = totalTokensAllChunks.toLocaleString();
     dom.statChunks.textContent = generatedChunks.length;
 
-    updateBudgetMeterUI(totalTokens);
+    updateBudgetMeterUI(totalTokensAllChunks, generatedChunks.length, false);
 
     if (generatedChunks.length > 1) {
         dom.chunkSelectLabel.style.display = 'inline-block';
@@ -587,7 +615,7 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     if (dom.copyBtn) dom.copyBtn.disabled = false;
 
     setAppState('built');
-    log(`[SUCCESS] Context ready: ${generatedChunks.length} part(s), ~${estTokens.toLocaleString()} tokens.`);
+    log(`[SUCCESS] Context ready: ${generatedChunks.length} part(s), ~${totalTokensAllChunks.toLocaleString()} total tokens.`);
 }
 
 // Auto-repack on setting changes if files are already cached
@@ -643,7 +671,7 @@ dom.packBtn.addEventListener('click', async () => {
     dom.packBtn.disabled = true;
     dom.abortBtn.style.display = 'inline-flex';
     dom.progressTrack.style.display = 'block';
-    dom.progressFill.style.width = '0%';
+    updateProgressBar(0);
     dom.log.textContent = '';
     if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'flex';
     if (dom.previewArea) dom.previewArea.style.display = 'none';
@@ -767,7 +795,11 @@ dom.packBtn.addEventListener('click', async () => {
                 if (treeControls.getSelectedStats && dom.selectedTokensBadge) {
                     const stats = treeControls.getSelectedStats();
                     dom.selectedTokensBadge.textContent = `~${stats.estTokens.toLocaleString()} tokens selected`;
-                    updateBudgetMeterUI(stats.estTokens);
+                    updateBudgetMeterUI(stats.estTokens, 1, true);
+                }
+                // Mark output as stale when selection changes after build
+                if (currentAppState === 'built') {
+                    setAppState('loaded', 'Rebuild context');
                 }
                 if (cachedRawFiles && cachedRawFiles.length > 0) {
                     if (currentActiveSelection && currentActiveSelection.length > 0) {
@@ -775,14 +807,15 @@ dom.packBtn.addEventListener('click', async () => {
                     }
                     repackBundleInMemory(currentActiveSelection);
                 }
-            }
+            },
+            parseInt(dom.largeFileThresholdKb ? dom.largeFileThresholdKb.value : '50', 10) || 50
         );
         currentActiveSelection = activeSelection;
 
         if (treeControls.getSelectedStats && dom.selectedTokensBadge) {
             const stats = treeControls.getSelectedStats();
             dom.selectedTokensBadge.textContent = `~${stats.estTokens.toLocaleString()} tokens selected`;
-            updateBudgetMeterUI(stats.estTokens);
+            updateBudgetMeterUI(stats.estTokens, 1, true);
         }
 
         dom.selectAllBtn.onclick = () => treeControls.selectAll(true);
@@ -791,6 +824,12 @@ dom.packBtn.addEventListener('click', async () => {
             dom.deselectLargeBtn.onclick = () => {
                 const kbVal = parseInt(dom.largeFileThresholdKb ? dom.largeFileThresholdKb.value : '50', 10) || 50;
                 treeControls.deselectLarge(kbVal * 1024);
+            };
+        }
+        if (dom.largeFileThresholdKb) {
+            dom.largeFileThresholdKb.onchange = () => {
+                const kbVal = parseInt(dom.largeFileThresholdKb.value, 10) || 50;
+                treeControls.setLargeThresholdKb(kbVal);
             };
         }
         if (dom.expandAllBtn) dom.expandAllBtn.onclick = () => treeControls.expandAll(true);
@@ -813,7 +852,6 @@ dom.packBtn.addEventListener('click', async () => {
             }
         }
 
-        // Global shortcut: '/' focuses search filter
         window.onkeydown = (e) => {
             if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
                 e.preventDefault();
@@ -846,7 +884,7 @@ dom.packBtn.addEventListener('click', async () => {
                 const signal = abortController.signal;
                 incrementActiveFetches();
                 dom.progressTrack.style.display = 'block';
-                dom.progressFill.style.width = '0%';
+                updateProgressBar(0);
                 let completedDelta = 0;
 
                 try {
@@ -895,7 +933,7 @@ dom.packBtn.addEventListener('click', async () => {
                             }
 
                             completedDelta++;
-                            dom.progressFill.style.width = `${Math.round((completedDelta / missingNodes.length) * 100)}%`;
+                            updateProgressBar((completedDelta / missingNodes.length) * 100);
 
                             if (throttleMs > 0) {
                                 await sleep(throttleMs, signal);
@@ -1035,7 +1073,7 @@ dom.packBtn.addEventListener('click', async () => {
                 }
 
                 completedCount++;
-                dom.progressFill.style.width = `${Math.round((completedCount / selectionSnapshot.length) * 100)}%`;
+                updateProgressBar((completedCount / selectionSnapshot.length) * 100);
 
                 if (throttleMs > 0) {
                     await sleep(throttleMs, abortController.signal);
@@ -1084,6 +1122,7 @@ dom.abortBtn.addEventListener('click', () => {
     if (abortController) abortController.abort();
 });
 
+// P2 fix: Changing chunk does not overwrite statTokens (total tokens remains unchanged)
 dom.chunkSelect.addEventListener('change', async () => {
     activeChunkIndex = parseInt(dom.chunkSelect.value, 10) || 0;
     const chunk = generatedChunks[activeChunkIndex];
@@ -1093,9 +1132,7 @@ dom.chunkSelect.addEventListener('change', async () => {
     outputExt = chunk.ext;
     outputMime = chunk.mime;
 
-    const estTokens = await estimateTokensAsync(packedOutputText);
     dom.statChars.textContent = packedOutputText.length.toLocaleString();
-    dom.statTokens.textContent = estTokens.toLocaleString();
     dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview; complete text will download] ...' : '');
 });
 
