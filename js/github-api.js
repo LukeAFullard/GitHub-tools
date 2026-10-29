@@ -210,8 +210,14 @@ export async function fetchFileContent(owner, repo, branch, path, pat, signal, o
                 const text = await res.text();
                 return { success: true, content: text, status: res.status, isPrivate: false };
             }
-            if (res.status === 429 || res.status === 403) {
+            if (res.status === 429) {
                 return { success: false, backoff: 60, status: res.status, isPrivate: false };
+            }
+            if (res.status === 403) {
+                const headersMeta = extractRateLimitHeaders(res);
+                if (isRateLimitResponse(res, headersMeta)) {
+                    return { success: false, backoff: headersMeta.retryAfter || 60, status: res.status, isPrivate: false };
+                }
             }
         } catch (err) {
             if (err.name === 'AbortError') throw err;
