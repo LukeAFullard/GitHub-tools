@@ -39,6 +39,7 @@ const dom = {
     minifyMode: document.getElementById('minifyMode'),
     chunkLimit: document.getElementById('chunkLimit'),
     packBtn: document.getElementById('packBtn'),
+    shareUrlBtn: document.getElementById('shareUrlBtn'),
     abortBtn: document.getElementById('abortBtn'),
     progressTrack: document.getElementById('progressTrack'),
     progressFill: document.getElementById('progressFill'),
@@ -118,6 +119,20 @@ function applyUrlParams() {
 
 applyUrlParams();
 
+function getDeepLinkUrl() {
+    const repo = dom.repoUrl ? dom.repoUrl.value.trim() : '';
+    const branch = dom.branch ? dom.branch.value.trim() : '';
+    const format = dom.format ? dom.format.value : '';
+    const minify = dom.minifyMode ? dom.minifyMode.value : '';
+
+    const url = new URL(window.location.href.split('?')[0]);
+    if (repo) url.searchParams.set('repo', repo);
+    if (branch) url.searchParams.set('branch', branch);
+    if (format) url.searchParams.set('format', format);
+    if (minify) url.searchParams.set('minify', minify);
+    return url.toString();
+}
+
 async function repackBundleInMemory() {
     if (!cachedRawFiles || cachedRawFiles.length === 0 || !cachedRepoInfo) return;
 
@@ -133,9 +148,11 @@ async function repackBundleInMemory() {
     const treeAscii = generateTree(paths);
     const chunkLimitVal = parseInt(dom.chunkLimit.value, 10) || 0;
 
+    const repoWithUrl = { ...cachedRepoInfo, url: getDeepLinkUrl() };
+
     generatedChunks = chunkContextOutput(
         dom.format.value,
-        cachedRepoInfo,
+        repoWithUrl,
         cachedBranch,
         treeAscii,
         processedFiles,
@@ -459,3 +476,17 @@ dom.copyBtn.addEventListener('click', async () => {
         alert('Unable to copy automatically. Please copy directly from the preview textarea.');
     }
 });
+
+if (dom.shareUrlBtn) {
+    dom.shareUrlBtn.addEventListener('click', async () => {
+        const deepLink = getDeepLinkUrl();
+        try {
+            await navigator.clipboard.writeText(deepLink);
+            const orig = dom.shareUrlBtn.textContent;
+            dom.shareUrlBtn.textContent = '✅ URL Copied!';
+            setTimeout(() => { dom.shareUrlBtn.textContent = orig; }, 2000);
+        } catch (_) {
+            alert(`Deep-Link URL:\n${deepLink}`);
+        }
+    });
+}

@@ -35,6 +35,9 @@ export function formatClaudeXml(repoInfo, branch, treeText, files) {
     doc += `  <context>\n`;
     doc += `    <repository>${escapeXml(`${repoInfo.owner}/${repoInfo.repo}`)}</repository>\n`;
     doc += `    <branch>${escapeXml(branch)}</branch>\n`;
+    if (repoInfo.url) {
+        doc += `    <url>${escapeXml(repoInfo.url)}</url>\n`;
+    }
     doc += `    <structure>\n${escapeXml(treeText)}    </structure>\n`;
     doc += `  </context>\n\n`;
 
@@ -54,8 +57,11 @@ export function formatClaudeXml(repoInfo, branch, treeText, files) {
 
 export function formatMarkdown(repoInfo, branch, treeText, files) {
     const treeFence = getMarkdownFence(treeText);
-    let md = `# Repository: ${repoInfo.owner}/${repoInfo.repo}\nBranch: ${branch}\n\n`;
-    md += `## Structure\n${treeFence}text\n${treeText}${treeFence}\n\n## Files\n\n`;
+    let md = `# Repository: ${repoInfo.owner}/${repoInfo.repo}\nBranch: ${branch}\n`;
+    if (repoInfo.url) {
+        md += `Source URL: ${repoInfo.url}\n`;
+    }
+    md += `\n## Structure\n${treeFence}text\n${treeText}${treeFence}\n\n## Files\n\n`;
     for (const file of files) {
         const ext = file.path.includes('.') ? file.path.split('.').pop() : '';
         const fence = getMarkdownFence(file.content);
@@ -69,7 +75,7 @@ export function formatMarkdown(repoInfo, branch, treeText, files) {
 }
 
 export function formatGenericXml(repoInfo, branch, treeText, files) {
-    let xml = `<repository name="${escapeXml(`${repoInfo.owner}/${repoInfo.repo}`)}" branch="${escapeXml(branch)}">\n`;
+    let xml = `<repository name="${escapeXml(`${repoInfo.owner}/${repoInfo.repo}`)}" branch="${escapeXml(branch)}"${repoInfo.url ? ` url="${escapeXml(repoInfo.url)}"` : ''}>\n`;
     xml += `<structure>\n${escapeXml(treeText)}</structure>\n<files>\n`;
     for (const file of files) {
         xml += `<file path="${escapeXml(file.path)}">\n<![CDATA[\n${escapeCdata(file.content)}\n]]>\n</file>\n`;
@@ -86,6 +92,7 @@ export function formatJson(repoInfo, branch, treeText, files) {
     const json = JSON.stringify({
         repository: `${repoInfo.owner}/${repoInfo.repo}`,
         branch,
+        ...(repoInfo.url ? { url: repoInfo.url } : {}),
         structure: treeText,
         files
     }, null, 2);
