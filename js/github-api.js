@@ -34,7 +34,18 @@ export function parseRepoInput(input) {
     const validOwner = /^[a-zA-Z0-9_-]+$/.test(owner);
     const validRepo = /^[a-zA-Z0-9_.-]+$/.test(repo);
     if (!validOwner || !validRepo) return null;
-    return { owner, repo };
+
+    let branch = null;
+    let subpath = null;
+
+    if (parts.length >= 4 && parts[2] === 'tree') {
+        branch = parts[3];
+        if (parts.length > 4) {
+            subpath = parts.slice(4).join('/');
+        }
+    }
+
+    return { owner, repo, branch, subpath };
 }
 
 export function extractRateLimitHeaders(response) {

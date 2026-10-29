@@ -122,11 +122,12 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
         label.textContent = item.isDir ? `📁 ${item.name}` : `📄 ${item.name}`;
 
         const sizeBadge = document.createElement('span');
-        sizeBadge.className = 'tree-size-badge';
         const bytes = item.isDir ? calculateDirSize(item) : (item.size || 0);
         const kbStr = bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`;
         const estTok = Math.round(bytes / 3.8);
-        sizeBadge.textContent = ` (${kbStr} ~${estTok.toLocaleString()} tok)`;
+        const isLarge = !item.isDir && bytes > 50 * 1024; // 50 KB warning
+        sizeBadge.className = 'tree-size-badge' + (isLarge ? ' tree-large-warning' : '');
+        sizeBadge.textContent = ` ${isLarge ? '⚠️ ' : ''}(${kbStr} ~${estTok.toLocaleString()} tok)`;
 
         row.appendChild(checkbox);
         row.appendChild(label);
@@ -246,6 +247,11 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
             if (onlyVisible && li.style.display === 'none') return;
                     checkbox.checked = val;
                 },
+        deselectIfLargerThan(thresholdBytes) {
+            if (!item.isDir && item.size > thresholdBytes) {
+                checkbox.checked = false;
+            }
+        },
                 updateStateFromChildren() {},
                 collectSelectedFiles(acc) {
                     if (checkbox.checked) {
@@ -299,12 +305,29 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
 
     let currentQuery = '';
 
+    function getSelectedStats() {
+        const selected = getSelectedNodes();
+        let totalBytes = 0;
+        for (const n of selected) {
+            totalBytes += n.size || 0;
+        }
+        const estTokens = Math.round(totalBytes / 3.8);
+        return { count: selected.length, bytes: totalBytes, estTokens };
+    }
+
     return {
         getSelectedNodes,
+        getSelectedStats,
         selectAll(val) {
             const hasFilter = Boolean(currentQuery);
             for (const rn of rootNodes) {
                 rn.setSubtreeChecked(val, hasFilter);
+            }
+            updateSelectionState();
+        },
+        deselectLarge(thresholdBytes) {
+            for (const rn of rootNodes) {
+                if (rn.deselectIfLargerThan) rn.deselectIfLargerThan(thresholdBytes);
             }
             updateSelectionState();
         },

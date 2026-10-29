@@ -274,6 +274,11 @@ textarea.preview {
     color: var(--text-muted);
 }
 
+.tree-large-warning {
+    color: var(--warning);
+    font-weight: bold;
+}
+
 .tree-actions {
     display: flex;
     gap: 10px;

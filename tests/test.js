@@ -95,9 +95,9 @@ msg = 'hello # world'
 });
 
 test('github-api: parseRepoInput validation', () => {
-    assert.deepEqual(parseRepoInput('LukeAFullard/senti'), { owner: 'LukeAFullard', repo: 'senti' });
-    assert.deepEqual(parseRepoInput('https://github.com/LukeAFullard/senti.git'), { owner: 'LukeAFullard', repo: 'senti' });
-    assert.deepEqual(parseRepoInput('https://github.com/LukeAFullard/senti/extra/path'), { owner: 'LukeAFullard', repo: 'senti' });
+    assert.deepEqual(parseRepoInput('LukeAFullard/senti'), { owner: 'LukeAFullard', repo: 'senti', branch: null, subpath: null });
+    assert.deepEqual(parseRepoInput('https://github.com/LukeAFullard/senti.git'), { owner: 'LukeAFullard', repo: 'senti', branch: null, subpath: null });
+    assert.deepEqual(parseRepoInput('https://github.com/LukeAFullard/senti/tree/dev/src/components'), { owner: 'LukeAFullard', repo: 'senti', branch: 'dev', subpath: 'src/components' });
     assert.equal(parseRepoInput('invalid-input'), null);
     assert.equal(parseRepoInput('bad owner/repo name!'), null);
     assert.equal(parseRepoInput(''), null);
