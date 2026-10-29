@@ -138,6 +138,10 @@ dom.packBtn.addEventListener('click', async () => {
             updateRateLimitUI
         );
 
+        if (rawTree.truncated) {
+            log(`⚠️ Warning: Git repository tree is truncated by GitHub API (>10,000 files). Some deeply nested files may not be visible.`);
+        }
+
         // Filter valid source candidates
         const processable = rawTree.filter(node => {
             if (node.type !== 'blob') return false;
@@ -199,39 +203,62 @@ dom.packBtn.addEventListener('click', async () => {
 
         log(`Starting download for ${activeSelection.length} selected file(s)...`);
 
-        // Sequential download with secondary rate-limit compliance
         const collectedFiles = [];
+        let emptyCount = 0;
+        let failedCount = 0;
+
         for (let i = 0; i < activeSelection.length; i++) {
             const node = activeSelection[i];
             log(`[${i + 1}/${activeSelection.length}] Fetching ${node.path}...`);
 
-            const result = await fetchFileContent(
-                repoInfo.owner,
-                repoInfo.repo,
-                targetBranch,
-                node.path,
-                pat,
-                abortController.signal,
-                updateRateLimitUI
-            );
+            let retries = 0;
+            let result = null;
 
-            if (result.backoff) {
-                log(`🚨 Hit secondary limit! Cooling down for ${result.backoff}s...`);
-                await sleep(result.backoff * 1000);
-                i--; // Retry item
-                continue;
+            while (retries < 3) {
+                result = await fetchFileContent(
+                    repoInfo.owner,
+                    repoInfo.repo,
+                    targetBranch,
+                    node.path,
+                    pat,
+                    abortController.signal,
+                    updateRateLimitUI
+                );
+
+                if (result.backoff) {
+                    retries++;
+                    const backoffTime = Math.min(result.backoff, 60);
+                    log(`🚨 Rate limit warning for ${node.path}. Retry ${retries}/3 cooling down for ${backoffTime}s...`);
+                    await sleep(backoffTime * 1000, abortController.signal);
+                    continue;
+                }
+                break;
             }
 
-            if (result.content) {
-                const processedContent = minifyCode(result.content, node.path, minifyMode);
+            if (result && result.success) {
+                const rawContent = result.content;
+                if (rawContent.length === 0) {
+                    emptyCount++;
+                }
+                const processedContent = minifyCode(rawContent, node.path, minifyMode);
                 collectedFiles.push({ path: node.path, content: processedContent });
+            } else {
+                failedCount++;
+                log(`❌ Failed to fetch ${node.path}${result && result.error ? `: ${result.error}` : ''}`);
             }
 
             dom.progressFill.style.width = `${Math.round(((i + 1) / activeSelection.length) * 100)}%`;
 
             if (throttleMs > 0 && i < activeSelection.length - 1) {
-                await sleep(throttleMs);
+                await sleep(throttleMs, abortController.signal);
             }
+        }
+
+        log(`Download complete: ${collectedFiles.length} file(s) processed (${emptyCount} empty), ${failedCount} failed.`);
+
+        if (collectedFiles.length === 0) {
+            log('⚠️ No content could be fetched from the selected files.');
+            return;
         }
 
         log(`Structuring bundle into ${dom.format.value}...`);
@@ -248,6 +275,14 @@ dom.packBtn.addEventListener('click', async () => {
             chunkLimitVal,
             estimateTokens
         );
+
+        let limitExceeded = false;
+        for (const chunk of generatedChunks) {
+            if (chunk.exceedsLimit) limitExceeded = true;
+        }
+        if (limitExceeded) {
+            log(`⚠️ Warning: One or more single files exceed your requested chunk limit of ${chunkLimitVal} tokens.`);
+        }
 
         activeChunkIndex = 0;
         const firstChunk = generatedChunks[0];
@@ -278,7 +313,7 @@ dom.packBtn.addEventListener('click', async () => {
 
         dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview; complete text will download] ...' : '');
         dom.outputCard.style.display = 'flex';
-        log(`✅ Context bundle ready: ${generatedChunks.length} chunk(s), ~${estTokens.toLocaleString()} tokens in active chunk.`);
+        log(`✅ Context bundle ready: ${generatedChunks.length} chunk(s), ~${estTokens.toLocaleString()} tokens (approximate BPE count) in active chunk.`);
 
     } catch (err) {
         if (err.name === 'AbortError') {
@@ -334,7 +369,7 @@ dom.downloadAllBtn.addEventListener('click', async () => {
         a.download = `${repoInfo.repo}-part${i + 1}-of-${generatedChunks.length}-llm-context.${chunk.ext}`;
         a.click();
         URL.revokeObjectURL(url);
-        await sleep(150);
+        await sleep(150, abortController ? abortController.signal : null);
     }
 });
 

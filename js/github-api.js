@@ -4,15 +4,43 @@
  */
 import { GITHUB_API_BASE, GITHUB_RAW_BASE } from './config.js';
 
-export const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+export function sleep(ms, signal) {
+    return new Promise((resolve, reject) => {
+        if (signal && signal.aborted) {
+            return reject(new DOMException('Aborted', 'AbortError'));
+        }
+        let timer = null;
+        const onAbort = () => {
+            if (timer) clearTimeout(timer);
+            reject(new DOMException('Aborted', 'AbortError'));
+        };
+        if (signal) signal.addEventListener('abort', onAbort, { once: true });
+        timer = setTimeout(() => {
+            if (signal) signal.removeEventListener('abort', onAbort);
+            resolve();
+        }, ms);
+    });
+}
 
 export function parseRepoInput(input) {
-    input = input.trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\/+$/, '');
-    const parts = input.split('/');
-    return parts.length >= 2 ? { owner: parts[0], repo: parts[1] } : null;
+    if (!input || typeof input !== 'string') return null;
+    let cleaned = input.trim().replace(/^https?:\/\/github\.com\//i, '');
+    cleaned = cleaned.replace(/^\/+|\/+$/g, '');
+    const parts = cleaned.split('/');
+    if (parts.length < 2) return null;
+    const owner = parts[0].trim();
+    let repo = parts[1].trim().replace(/\.git$/i, '');
+    if (!owner || !repo) return null;
+    const validOwner = /^[a-zA-Z0-9_-]+$/.test(owner);
+    const validRepo = /^[a-zA-Z0-9_.-]+$/.test(repo);
+    if (!validOwner || !validRepo) return null;
+    return { owner, repo };
 }
 
 export function extractRateLimitHeaders(response) {
+    if (!response || !response.headers) {
+        return { remaining: null, limit: null, reset: null, retryAfter: null };
+    }
     return {
         remaining: response.headers.get('x-ratelimit-remaining'),
         limit: response.headers.get('x-ratelimit-limit'),
@@ -46,8 +74,9 @@ export async function fetchRateLimit(pat = '') {
 
 export async function resolveDefaultBranch(owner, repo, pat, signal, onHeaders) {
     const headers = { 'Accept': 'application/vnd.github.v3+json', ...getAuthHeader(pat) };
+    const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
 
-    const res = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}`, { headers, signal });
+    const res = await fetch(url, { headers, signal });
     if (onHeaders) onHeaders(extractRateLimitHeaders(res));
 
     if (!res.ok) {
@@ -59,11 +88,10 @@ export async function resolveDefaultBranch(owner, repo, pat, signal, onHeaders) 
 
 export async function fetchRepoTree(owner, repo, branch, pat, signal, onHeaders) {
     const headers = { 'Accept': 'application/vnd.github.v3+json', ...getAuthHeader(pat) };
+    const branchEncoded = branch.split('/').map(encodeURIComponent).join('/');
+    const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${branchEncoded}?recursive=1`;
 
-    const res = await fetch(
-        `${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
-        { headers, signal }
-    );
+    const res = await fetch(url, { headers, signal });
     if (onHeaders) onHeaders(extractRateLimitHeaders(res));
 
     if (!res.ok) {
@@ -75,37 +103,43 @@ export async function fetchRepoTree(owner, repo, branch, pat, signal, onHeaders)
     }
 
     const data = await res.json();
-    return data.tree || [];
+    const tree = data.tree || [];
+    tree.truncated = Boolean(data.truncated);
+    return tree;
 }
 
 export async function fetchFileContent(owner, repo, branch, path, pat, signal, onHeaders) {
+    const pathEncoded = path.split('/').map(encodeURIComponent).join('/');
     if (pat) {
         const headers = {
             'Accept': 'application/vnd.github.raw+json',
             ...getAuthHeader(pat)
         };
-        const res = await fetch(
-            `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${path}?ref=${branch}`,
-            { headers, signal }
-        );
+        const branchQuery = encodeURIComponent(branch);
+        const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${pathEncoded}?ref=${branchQuery}`;
+        const res = await fetch(url, { headers, signal });
         if (onHeaders) onHeaders(extractRateLimitHeaders(res));
 
         if (res.status === 429 || res.status === 403) {
             const retryAfter = parseInt(res.headers.get('retry-after') || '60', 10);
-            return { backoff: retryAfter };
+            return { success: false, backoff: retryAfter, status: res.status };
         }
         if (res.ok) {
             const text = await res.text();
-            return { content: text };
+            return { success: true, content: text, status: res.status };
         }
-        return { content: '' };
+        return { success: false, error: `HTTP ${res.status}: ${res.statusText}`, status: res.status };
     } else {
-        const rawUrl = `${GITHUB_RAW_BASE}/${owner}/${repo}/${branch}/${path}`;
+        const branchPath = branch.split('/').map(encodeURIComponent).join('/');
+        const rawUrl = `${GITHUB_RAW_BASE}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${branchPath}/${pathEncoded}`;
         const res = await fetch(rawUrl, { signal });
         if (res.ok) {
             const text = await res.text();
-            return { content: text };
+            return { success: true, content: text, status: res.status };
         }
-        return { content: '' };
+        if (res.status === 429 || res.status === 403) {
+            return { success: false, backoff: 60, status: res.status };
+        }
+        return { success: false, error: `HTTP ${res.status}: ${res.statusText}`, status: res.status };
     }
 }

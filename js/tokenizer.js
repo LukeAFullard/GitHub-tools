@@ -22,6 +22,16 @@ export function estimateTokensAsync(text) {
                         callbacks.delete(id);
                     }
                 };
+                worker.onerror = () => {
+                    for (const [id, cb] of callbacks.entries()) {
+                        cb(estimateTokens(text));
+                    }
+                    callbacks.clear();
+                    if (worker) {
+                        worker.terminate();
+                        worker = null;
+                    }
+                };
             } catch (_) {
                 resolve(estimateTokens(text));
                 return;
@@ -29,7 +39,12 @@ export function estimateTokensAsync(text) {
         }
         const currentId = ++msgId;
         callbacks.set(currentId, resolve);
-        worker.postMessage({ id: currentId, text });
+        try {
+            worker.postMessage({ id: currentId, text });
+        } catch (_) {
+            callbacks.delete(currentId);
+            resolve(estimateTokens(text));
+        }
     });
 }
 
