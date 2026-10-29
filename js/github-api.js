@@ -22,7 +22,7 @@ export function sleep(ms, signal) {
     });
 }
 
-export function parseRepoInput(input) {
+export function parseRepoInput(input, overrideBranch = null) {
     if (!input || typeof input !== 'string') return null;
     let urlStr = input.trim();
     try {
@@ -47,10 +47,21 @@ export function parseRepoInput(input) {
     let subpath = null;
 
     if (parts.length >= 4 && (parts[2] === 'tree' || parts[2] === 'blob')) {
-        branch = parts[3];
-        if (parts.length > 4) {
-            subpath = parts.slice(4).join('/');
+        const tail = parts.slice(3);
+        const tailStr = tail.join('/');
+        const cleanBranch = overrideBranch ? overrideBranch.trim() : null;
+
+        if (cleanBranch && (tailStr === cleanBranch || tailStr.startsWith(cleanBranch + '/'))) {
+            branch = cleanBranch;
+            subpath = tailStr.slice(cleanBranch.length + 1) || null;
+        } else {
+            branch = parts[3];
+            if (parts.length > 4) {
+                subpath = parts.slice(4).join('/');
+            }
         }
+    } else if (overrideBranch && overrideBranch.trim()) {
+        branch = overrideBranch.trim();
     }
 
     return { owner, repo, branch, subpath };
@@ -190,22 +201,17 @@ export async function fetchFileContent(owner, repo, branch, path, pat, signal, o
     const pathEncoded = path.split('/').map(encodeURIComponent).join('/');
     const branchPath = branch.split('/').map(encodeURIComponent).join('/');
     const rawUrl = `${GITHUB_RAW_BASE}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${branchPath}/${pathEncoded}`;
-    let currentIsPrivate = isPrivate;
 
     // Try fetching from raw.githubusercontent.com first if repo is NOT known to be private
-    if (!currentIsPrivate) {
+    if (!isPrivate) {
         try {
             const res = await fetch(rawUrl, { signal });
             if (res.ok) {
                 const text = await res.text();
-                return { success: true, content: text, status: res.status, isPrivate: currentIsPrivate };
+                return { success: true, content: text, status: res.status, isPrivate: false };
             }
-            if (res.status === 429 || res.status === 403) {
-                return { success: false, backoff: 60, status: res.status, isPrivate: currentIsPrivate };
-            }
-            if ((res.status === 404 || res.status === 403) && pat) {
-                // Private repository detected; mark as private for remaining files
-                currentIsPrivate = true;
+            if (res.status === 429) {
+                return { success: false, backoff: 60, status: res.status, isPrivate: false };
             }
         } catch (err) {
             if (err.name === 'AbortError') throw err;

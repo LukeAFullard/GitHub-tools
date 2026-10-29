@@ -295,17 +295,19 @@ function stripHashComments(code) {
 }
 
 function minifyHtml(code) {
-    const preBlocks = [];
-    let preserved = code.replace(/<pre\b[\s\S]*?<\/pre>/gi, (match) => {
-        preBlocks.push(match);
-        return `___PRE_BLOCK_${preBlocks.length - 1}___`;
+    const rawBlocks = [];
+    const nonce = '___PRE_TEXTAREA_' + Math.random().toString(36).substring(2, 9) + '_';
+    let preserved = code.replace(/<(pre|textarea)\b[\s\S]*?<\/\1>/gi, (match) => {
+        rawBlocks.push(match);
+        return `${nonce}${rawBlocks.length - 1}___`;
     });
 
     preserved = preserved.replace(/<!--[\s\S]*?-->/g, '');
     let lines = preserved.split('\n').map(l => l.trimEnd()).filter(l => l.trim().length > 0);
     let result = lines.join('\n');
 
-    result = result.replace(/___PRE_BLOCK_(\d+)___/g, (_, idx) => preBlocks[parseInt(idx, 10)]);
+    const re = new RegExp(`${nonce}(\\d+)___`, 'g');
+    result = result.replace(re, (_, idx) => rawBlocks[parseInt(idx, 10)]);
     return result;
 }
 
