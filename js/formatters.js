@@ -114,10 +114,13 @@ export function chunkContextOutput(format, repoInfo, branch, treeText, files, ch
     const emptyOutput = buildContextOutput(format, repoInfo, branch, treeText, []);
     const baseOverheadTokens = estimateTokensFn(emptyOutput.text);
 
-    // Pre-calculate token counts per single file wrapped in context format
-    const fileTokens = files.map((file, idx) => {
-        const singleOutput = buildContextOutput(format, repoInfo, branch, treeText, [file]);
-        const tokens = estimateTokensFn(singleOutput.text) - baseOverheadTokens;
+    // Pre-calculate token counts per single file using empty treeText to avoid re-scanning tree topology
+    const emptyBase = buildContextOutput(format, repoInfo, branch, '', []);
+    const emptyBaseTokens = estimateTokensFn(emptyBase.text);
+
+    const fileTokens = files.map((file) => {
+        const singleOutput = buildContextOutput(format, repoInfo, branch, '', [file]);
+        const tokens = estimateTokensFn(singleOutput.text) - emptyBaseTokens;
         return Math.max(0, tokens);
     });
 

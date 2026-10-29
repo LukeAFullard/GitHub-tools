@@ -108,17 +108,19 @@ test('tokenizer: estimateTokens', () => {
     assert.ok(count > 0);
 });
 
-test('minifier: JS comment stripping preserves RegExp literals', () => {
+test('minifier: JS comment stripping preserves RegExp literals and distinguishes division', () => {
     const code = `
     // comment before
     const pattern = /^https?:\\/\\//;
     const regexWithCommentLike = /a\\/b/*c/;
+    const myreturn = 10 / 2;
     /* comment after */
     `;
     const minified = minifyCode(code, 'app.js', 'aggressive');
     assert.ok(!minified.includes('comment before'));
     assert.ok(!minified.includes('comment after'));
     assert.ok(minified.includes('const pattern = /^https?:\\/\\//;'));
+    assert.ok(minified.includes('const myreturn = 10 / 2;'));
 });
 
 test('formatters: linear chunking does not stall or throw', () => {

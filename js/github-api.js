@@ -89,7 +89,9 @@ export async function resolveDefaultBranch(owner, repo, pat, signal, onHeaders) 
         throw new Error(`Repository lookup failed (${res.status}): ${res.statusText}`);
     }
     const data = await res.json();
-    return data.default_branch || 'main';
+    const branch = data.default_branch || 'main';
+    const isPrivate = Boolean(data.private);
+    return { branch, isPrivate };
 }
 
 export async function fetchRepoTree(owner, repo, branch, pat, signal, onHeaders) {
@@ -114,27 +116,28 @@ export async function fetchRepoTree(owner, repo, branch, pat, signal, onHeaders)
     return tree;
 }
 
-export async function fetchFileContent(owner, repo, branch, path, pat, signal, onHeaders) {
+export async function fetchFileContent(owner, repo, branch, path, pat, signal, onHeaders, isPrivate = false) {
     const pathEncoded = path.split('/').map(encodeURIComponent).join('/');
     const branchPath = branch.split('/').map(encodeURIComponent).join('/');
     const rawUrl = `${GITHUB_RAW_BASE}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${branchPath}/${pathEncoded}`;
 
-    // Try fetching from raw.githubusercontent.com first to save API quota
-    try {
-        const res = await fetch(rawUrl, { signal });
-        if (res.ok) {
-            const text = await res.text();
-            return { success: true, content: text, status: res.status };
+    // Try fetching from raw.githubusercontent.com first if repo is NOT known to be private
+    if (!isPrivate) {
+        try {
+            const res = await fetch(rawUrl, { signal });
+            if (res.ok) {
+                const text = await res.text();
+                return { success: true, content: text, status: res.status };
+            }
+            if (res.status === 429 || res.status === 403) {
+                return { success: false, backoff: 60, status: res.status };
+            }
+        } catch (err) {
+            if (err.name === 'AbortError') throw err;
         }
-        // If 429/403, back off
-        if (res.status === 429 || res.status === 403) {
-            return { success: false, backoff: 60, status: res.status };
-        }
-    } catch (err) {
-        if (err.name === 'AbortError') throw err;
     }
 
-    // Fall back to REST API (required for private repos or fallback)
+    // Fall back to REST API (required for private repos)
     if (pat) {
         const headers = {
             'Accept': 'application/vnd.github.raw+json',
