@@ -526,6 +526,24 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
             }
             updateSelectionState();
         },
+        setPathsChecked(paths, checked = false) {
+            const pathSet = new Set(Array.isArray(paths) ? paths : [paths]);
+            function walk(node) {
+                if (!node.isDir) {
+                    if (pathSet.has(node.path)) {
+                        node.checkbox.checked = checked;
+                    }
+                } else if (node.childElements) {
+                    for (const child of node.childElements) {
+                        walk(child);
+                    }
+                }
+            }
+            for (const rn of rootNodes) {
+                walk(rn);
+            }
+            updateSelectionState();
+        },
         deselectLarge(thresholdBytes) {
             for (const rn of rootNodes) {
                 if (rn.deselectIfLargerThan) rn.deselectIfLargerThan(thresholdBytes);

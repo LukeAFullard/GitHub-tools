@@ -9,13 +9,15 @@ import {
     formatMarkdown,
     formatGenericXml,
     formatJson,
-    chunkContextOutput
+    chunkContextOutput,
+    buildContextOutput
 } from '../js/formatters.js';
 
 import { minifyCode } from '../js/minifier.js';
 import { parseRepoInput, extractRateLimitHeaders, fetchRepoZipball } from '../js/github-api.js';
 import { estimateTokens } from '../js/tokenizer.js';
 import { generateTree } from '../js/tree.js';
+import { scanForSecrets, redactSecrets } from '../js/secrets.js';
 
 test('formatters: escapeXml', () => {
     assert.equal(escapeXml('<script>alert("xss & ' + "'" + '")</script>'), '&lt;script&gt;alert(&quot;xss &amp; &apos;&quot;)&lt;/script&gt;');
@@ -406,7 +408,6 @@ test('app: boots safely when localStorage throws', () => {
             }
         });
 
-        // Test persistence safety functions
         assert.doesNotThrow(() => {
             try {
                 localStorage.getItem('cfg_format');
@@ -491,7 +492,6 @@ test('tree: filtering updates tab stops so hidden tab-stop row transfers tabInde
 
         const controls = renderInteractiveTree(nodes, container);
 
-        // Find rows
         function findRows(el) {
             let res = [];
             if (el.className === 'tree-row') res.push(el);
@@ -503,18 +503,15 @@ test('tree: filtering updates tab stops so hidden tab-stop row transfers tabInde
 
         const rows = findRows(container);
         assert.equal(rows.length, 2);
-        assert.equal(rows[0].tabIndex, 0); // First row is tab-stop
+        assert.equal(rows[0].tabIndex, 0);
         assert.equal(rows[1].tabIndex, -1);
 
-        // Filter to 'beta', which hides row 0 ('alpha.js')
         controls.filter('beta');
 
-        // Verify row 1 now has tabIndex 0 so keyboard users can still tab into the tree
         assert.equal(rows[0].tabIndex, -1);
         assert.equal(rows[1].tabIndex, 0);
 
-        // Dynamic threshold update test
-        controls.setLargeThresholdKb(0.05); // 50 bytes -> 100B and 200B become [Large]
+        controls.setLargeThresholdKb(0.05);
         assert.ok(container.children[0].innerHTML.includes('[Large]') || rows[0].innerHTML.includes('[Large]') || findRows(container).some(r => r.children.some(c => c.textContent && c.textContent.includes('[Large]'))));
 
     } finally {
@@ -523,7 +520,6 @@ test('tree: filtering updates tab stops so hidden tab-stop row transfers tabInde
 });
 
 test('budget status logic for pre-build split and oversized split chunk', () => {
-    // Helper replicating updateBudgetMeterUI logic for test assertion
     function calcBudgetStatus(totalTokens, numChunks = 1, isPreBuild = false, maxChunkTokens = 0, hasOversizedChunk = false, currentBudgetWindow = 200000, chunkLimitVal = 0) {
         if (isPreBuild && chunkLimitVal > 0 && totalTokens > chunkLimitVal) {
             const estChunks = Math.ceil(totalTokens / chunkLimitVal);
@@ -553,12 +549,227 @@ test('budget status logic for pre-build split and oversized split chunk', () => 
         return { text: 'Fits context window', statusClass: 'status-fits' };
     }
 
-    // Case 1: Pre-build over window with split limit on (chunkLimit = 50k, total = 120k)
     const preBuildRes = calcBudgetStatus(120000, 1, true, 0, false, 200000, 50000);
     assert.equal(preBuildRes.text, 'About 120,000 tokens, will split into about 3 parts');
 
-    // Case 2: Split output with one oversized part exceeding limit
     const splitOversizedRes = calcBudgetStatus(150000, 3, false, 65000, true, 200000, 50000);
     assert.equal(splitOversizedRes.text, 'Split into 3 parts (largest: 65,000 tok) - 1+ part exceeds split limit');
     assert.equal(splitOversizedRes.statusClass, 'status-over');
+});
+
+// --- Secrets Detection & Redaction Tests ---
+
+test('secrets: true positive and near-miss for each pattern detector', () => {
+    // AWS
+    const awsPos = scanForSecrets('app.js', 'const k = "' + 'AKIA' + '1234567890ABCDEF";');
+    assert.equal(awsPos.length, 1);
+    assert.equal(awsPos[0].type, 'aws-key');
+
+    const awsNear = scanForSecrets('app.js', 'const k = "AKIAEXAMPLEKEY1234";');
+    assert.equal(awsNear.length, 0);
+
+    // GitHub
+    const ghPos = scanForSecrets('app.js', 'const token = "' + 'ghp_' + '1234567890abcdefghijklmnopqrstuvwxyz";');
+    assert.equal(ghPos.length, 1);
+    assert.equal(ghPos[0].type, 'github-token');
+
+    const ghNear = scanForSecrets('app.js', 'const token = "ghp_your_token_here_xxxxxxxxx";');
+    assert.equal(ghNear.length, 0);
+
+    // Slack
+    const slackPos = scanForSecrets('app.js', 'const token = "' + 'xoxb-' + '1234567890-1234567890123-abcdefghijklmnopqrstuvwx";');
+    assert.equal(slackPos.length, 1);
+    assert.equal(slackPos[0].type, 'slack-token');
+
+    const slackNear = scanForSecrets('app.js', 'const token = "xoxb-your_token_here";');
+    assert.equal(slackNear.length, 0);
+
+    // Stripe
+    const stripePos = scanForSecrets('app.js', 'const key = "' + 'sk_live_' + '51Hz3abc123def456ghi789jkl";');
+    assert.equal(stripePos.length, 1);
+    assert.equal(stripePos[0].type, 'stripe-key');
+
+    const stripeNear = scanForSecrets('app.js', 'const key = "sk_live_xxxxchangeme00000000000";');
+    assert.equal(stripeNear.length, 0);
+
+    // Google
+    const googlePos = scanForSecrets('app.js', 'const key = "' + 'AIza' + 'SyD1234567890abcdefghijklmnopqrstUV";');
+    assert.equal(googlePos.length, 1);
+    assert.equal(googlePos[0].type, 'google-key');
+
+    const googleNear = scanForSecrets('app.js', 'const key = "AIzaSyD_your_google_api_key_xxxx";');
+    assert.equal(googleNear.length, 0);
+
+    // PEM
+    const pemPos = scanForSecrets('app.js', '-----BEGIN RSA PRIVATE KEY-----\nMIIEogIBAAK...\n-----END RSA PRIVATE KEY-----');
+    assert.equal(pemPos.length, 1);
+    assert.equal(pemPos[0].type, 'pem-key');
+
+    const pemNear = scanForSecrets('app.js', '-----BEGIN PUBLIC KEY-----\nMIIE...\n-----END PUBLIC KEY-----');
+    assert.equal(pemNear.length, 0);
+
+    // JWT
+    const jwtPos = scanForSecrets('app.js', 'const token = "' + 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.' + 'eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.' + 'SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";');
+    assert.equal(jwtPos.length, 1);
+    assert.equal(jwtPos[0].type, 'jwt');
+
+    const jwtNear = scanForSecrets('app.js', 'const token = "eyJ_your_jwt.eyJ_test.eyJ_xxxx";');
+    assert.equal(jwtNear.length, 0);
+
+    // Anthropic
+    const antPos = scanForSecrets('app.js', 'const key = "' + 'sk-ant-' + 'api03-1234567890abcdefghijklmnopqrstuvwxyz";');
+    assert.equal(antPos.length, 1);
+    assert.equal(antPos[0].type, 'anthropic-key');
+
+    const antNear = scanForSecrets('app.js', 'const key = "sk-ant-your_anthropic_key_here";');
+    assert.equal(antNear.length, 0);
+
+    // OpenAI
+    const oaiPos = scanForSecrets('app.js', 'const key = "' + 'sk-proj-' + '1234567890abcdefghijklmnopqrstuvwxyz";');
+    assert.equal(oaiPos.length, 1);
+    assert.equal(oaiPos[0].type, 'openai-key');
+
+    const oaiNear = scanForSecrets('app.js', 'const key = "sk-your_openai_key_xxxx";');
+    assert.equal(oaiNear.length, 0);
+
+    // Generic
+    const genPos = scanForSecrets('config.js', 'password = "aB3$k9P1zX7!"');
+    assert.equal(genPos.length, 1);
+    assert.equal(genPos[0].type, 'generic-secret');
+
+    const genNear = scanForSecrets('config.js', 'password = "your_password"');
+    assert.equal(genNear.length, 0);
+
+    // Sensitive filename
+    const filePos = scanForSecrets('.env', 'FOO=bar');
+    assert.equal(filePos.some(f => f.type === 'sensitive-file'), true);
+
+    const fileNear = scanForSecrets('.env.example', 'FOO=bar');
+    assert.equal(fileNear.some(f => f.type === 'sensitive-file'), false);
+});
+
+test('secrets: placeholders are not flagged', () => {
+    const code = `
+    const a = "your_api_key";
+    const b = "AKIAEXAMPLEKEY1234";
+    const c = "\${TOKEN}";
+    const d = "<YOUR_KEY>";
+    const e = process.env.SECRET;
+    const f = os.environ["KEY"];
+    `;
+    const findings = scanForSecrets('app.js', code);
+    assert.equal(findings.length, 0);
+});
+
+test('secrets: masking guarantees full secret never appears in finding', () => {
+    const secret = "AKIA" + "1234567890ABCDEF";
+    const findings = scanForSecrets('app.js', `const k = "${secret}";`);
+    assert.equal(findings.length, 1);
+    const f = findings[0];
+
+    assert.equal(f.preview, "AKIA…");
+    assert.equal('value' in f, false);
+    assert.equal('secret' in f, false);
+    assert.equal(JSON.stringify(f).includes(secret), false);
+});
+
+test('secrets: redaction on all four formats and with chunking produces valid output', () => {
+    const rawSecret = 'AKIA' + '1234567890ABCDEF';
+    const content = `const aws = "${rawSecret}";`;
+    const redacted = redactSecrets(content, 'app.js');
+
+    assert.equal(redacted.includes('[REDACTED:aws-key]'), true);
+    assert.equal(redacted.includes(rawSecret), false);
+
+    const repoInfo = { owner: 'owner', repo: 'repo' };
+    const files = [{ path: 'app.js', content: redacted }];
+
+    // Claude XML
+    const xml1 = formatClaudeXml(repoInfo, 'main', '', files);
+    assert.ok(xml1.text.includes('[REDACTED:aws-key]'));
+    assert.ok(xml1.text.startsWith('<documents>') && xml1.text.endsWith('</documents>'));
+
+    // Generic XML
+    const xml2 = formatGenericXml(repoInfo, 'main', '', files);
+    assert.ok(xml2.text.includes('[REDACTED:aws-key]'));
+    assert.ok(xml2.text.startsWith('<repository') && xml2.text.endsWith('</repository>'));
+
+    // Markdown
+    const md = formatMarkdown(repoInfo, 'main', '', files);
+    assert.ok(md.text.includes('[REDACTED:aws-key]'));
+
+    // JSON
+    const json = formatJson(repoInfo, 'main', '', files);
+    const parsed = JSON.parse(json.text);
+    assert.ok(parsed.files[0].content.includes('[REDACTED:aws-key]'));
+
+    // Chunking
+    const chunks = chunkContextOutput('json', repoInfo, 'main', '', files, 500, estimateTokens);
+    assert.ok(chunks.length >= 1);
+    assert.ok(JSON.parse(chunks[0].text).files[0].content.includes('[REDACTED:aws-key]'));
+});
+
+test('secrets: file containing ]]> plus secret produces well-formed output', () => {
+    const rawSecret = 'AKIA' + '1234567890ABCDEF';
+    const rawContent = `hello ]]> world ${rawSecret}`;
+    const redacted = redactSecrets(rawContent, 'file.txt');
+    const repoInfo = { owner: 'owner', repo: 'repo' };
+    const files = [{ path: 'file.txt', content: redacted }];
+
+    const resXml = formatGenericXml(repoInfo, 'main', '', files);
+    assert.ok(resXml.text.includes(']]]]><![CDATA[>'));
+    assert.ok(resXml.text.includes('[REDACTED:aws-key]'));
+    assert.ok(!resXml.text.includes(rawSecret));
+});
+
+test('instructions: appear exactly once, in last chunk when chunked, with part notes in others, in all four formats', () => {
+    const repoInfo = { owner: 'owner', repo: 'repo' };
+    const files = Array.from({ length: 10 }, (_, i) => ({
+        path: `file_${i}.js`,
+        content: `console.log("file ${i} content repeat ".repeat(20));`
+    }));
+    const instructions = 'Review this code for architecture.';
+
+    const formats = ['claude-xml', 'generic-xml', 'markdown', 'json'];
+
+    for (const fmt of formats) {
+        const chunks = chunkContextOutput(fmt, repoInfo, 'main', '', files, 200, estimateTokens, { instructions });
+        assert.ok(chunks.length >= 2, `Expected multiple chunks for format ${fmt}`);
+
+        for (let i = 0; i < chunks.length; i++) {
+            const isLast = i === chunks.length - 1;
+            const text = chunks[i].text;
+
+            if (isLast) {
+                assert.ok(text.includes('Review this code for architecture'), `Last chunk in ${fmt} should contain instructions`);
+                assert.ok(!text.includes('Part 1 of'), `Last chunk in ${fmt} should not contain intermediate part note`);
+            } else {
+                assert.ok(!text.includes('Review this code for architecture'), `Chunk ${i + 1} in ${fmt} should NOT contain instructions`);
+                assert.ok(text.includes(`Part ${i + 1} of ${chunks.length}. Instructions are in part ${chunks.length}.`), `Chunk ${i + 1} in ${fmt} should contain part note`);
+            }
+        }
+    }
+});
+
+test('instructions: tokens are included in chunk-size estimates', () => {
+    const repoInfo = { owner: 'owner', repo: 'repo' };
+    const files = [{ path: 'app.js', content: 'const x = 1;' }];
+
+    const outNoInst = buildContextOutput('claude-xml', repoInfo, 'main', '', files, {});
+    const outWithInst = buildContextOutput('claude-xml', repoInfo, 'main', '', files, { instructions: 'Detailed architectural instructions '.repeat(20) });
+
+    const tokNoInst = estimateTokens(outNoInst.text);
+    const tokWithInst = estimateTokens(outWithInst.text);
+
+    assert.ok(tokWithInst > tokNoInst, 'Output with instructions should produce higher token estimate');
+});
+
+test('secrets: long single-line input scans in under 1 second', () => {
+    const start = Date.now();
+    const longSingleLine = 'a'.repeat(1000000);
+    const findings = scanForSecrets('bigfile.txt', longSingleLine);
+    const duration = Date.now() - start;
+
+    assert.equal(findings.length, 0);
+    assert.ok(duration < 1000, `Scan took ${duration} ms (expected < 1000 ms)`);
 });

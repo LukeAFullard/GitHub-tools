@@ -14,8 +14,9 @@ function isIgnoredDirPath(dirParts) {
 }
 import { estimateTokens, estimateTokensAsync } from './tokenizer.js';
 import { generateTree, renderInteractiveTree } from './tree.js';
-import { buildContextOutput, chunkContextOutput } from './formatters.js';
+import { buildContextOutput, chunkContextOutput, escapeXml } from './formatters.js';
 import { minifyCode } from './minifier.js';
+import { scanForSecrets, redactSecrets } from './secrets.js';
 import {
     parseRepoInput,
     fetchRateLimit,
@@ -33,6 +34,9 @@ let outputExt = "xml";
 let outputMime = "application/xml";
 
 let cachedRawFiles = []; // [{ path: string, rawContent: string }]
+let secretsMap = new Map(); // path -> Array<{ type, line, preview }>
+let activeTreeControls = null;
+
 let cachedSkippedPaths = new Set();
 let cachedRepoInfo = null;
 let cachedBranch = "";
@@ -59,6 +63,14 @@ const dom = {
     ignoreExt: document.getElementById('ignoreExt'),
     minifyMode: document.getElementById('minifyMode'),
     chunkLimit: document.getElementById('chunkLimit'),
+    redactSecrets: document.getElementById('redactSecrets'),
+    aiInstructions: document.getElementById('aiInstructions'),
+    clearInstructionsBtn: document.getElementById('clearInstructionsBtn'),
+    instructionsCharCount: document.getElementById('instructionsCharCount'),
+    secretsWarningPanel: document.getElementById('secretsWarningPanel'),
+    secretsWarningSummary: document.getElementById('secretsWarningSummary'),
+    excludeAllSecretsBtn: document.getElementById('excludeAllSecretsBtn'),
+    secretsTableBody: document.getElementById('secretsTableBody'),
     packBtn: document.getElementById('packBtn'),
     shareUrlBtn: document.getElementById('shareUrlBtn'),
     abortBtn: document.getElementById('abortBtn'),
@@ -139,7 +151,7 @@ function showInlineError(msg) {
     }
 }
 
-// --- Theme Management (Guarded for strict/blocked localStorage) ---
+// --- Theme Management ---
 function initTheme() {
     try {
         const savedTheme = localStorage.getItem('app_theme');
@@ -167,7 +179,13 @@ if (dom.themeToggleBtn) {
 }
 initTheme();
 
-// --- Persistence (Non-sensitive Settings) ---
+// --- Persistence ---
+function updateCharCount() {
+    if (dom.instructionsCharCount && dom.aiInstructions) {
+        dom.instructionsCharCount.textContent = `${dom.aiInstructions.value.length} chars`;
+    }
+}
+
 function loadSavedSettings() {
     try {
         if (dom.format && localStorage.getItem('cfg_format')) dom.format.value = localStorage.getItem('cfg_format');
@@ -176,6 +194,13 @@ function loadSavedSettings() {
         if (dom.maxKb && localStorage.getItem('cfg_maxKb')) dom.maxKb.value = localStorage.getItem('cfg_maxKb');
         if (dom.throttleMs && localStorage.getItem('cfg_throttleMs')) dom.throttleMs.value = localStorage.getItem('cfg_throttleMs');
         if (dom.ignoreExt && localStorage.getItem('cfg_ignoreExt')) dom.ignoreExt.value = localStorage.getItem('cfg_ignoreExt');
+        if (dom.redactSecrets && localStorage.getItem('cfg_redactSecrets') !== null) {
+            dom.redactSecrets.checked = localStorage.getItem('cfg_redactSecrets') !== 'false';
+        }
+        if (dom.aiInstructions && localStorage.getItem('cfg_aiInstructions') !== null) {
+            dom.aiInstructions.value = localStorage.getItem('cfg_aiInstructions');
+            updateCharCount();
+        }
         if (localStorage.getItem('cfg_budgetWindow')) {
             currentBudgetWindow = parseInt(localStorage.getItem('cfg_budgetWindow'), 10) || 200000;
         }
@@ -190,24 +215,11 @@ function saveSettings() {
         if (dom.maxKb) localStorage.setItem('cfg_maxKb', dom.maxKb.value);
         if (dom.throttleMs) localStorage.setItem('cfg_throttleMs', dom.throttleMs.value);
         if (dom.ignoreExt) localStorage.setItem('cfg_ignoreExt', dom.ignoreExt.value);
+        if (dom.redactSecrets) localStorage.setItem('cfg_redactSecrets', dom.redactSecrets.checked ? 'true' : 'false');
+        if (dom.aiInstructions) localStorage.setItem('cfg_aiInstructions', dom.aiInstructions.value);
         localStorage.setItem('cfg_budgetWindow', currentBudgetWindow.toString());
     } catch (_) {}
 }
-
-// Save options on change
-['format', 'minifyMode', 'chunkLimit', 'maxKb', 'throttleMs', 'ignoreExt'].forEach(id => {
-    if (dom[id]) {
-        dom[id].addEventListener('change', () => {
-            saveSettings();
-            if (id === 'chunkLimit') {
-                const val = parseInt(dom.chunkLimit.value, 10) || 0;
-                if (val > 0) {
-                    currentBudgetWindow = val;
-                }
-            }
-        });
-    }
-});
 
 // Options Drawer Toggle
 if (dom.optionsToggleBtn && dom.optionsDrawer) {
@@ -347,7 +359,7 @@ if (dom.wrapToggleBtn && dom.previewArea) {
     });
 }
 
-// Budget Meter Presets (P1 fix: dispatch change to repack immediately)
+// Budget Meter Presets
 document.querySelectorAll('.preset-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         const val = parseInt(btn.getAttribute('data-preset'), 10);
@@ -442,7 +454,13 @@ function decrementActiveFetches() {
 function updateCachedRawFiles(newFiles) {
     const map = new Map(cachedRawFiles.map(f => [f.path, f]));
     for (const f of newFiles) {
-        if (f && f.path) map.set(f.path, f);
+        if (f && f.path) {
+            map.set(f.path, f);
+            if (!secretsMap.has(f.path)) {
+                const findings = scanForSecrets(f.path, f.rawContent);
+                secretsMap.set(f.path, findings);
+            }
+        }
     }
     cachedRawFiles = Array.from(map.values());
 }
@@ -470,6 +488,7 @@ function clearOutputState() {
     if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'flex';
     if (dom.previewNotice) dom.previewNotice.style.display = 'none';
     if (dom.previewArea) dom.previewArea.style.display = 'none';
+    if (dom.secretsWarningPanel) dom.secretsWarningPanel.style.display = 'none';
     if (dom.statFiles) dom.statFiles.textContent = '0';
     if (dom.statChars) dom.statChars.textContent = '0';
     if (dom.statTokens) dom.statTokens.textContent = '0';
@@ -548,6 +567,66 @@ function getDeepLinkUrl() {
     return url.toString();
 }
 
+function updateSecretsWarningPanel(selectedFiles) {
+    if (!dom.secretsWarningPanel || !dom.secretsTableBody || !dom.secretsWarningSummary) return;
+
+    const selectedPaths = new Set(selectedFiles.map(f => f.path));
+    let totalFindings = 0;
+    const flaggedPaths = new Set();
+    const rows = [];
+
+    for (const file of selectedFiles) {
+        const findings = secretsMap.get(file.path) || [];
+        if (findings.length > 0) {
+            flaggedPaths.add(file.path);
+            totalFindings += findings.length;
+            for (const f of findings) {
+                rows.push({
+                    path: file.path,
+                    type: f.type,
+                    line: f.line,
+                    preview: f.preview
+                });
+            }
+        }
+    }
+
+    if (totalFindings === 0) {
+        dom.secretsWarningPanel.style.display = 'none';
+        return;
+    }
+
+    dom.secretsWarningPanel.style.display = 'block';
+    dom.secretsWarningSummary.textContent = `${totalFindings} possible secret${totalFindings === 1 ? '' : 's'} in ${flaggedPaths.size} file${flaggedPaths.size === 1 ? '' : 's'}.`;
+
+    dom.secretsTableBody.innerHTML = rows.map(r => `
+        <tr>
+            <td>${escapeXml(r.path)}</td>
+            <td>${escapeXml(r.type)}</td>
+            <td>${r.line}</td>
+            <td>${escapeXml(r.preview)}</td>
+            <td><button type="button" class="secondary btn-xs exclude-secret-btn" data-path="${escapeXml(r.path)}">Exclude file</button></td>
+        </tr>
+    `).join('');
+
+    dom.secretsTableBody.querySelectorAll('.exclude-secret-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const path = btn.getAttribute('data-path');
+            if (path && activeTreeControls) {
+                activeTreeControls.setPathsChecked([path], false);
+            }
+        });
+    });
+
+    if (dom.excludeAllSecretsBtn) {
+        dom.excludeAllSecretsBtn.onclick = () => {
+            if (activeTreeControls && flaggedPaths.size > 0) {
+                activeTreeControls.setPathsChecked(Array.from(flaggedPaths), false);
+            }
+        };
+    }
+}
+
 async function repackBundleInMemory(activeSelectionNodes = currentActiveSelection) {
     repackGeneration++;
     const thisRepackGen = repackGeneration;
@@ -571,12 +650,24 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     }
 
     const minifyMode = dom.minifyMode ? dom.minifyMode.value : 'none';
-    log(`[PACK] Building context from ${targetFiles.length} files (${dom.format.value}, shrink: ${minifyMode})...`);
+    const isRedact = dom.redactSecrets ? dom.redactSecrets.checked : true;
+    const instructions = dom.aiInstructions ? dom.aiInstructions.value : '';
 
-    const processedFiles = targetFiles.map(f => ({
-        path: f.path,
-        content: minifyCode(f.rawContent, f.path, minifyMode)
-    }));
+    log(`[PACK] Building context from ${targetFiles.length} files (${dom.format.value}, shrink: ${minifyMode}, redact: ${isRedact})...`);
+
+    const processedFiles = targetFiles.map(f => {
+        let content = f.rawContent;
+        if (isRedact) {
+            content = redactSecrets(content, f.path);
+        }
+        if (minifyMode !== 'none') {
+            content = minifyCode(content, f.path, minifyMode);
+        }
+        return {
+            path: f.path,
+            content
+        };
+    });
 
     const paths = processedFiles.map(f => f.path);
     const treeAscii = generateTree(paths);
@@ -595,7 +686,8 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
         treeAscii,
         processedFiles,
         chunkLimitVal,
-        estimateTokens
+        estimateTokens,
+        { instructions }
     );
 
     const firstChunk = newChunks[0];
@@ -635,6 +727,7 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     dom.statChunks.textContent = generatedChunks.length;
 
     updateBudgetMeterUI(totalTokensAllChunks, generatedChunks.length, false, maxChunkTokens, hasOversizedChunk);
+    updateSecretsWarningPanel(targetFiles);
 
     if (generatedChunks.length > 1) {
         dom.chunkSelectLabel.style.display = 'inline-block';
@@ -663,6 +756,45 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
 if (dom.format) dom.format.addEventListener('change', () => repackBundleInMemory());
 if (dom.minifyMode) dom.minifyMode.addEventListener('change', () => repackBundleInMemory());
 if (dom.chunkLimit) dom.chunkLimit.addEventListener('change', () => repackBundleInMemory());
+if (dom.redactSecrets) {
+    dom.redactSecrets.addEventListener('change', () => {
+        saveSettings();
+        repackBundleInMemory();
+    });
+}
+if (dom.aiInstructions) {
+    dom.aiInstructions.addEventListener('input', () => {
+        updateCharCount();
+        saveSettings();
+        repackBundleInMemory();
+    });
+}
+
+if (dom.clearInstructionsBtn) {
+    dom.clearInstructionsBtn.addEventListener('click', () => {
+        if (dom.aiInstructions) {
+            dom.aiInstructions.value = '';
+            updateCharCount();
+        }
+        try {
+            localStorage.removeItem('cfg_aiInstructions');
+        } catch (_) {}
+        saveSettings();
+        repackBundleInMemory();
+    });
+}
+
+document.querySelectorAll('.preset-buttons button[data-instruction]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const instText = btn.getAttribute('data-instruction');
+        if (instText && dom.aiInstructions) {
+            dom.aiInstructions.value = instText;
+            updateCharCount();
+            saveSettings();
+            repackBundleInMemory();
+        }
+    });
+});
 
 // --- Main Processing Pipeline ---
 dom.packBtn.addEventListener('click', async () => {
@@ -681,6 +813,7 @@ dom.packBtn.addEventListener('click', async () => {
     const thisGen = currentGeneration;
 
     cachedRawFiles = [];
+    secretsMap.clear();
     cachedSkippedPaths.clear();
     cachedRepoInfo = null;
     cachedBranch = "";
@@ -838,7 +971,6 @@ dom.packBtn.addEventListener('click', async () => {
                     dom.selectedTokensBadge.textContent = `~${stats.estTokens.toLocaleString()} tokens selected`;
                     updateBudgetMeterUI(stats.estTokens, 1, true);
                 }
-                // Mark output as stale when selection changes after build
                 if (currentAppState === 'built') {
                     setAppState('loaded', 'Rebuild context');
                 }
@@ -851,6 +983,7 @@ dom.packBtn.addEventListener('click', async () => {
             },
             parseInt(dom.largeFileThresholdKb ? dom.largeFileThresholdKb.value : '50', 10) || 50
         );
+        activeTreeControls = treeControls;
         currentActiveSelection = activeSelection;
 
         if (treeControls.getSelectedStats && dom.selectedTokensBadge) {
@@ -1135,6 +1268,11 @@ dom.packBtn.addEventListener('click', async () => {
         }
 
         cachedRawFiles = collectedFiles;
+        secretsMap.clear();
+        for (const f of collectedFiles) {
+            secretsMap.set(f.path, scanForSecrets(f.path, f.rawContent));
+        }
+
         cachedRepoInfo = repoInfo;
         cachedBranch = targetBranch;
 
@@ -1163,7 +1301,6 @@ dom.abortBtn.addEventListener('click', () => {
     if (abortController) abortController.abort();
 });
 
-// P2 fix: Changing chunk does not overwrite statTokens (total tokens remains unchanged)
 dom.chunkSelect.addEventListener('change', async () => {
     activeChunkIndex = parseInt(dom.chunkSelect.value, 10) || 0;
     const chunk = generatedChunks[activeChunkIndex];

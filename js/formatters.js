@@ -39,6 +39,9 @@ export function formatClaudeXml(repoInfo, branch, treeText, files, options = {})
     let doc = `<documents>\n`;
     doc += `  <!-- Global Repository Context -->\n`;
     doc += `  <context>\n`;
+    if (options && options.partNote) {
+        doc += `    <note>${escapeXml(options.partNote)}</note>\n`;
+    }
     doc += `    <repository>${escapeXml(`${repoInfo.owner}/${repoInfo.repo}`)}</repository>\n`;
     doc += `    <branch>${escapeXml(branch)}</branch>\n`;
     if (repoInfo.url) {
@@ -59,6 +62,17 @@ export function formatClaudeXml(repoInfo, branch, treeText, files, options = {})
         doc += `    <document_content>\n${contentStr}\n    </document_content>\n`;
         doc += `  </document>\n`;
     });
+
+    if (options && options.instructions) {
+        let instStr = stripXmlInvalidChars(options.instructions);
+        if (instStr.includes('</instructions>') || instStr.includes('<') || instStr.includes('&') || instStr.includes(']]>')) {
+            instStr = `<![CDATA[\n${escapeCdata(instStr)}\n]]>`;
+        } else {
+            instStr = escapeXml(instStr);
+        }
+        doc += `  <instructions>\n${instStr}\n  </instructions>\n`;
+    }
+
     doc += `</documents>`;
     return {
         text: doc,
@@ -69,7 +83,11 @@ export function formatClaudeXml(repoInfo, branch, treeText, files, options = {})
 
 export function formatMarkdown(repoInfo, branch, treeText, files, options = {}) {
     const treeFence = getMarkdownFence(treeText);
-    let md = `# Repository: ${repoInfo.owner}/${repoInfo.repo}\nBranch: ${branch}\n`;
+    let md = '';
+    if (options && options.partNote) {
+        md += `Note: ${options.partNote}\n\n`;
+    }
+    md += `# Repository: ${repoInfo.owner}/${repoInfo.repo}\nBranch: ${branch}\n`;
     if (repoInfo.url) {
         md += `Source URL: ${repoInfo.url}\n`;
     }
@@ -84,6 +102,11 @@ export function formatMarkdown(repoInfo, branch, treeText, files, options = {}) 
         const pathFence = file.path.includes('`') ? '`` ' + file.path + ' ``' : '`' + file.path + '`';
         md += `### File: ${pathFence}\n${fence}${ext}\n${file.content}\n${fence}\n\n`;
     }
+
+    if (options && options.instructions) {
+        md += `## Instructions\n\n${options.instructions}\n`;
+    }
+
     return {
         text: md,
         ext: 'md',
@@ -93,6 +116,9 @@ export function formatMarkdown(repoInfo, branch, treeText, files, options = {}) 
 
 export function formatGenericXml(repoInfo, branch, treeText, files, options = {}) {
     let xml = `<repository name="${escapeXml(`${repoInfo.owner}/${repoInfo.repo}`)}" branch="${escapeXml(branch)}"${repoInfo.url ? ` url="${escapeXml(repoInfo.url)}"` : ''}>\n`;
+    if (options && options.partNote) {
+        xml += `<note>${escapeXml(options.partNote)}</note>\n`;
+    }
     if (treeText) {
         xml += `<structure>\n${escapeXml(treeText)}</structure>\n`;
     }
@@ -100,7 +126,19 @@ export function formatGenericXml(repoInfo, branch, treeText, files, options = {}
     for (const file of files) {
         xml += `<file path="${escapeXml(file.path)}">\n<![CDATA[\n${escapeCdata(stripXmlInvalidChars(file.content))}\n]]>\n</file>\n`;
     }
-    xml += `</files>\n</repository>`;
+    xml += `</files>\n`;
+
+    if (options && options.instructions) {
+        let instStr = stripXmlInvalidChars(options.instructions);
+        if (instStr.includes('</instructions>') || instStr.includes('<') || instStr.includes('&') || instStr.includes(']]>')) {
+            instStr = `<![CDATA[\n${escapeCdata(instStr)}\n]]>`;
+        } else {
+            instStr = escapeXml(instStr);
+        }
+        xml += `<instructions>\n${instStr}\n</instructions>\n`;
+    }
+
+    xml += `</repository>`;
     return {
         text: xml,
         ext: 'xml',
@@ -109,13 +147,16 @@ export function formatGenericXml(repoInfo, branch, treeText, files, options = {}
 }
 
 export function formatJson(repoInfo, branch, treeText, files, options = {}) {
-    const json = JSON.stringify({
+    const jsonObj = {
         repository: `${repoInfo.owner}/${repoInfo.repo}`,
         branch,
+        ...(options && options.partNote ? { note: options.partNote } : {}),
         ...(repoInfo.url ? { url: repoInfo.url } : {}),
         ...(treeText ? { structure: treeText } : {}),
-        files
-    }, null, 2);
+        files,
+        ...(options && options.instructions ? { instructions: options.instructions } : {})
+    };
+    const json = JSON.stringify(jsonObj, null, 2);
     return {
         text: json,
         ext: 'json',
@@ -123,58 +164,63 @@ export function formatJson(repoInfo, branch, treeText, files, options = {}) {
     };
 }
 
-export function chunkContextOutput(format, repoInfo, branch, treeText, files, chunkTokenLimit, estimateTokensFn) {
+export function chunkContextOutput(format, repoInfo, branch, treeText, files, chunkTokenLimit, estimateTokensFn, options = {}) {
+    const instructions = (options && options.instructions) || '';
+
     if (!chunkTokenLimit || chunkTokenLimit <= 0) {
-        const output = buildContextOutput(format, repoInfo, branch, treeText, files);
+        const output = buildContextOutput(format, repoInfo, branch, treeText, files, { ...options, instructions });
         output.exceedsLimit = false;
         return [output];
     }
 
-    const firstChunkEmptyOutput = buildContextOutput(format, repoInfo, branch, treeText, []);
-    const firstChunkOverheadTokens = estimateTokensFn(firstChunkEmptyOutput.text);
-
-    const subsequentEmptyOutput = buildContextOutput(format, repoInfo, branch, '', []);
-    const subsequentOverheadTokens = estimateTokensFn(subsequentEmptyOutput.text);
-
-    const fileTokens = files.map((file) => {
-        const singleOutput = buildContextOutput(format, repoInfo, branch, '', [file]);
-        const tokens = estimateTokensFn(singleOutput.text) - subsequentOverheadTokens;
-        return Math.max(0, tokens);
-    });
-
     const chunks = [];
     let currentFiles = [];
-    let currentOverhead = firstChunkOverheadTokens;
-    let currentTokens = currentOverhead;
     let currentStartIndex = 1;
 
     for (let i = 0; i < files.length; i++) {
-        const fTokens = fileTokens[i];
+        const file = files[i];
+        const testFiles = [...currentFiles, file];
+        const isLastFile = (i === files.length - 1);
 
-        if (currentFiles.length > 0 && currentTokens + fTokens > chunkTokenLimit) {
-            const treeForChunk = chunks.length === 0 ? treeText : '';
-            const chunkOutput = buildContextOutput(format, repoInfo, branch, treeForChunk, currentFiles, { startIndex: currentStartIndex });
-            chunkOutput.exceedsLimit = estimateTokensFn(chunkOutput.text) > chunkTokenLimit;
-            chunks.push(chunkOutput);
+        const candidateOpts = {
+            ...options,
+            startIndex: currentStartIndex,
+            instructions: isLastFile ? instructions : '',
+            partNote: isLastFile ? '' : `Part ${chunks.length + 1} of ${chunks.length + 2}. Instructions are in part ${chunks.length + 2}.`
+        };
 
+        const candidateOutput = buildContextOutput(format, repoInfo, branch, chunks.length === 0 ? treeText : '', testFiles, candidateOpts);
+        const candidateTokens = estimateTokensFn(candidateOutput.text);
+
+        if (currentFiles.length > 0 && candidateTokens > chunkTokenLimit) {
+            chunks.push({ files: currentFiles, startIndex: currentStartIndex });
             currentStartIndex += currentFiles.length;
-            currentFiles = [files[i]];
-            currentOverhead = subsequentOverheadTokens;
-            currentTokens = currentOverhead + fTokens;
+            currentFiles = [file];
         } else {
-            currentFiles.push(files[i]);
-            currentTokens += fTokens;
+            currentFiles.push(file);
         }
     }
 
     if (currentFiles.length > 0) {
-        const treeForChunk = chunks.length === 0 ? treeText : '';
-        const chunkOutput = buildContextOutput(format, repoInfo, branch, treeForChunk, currentFiles, { startIndex: currentStartIndex });
-        chunkOutput.exceedsLimit = estimateTokensFn(chunkOutput.text) > chunkTokenLimit;
-        chunks.push(chunkOutput);
+        chunks.push({ files: currentFiles, startIndex: currentStartIndex });
     }
 
-    return chunks;
+    const N = chunks.length;
+    const finalChunks = chunks.map((c, idx) => {
+        const isLast = (idx === N - 1);
+        const chunkOpts = {
+            ...options,
+            startIndex: c.startIndex,
+            instructions: isLast ? instructions : '',
+            partNote: (N > 1 && !isLast) ? `Part ${idx + 1} of ${N}. Instructions are in part ${N}.` : ''
+        };
+        const treeForChunk = idx === 0 ? treeText : '';
+        const chunkOutput = buildContextOutput(format, repoInfo, branch, treeForChunk, c.files, chunkOpts);
+        chunkOutput.exceedsLimit = estimateTokensFn(chunkOutput.text) > chunkTokenLimit;
+        return chunkOutput;
+    });
+
+    return finalChunks;
 }
 
 export function buildContextOutput(format, repoInfo, branch, treeText, files, options = {}) {

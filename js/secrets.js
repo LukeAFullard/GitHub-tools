@@ -1,0 +1,291 @@
+/**
+ * Pure module for secret detection and output redaction.
+ * Zero DOM dependencies for Node unit testing compatibility.
+ */
+
+const SCAN_MAX_BYTES = 204800; // Cap per-file scan to 200 KB
+
+const SENSITIVE_FILENAME_EXACT = new Set([
+    '.env',
+    'id_rsa',
+    'credentials.json'
+]);
+
+const SENSITIVE_FILENAME_EXCEPTIONS = new Set([
+    '.env.example',
+    '.env.sample',
+    '.env.template',
+    '.env.dist'
+]);
+
+function isSensitiveFilename(path) {
+    if (!path) return false;
+    const filename = path.split('/').pop().toLowerCase();
+
+    if (SENSITIVE_FILENAME_EXCEPTIONS.has(filename)) {
+        return false;
+    }
+
+    if (SENSITIVE_FILENAME_EXACT.has(filename)) {
+        return true;
+    }
+
+    if (filename.startsWith('.env.')) {
+        return true;
+    }
+
+    if (filename.endsWith('.pem') || filename.endsWith('.key')) {
+        return true;
+    }
+
+    return false;
+}
+
+function calculateEntropy(str) {
+    if (!str) return 0;
+    const len = str.length;
+    const freqs = {};
+    for (let i = 0; i < len; i++) {
+        const char = str[i];
+        freqs[char] = (freqs[char] || 0) + 1;
+    }
+    let entropy = 0;
+    for (const char in freqs) {
+        const p = freqs[char] / len;
+        entropy -= p * Math.log2(p);
+    }
+    return entropy;
+}
+
+function getCharacterClassCount(str) {
+    let classes = 0;
+    if (/[a-z]/.test(str)) classes++;
+    if (/[A-Z]/.test(str)) classes++;
+    if (/[0-9]/.test(str)) classes++;
+    if (/[^a-zA-Z0-9]/.test(str)) classes++;
+    return classes;
+}
+
+function isRepeatedPattern(str) {
+    if (!str || str.length < 6) return false;
+    const freqs = {};
+    let maxFreq = 0;
+    for (let i = 0; i < str.length; i++) {
+        const c = str[i];
+        freqs[c] = (freqs[c] || 0) + 1;
+        if (freqs[c] > maxFreq) maxFreq = freqs[c];
+    }
+    if (maxFreq / str.length >= 0.6) return true;
+
+    const pat2 = str.slice(0, 2);
+    if (pat2.repeat(Math.floor(str.length / 2)) === str.slice(0, pat2.length * Math.floor(str.length / 2))) {
+        return true;
+    }
+
+    return false;
+}
+
+function isPlaceholder(val) {
+    if (!val) return true;
+    const lower = val.toLowerCase();
+
+    if (
+        lower.includes('example') ||
+        lower.includes('your_') ||
+        lower.includes('xxxx') ||
+        lower.includes('changeme') ||
+        lower.includes('process.env') ||
+        lower.includes('os.environ')
+    ) {
+        return true;
+    }
+
+    if (val.includes('${') || val.includes('<') && val.includes('>')) {
+        return true;
+    }
+
+    if (isRepeatedPattern(val)) {
+        return true;
+    }
+
+    return false;
+}
+
+function createMaskedPreview(val) {
+    if (!val) return '…';
+    const head = val.slice(0, 4);
+    return `${head}…`;
+}
+
+function getLineNumber(content, index) {
+    if (index <= 0) return 1;
+    let line = 1;
+    for (let i = 0; i < index; i++) {
+        if (content.charCodeAt(i) === 10) { // '\n'
+            line++;
+        }
+    }
+    return line;
+}
+
+/**
+ * Helper returning matches with raw values, ranges, types, and line numbers.
+ * Internal only - raw values are NOT exposed in scanForSecrets findings.
+ */
+function findMatchesInternal(path, content) {
+    const specificResults = [];
+    const genericResults = [];
+
+    const filename = path ? path.split('/').pop().toLowerCase() : '';
+    if (path && isSensitiveFilename(path)) {
+        specificResults.push({
+            type: 'sensitive-file',
+            line: 1,
+            value: filename,
+            index: 0,
+            length: filename.length
+        });
+    }
+
+    if (!content) return specificResults;
+
+    const scanContent = content.length > SCAN_MAX_BYTES ? content.slice(0, SCAN_MAX_BYTES) : content;
+
+    const PATTERNS = [
+        {
+            type: 'aws-key',
+            regex: /(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
+            check: (m) => !isPlaceholder(m[0])
+        },
+        {
+            type: 'github-token',
+            regex: /(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,255}\b|github_pat_[A-Za-z0-9_]{22,255}\b/g,
+            check: (m) => !isPlaceholder(m[0])
+        },
+        {
+            type: 'slack-token',
+            regex: /xox[baprs]-[0-9a-zA-Z]{10,48}(?:-[0-9a-zA-Z]{10,48})?\b/g,
+            check: (m) => !isPlaceholder(m[0])
+        },
+        {
+            type: 'stripe-key',
+            regex: /(?:sk|rk)_live_[0-9a-zA-Z]{24,99}\b/g,
+            check: (m) => !isPlaceholder(m[0])
+        },
+        {
+            type: 'google-key',
+            regex: /AIza[0-9A-Za-z\-_]{35}\b/g,
+            check: (m) => !isPlaceholder(m[0])
+        },
+        {
+            type: 'pem-key',
+            regex: /-----BEGIN [A-Z0-9_ ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9_ ]*PRIVATE KEY-----/g,
+            check: (m) => !isPlaceholder(m[0])
+        },
+        {
+            type: 'jwt',
+            regex: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+            check: (m) => !isPlaceholder(m[0])
+        },
+        {
+            type: 'anthropic-key',
+            regex: /sk-ant-[a-zA-Z0-9_\-]{20,100}\b/g,
+            check: (m) => !isPlaceholder(m[0])
+        },
+        {
+            type: 'openai-key',
+            regex: /sk-(?!ant-)[a-zA-Z0-9_\-]{20,100}\b/g,
+            check: (m) => !isPlaceholder(m[0])
+        },
+        {
+            type: 'generic-secret',
+            regex: /(?:password|passwd|secret|token|api_key|apikey|auth)\s*[:=]\s*(["'])([^"'\r\n]{8,})\1/gi,
+            check: (m) => {
+                const val = m[2];
+                if (isPlaceholder(val)) return false;
+                if (getCharacterClassCount(val) < 2) return false;
+                if (calculateEntropy(val) < 2.5) return false;
+                return true;
+            },
+            getValue: (m) => m[2],
+            getIndex: (m) => m.index + m[0].lastIndexOf(m[2]),
+            getLength: (m) => m[2].length
+        }
+    ];
+
+    for (const p of PATTERNS) {
+        p.regex.lastIndex = 0;
+        let match;
+        while ((match = p.regex.exec(scanContent)) !== null) {
+            if (p.check(match)) {
+                const val = p.getValue ? p.getValue(match) : match[0];
+                const matchIdx = p.getIndex ? p.getIndex(match) : match.index;
+                const matchLen = p.getLength ? p.getLength(match) : match[0].length;
+                const item = {
+                    type: p.type,
+                    line: getLineNumber(scanContent, matchIdx),
+                    value: val,
+                    index: matchIdx,
+                    length: matchLen
+                };
+                if (p.type === 'generic-secret') {
+                    genericResults.push(item);
+                } else {
+                    specificResults.push(item);
+                }
+            }
+        }
+    }
+
+    for (const gen of genericResults) {
+        const overlaps = specificResults.some(spec => {
+            return (gen.index < spec.index + spec.length) && (gen.index + gen.length > spec.index);
+        });
+        if (!overlaps) {
+            specificResults.push(gen);
+        }
+    }
+
+    return specificResults;
+}
+
+/**
+ * Scans path and file content for sensitive patterns and flags findings.
+ * @param {string} path - Relative file path.
+ * @param {string} content - Raw content of the file.
+ * @returns {Array<{ type: string, line: number, preview: string }>} Array of secret findings.
+ */
+export function scanForSecrets(path, content) {
+    const rawMatches = findMatchesInternal(path, content);
+    return rawMatches.map(m => ({
+        type: m.type,
+        line: m.line,
+        preview: createMaskedPreview(m.value)
+    }));
+}
+
+/**
+ * Replaces matched secret values in content with [REDACTED:<type>].
+ * @param {string} content - Raw content of the file.
+ * @param {string} path - Relative file path.
+ * @returns {string} Content with secrets redacted.
+ */
+export function redactSecrets(content, path) {
+    if (!content) return content || '';
+
+    const matches = findMatchesInternal(path, content).filter(m => m.type !== 'sensitive-file');
+    if (matches.length === 0) return content;
+
+    const sorted = [...matches].sort((a, b) => b.index - a.index);
+    let redacted = content;
+
+    for (const m of sorted) {
+        if (m.index >= 0 && m.index + m.length <= redacted.length) {
+            const before = redacted.slice(0, m.index);
+            const after = redacted.slice(m.index + m.length);
+            redacted = before + `[REDACTED:${m.type}]` + after;
+        }
+    }
+
+    return redacted;
+}
