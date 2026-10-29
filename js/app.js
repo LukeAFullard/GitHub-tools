@@ -66,15 +66,22 @@ function log(msg) {
 }
 
 function updateRateLimitUI(meta) {
-    if (meta.remaining !== null && meta.limit !== null) {
-        dom.quotaVal.textContent = `${meta.remaining} / ${meta.limit}`;
-        dom.quotaVal.className = 'rate-status ' + (
-            meta.remaining < 5 ? 'rate-critical' : meta.remaining < 20 ? 'rate-warning' : 'rate-normal'
-        );
+    if (meta.remaining !== null && meta.remaining !== undefined && meta.limit !== null && meta.limit !== undefined) {
+        const remaining = typeof meta.remaining === 'number' ? meta.remaining : parseInt(meta.remaining, 10);
+        const limit = typeof meta.limit === 'number' ? meta.limit : parseInt(meta.limit, 10);
+        if (!Number.isNaN(remaining) && !Number.isNaN(limit)) {
+            dom.quotaVal.textContent = `${remaining} / ${limit}`;
+            dom.quotaVal.className = 'rate-status ' + (
+                remaining < 5 ? 'rate-critical' : remaining < 20 ? 'rate-warning' : 'rate-normal'
+            );
+        }
     }
     if (meta.reset) {
-        const resetDate = new Date(parseInt(meta.reset, 10) * 1000);
-        dom.resetVal.textContent = resetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const resetSec = typeof meta.reset === 'number' ? meta.reset : parseInt(meta.reset, 10);
+        if (!Number.isNaN(resetSec)) {
+            const resetDate = new Date(resetSec * 1000);
+            dom.resetVal.textContent = resetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
     }
 }
 
@@ -101,9 +108,9 @@ dom.packBtn.addEventListener('click', async () => {
     const maxKb = parseInt(dom.maxKb.value, 10) || 150;
     const throttleMs = parseInt(dom.throttleMs.value, 10) || 80;
     const minifyMode = dom.minifyMode ? dom.minifyMode.value : 'none';
-    const customIgnoredExts = new Set(
-        dom.ignoreExt.value.split(',').map(s => s.trim().toLowerCase().replace(/^\./, ''))
-    );
+    const customIgnoredExts = Array.from(new Set(
+        dom.ignoreExt.value.split(',').map(s => s.trim().toLowerCase().replace(/^\./, '')).filter(Boolean)
+    ));
 
     abortController = new AbortController();
     dom.packBtn.disabled = true;
@@ -151,8 +158,7 @@ dom.packBtn.addEventListener('click', async () => {
             if (pathParts.some(p => IGNORED_DIRS.has(p.toLowerCase()))) return false;
             if (IGNORED_FILES.has(filename)) return false;
 
-            const ext = filename.includes('.') ? filename.split('.').pop() : '';
-            if (customIgnoredExts.has(ext)) return false;
+            if (customIgnoredExts.some(ext => filename === ext || filename.endsWith('.' + ext))) return false;
             if (node.size && node.size > maxKb * 1024) return false;
 
             return true;
@@ -183,16 +189,22 @@ dom.packBtn.addEventListener('click', async () => {
 
         await new Promise((resolve, reject) => {
             const onStart = () => {
-                dom.startDownloadBtn.removeEventListener('click', onStart);
+                cleanup();
                 resolve();
             };
+            const onAbort = () => {
+                cleanup();
+                reject(new DOMException('Aborted by user', 'AbortError'));
+            };
+            const cleanup = () => {
+                dom.startDownloadBtn.removeEventListener('click', onStart);
+                if (abortController.signal) {
+                    abortController.signal.removeEventListener('abort', onAbort);
+                }
+            };
             dom.startDownloadBtn.addEventListener('click', onStart);
-
             if (abortController.signal) {
-                abortController.signal.addEventListener('abort', () => {
-                    dom.startDownloadBtn.removeEventListener('click', onStart);
-                    reject(new DOMException('Aborted by user', 'AbortError'));
-                });
+                abortController.signal.addEventListener('abort', onAbort);
             }
         });
 
@@ -239,6 +251,12 @@ dom.packBtn.addEventListener('click', async () => {
                 const rawContent = result.content;
                 if (rawContent.length === 0) {
                     emptyCount++;
+                }
+                // Inspect first ~512 chars for null bytes to detect binary content
+                const sample = rawContent.slice(0, 512);
+                if (sample.includes('\0')) {
+                    log(`⚠️ Skipping ${node.path}: Binary content detected (null bytes).`);
+                    continue;
                 }
                 const processedContent = minifyCode(rawContent, node.path, minifyMode);
                 collectedFiles.push({ path: node.path, content: processedContent });

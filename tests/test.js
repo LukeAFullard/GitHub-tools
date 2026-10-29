@@ -15,6 +15,7 @@ import {
 import { minifyCode } from '../js/minifier.js';
 import { parseRepoInput, extractRateLimitHeaders } from '../js/github-api.js';
 import { estimateTokens } from '../js/tokenizer.js';
+import { generateTree } from '../js/tree.js';
 
 test('formatters: escapeXml', () => {
     assert.equal(escapeXml('<script>alert("xss & ' + "'" + '")</script>'), '&lt;script&gt;alert(&quot;xss &amp; &apos;&quot;)&lt;/script&gt;');
@@ -104,4 +105,56 @@ test('github-api: parseRepoInput validation', () => {
 test('tokenizer: estimateTokens', () => {
     const count = estimateTokens('function helloWorld() { return 42; }');
     assert.ok(count > 0);
+});
+
+test('minifier: JS comment stripping preserves RegExp literals', () => {
+    const code = `
+    // comment before
+    const pattern = /^https?:\\/\\//;
+    const regexWithCommentLike = /a\\/b/*c/;
+    /* comment after */
+    `;
+    const minified = minifyCode(code, 'app.js', 'aggressive');
+    assert.ok(!minified.includes('comment before'));
+    assert.ok(!minified.includes('comment after'));
+    assert.ok(minified.includes('const pattern = /^https?:\\/\\//;'));
+});
+
+test('formatters: linear chunking does not stall or throw', () => {
+    const repoInfo = { owner: 'user', repo: 'my-repo' };
+    const files = Array.from({ length: 50 }, (_, i) => ({
+        path: `file_${i}.js`,
+        content: `console.log("File ${i} content repeat ".repeat(20));`
+    }));
+
+    const chunks = chunkContextOutput('claude-xml', repoInfo, 'main', '├── file.js\n', files, 200, estimateTokens);
+    assert.ok(chunks.length > 1);
+});
+
+test('github-api: extractRateLimitHeaders converts strings to numbers', () => {
+    const map = new Map([
+        ['x-ratelimit-remaining', '4999'],
+        ['x-ratelimit-limit', '5000'],
+        ['x-ratelimit-reset', '1600000000'],
+        ['retry-after', '30']
+    ]);
+    const mockResponse = {
+        headers: {
+            get: (k) => map.get(k) || null
+        }
+    };
+
+    const parsed = extractRateLimitHeaders(mockResponse);
+    assert.strictEqual(parsed.remaining, 4999);
+    assert.strictEqual(parsed.limit, 5000);
+    assert.strictEqual(parsed.reset, 1600000000);
+    assert.strictEqual(parsed.retryAfter, 30);
+});
+
+test('tree: generateTree handles prototype property collisions safely', () => {
+    const paths = ['toString/file.js', 'constructor/test.js', 'valueOf/index.js'];
+    const ascii = generateTree(paths);
+    assert.ok(ascii.includes('toString'));
+    assert.ok(ascii.includes('constructor'));
+    assert.ok(ascii.includes('valueOf'));
 });

@@ -103,21 +103,34 @@ export function chunkContextOutput(format, repoInfo, branch, treeText, files, ch
         return [output];
     }
 
+    // Estimate header/template overhead for an empty repository output
+    const emptyOutput = buildContextOutput(format, repoInfo, branch, treeText, []);
+    const baseOverheadTokens = estimateTokensFn(emptyOutput.text);
+
+    // Pre-calculate token counts per single file wrapped in context format
+    const fileTokens = files.map((file, idx) => {
+        const singleOutput = buildContextOutput(format, repoInfo, branch, treeText, [file]);
+        const tokens = estimateTokensFn(singleOutput.text) - baseOverheadTokens;
+        return Math.max(0, tokens);
+    });
+
     const chunks = [];
     let currentFiles = [];
+    let currentTokens = baseOverheadTokens;
 
     for (let i = 0; i < files.length; i++) {
-        const candidateFiles = [...currentFiles, files[i]];
-        const candidateOutput = buildContextOutput(format, repoInfo, branch, treeText, candidateFiles);
-        const est = estimateTokensFn(candidateOutput.text);
+        const fTokens = fileTokens[i];
 
-        if (est > chunkTokenLimit && currentFiles.length > 0) {
+        if (currentFiles.length > 0 && currentTokens + fTokens > chunkTokenLimit) {
             const chunkOutput = buildContextOutput(format, repoInfo, branch, treeText, currentFiles);
             chunkOutput.exceedsLimit = estimateTokensFn(chunkOutput.text) > chunkTokenLimit;
             chunks.push(chunkOutput);
+
             currentFiles = [files[i]];
+            currentTokens = baseOverheadTokens + fTokens;
         } else {
             currentFiles.push(files[i]);
+            currentTokens += fTokens;
         }
     }
 
