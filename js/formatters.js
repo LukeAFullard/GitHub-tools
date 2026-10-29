@@ -14,7 +14,7 @@ export function escapeXml(str) {
 
 export function escapeCdata(str) {
     if (!str) return '';
-    return String(str).replace(/]]>/g, ']]]]><![CDATA[>');
+    return String(str).replace(/\]\]\>/g, ']]]]><![CDATA[>');
 }
 
 export function getMarkdownFence(content) {
@@ -45,7 +45,7 @@ export function formatClaudeXml(repoInfo, branch, treeText, files) {
         doc += `  <document index="${idx + 1}">\n`;
         doc += `    <source>${escapeXml(file.path)}</source>\n`;
         let contentStr = file.content || '';
-        if (contentStr.includes('</document_content>') || contentStr.includes('</document>') || contentStr.includes('<') || contentStr.includes('&')) {
+        if (contentStr.includes('</document_content>') || contentStr.includes('</document>') || contentStr.includes('<') || contentStr.includes('&') || contentStr.includes(']]>')) {
             contentStr = `<![CDATA[\n${escapeCdata(contentStr)}\n]]>`;
         }
         doc += `    <document_content>\n${contentStr}\n    </document_content>\n`;
