@@ -504,7 +504,9 @@ dom.packBtn.addEventListener('click', async () => {
                                 results[i] = { path: node.path, rawContent: result.content };
                             }
                         } else {
-                            cachedSkippedPaths.add(node.path);
+                            if (result && result.status === 404) {
+                                cachedSkippedPaths.add(node.path);
+                            }
                             log(`[ERROR] Failed to fetch delta ${node.path}${result && result.error ? `: ${result.error}` : ''}`);
                         }
 
@@ -621,7 +623,9 @@ dom.packBtn.addEventListener('click', async () => {
                         results[i] = { path: node.path, rawContent: rawContent };
                     }
                 } else {
-                    cachedSkippedPaths.add(node.path);
+                    if (result && result.status === 404) {
+                        cachedSkippedPaths.add(node.path);
+                    }
                     failedCount++;
                     log(`[ERROR] Failed to fetch ${node.path}${result && result.error ? `: ${result.error}` : ''}`);
                 }
