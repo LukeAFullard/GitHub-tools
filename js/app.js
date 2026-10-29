@@ -103,6 +103,21 @@ async function refreshRateLimitBadge() {
 dom.pat.addEventListener('change', refreshRateLimitBadge);
 refreshRateLimitBadge();
 
+function applyUrlParams() {
+    const params = new URLSearchParams(window.location.search);
+    const repoParam = params.get('repo');
+    const branchParam = params.get('branch');
+    const formatParam = params.get('format');
+    const minifyParam = params.get('minify');
+
+    if (repoParam && dom.repoUrl) dom.repoUrl.value = repoParam;
+    if (branchParam && dom.branch) dom.branch.value = branchParam;
+    if (formatParam && dom.format) dom.format.value = formatParam;
+    if (minifyParam && dom.minifyMode) dom.minifyMode.value = minifyParam;
+}
+
+applyUrlParams();
+
 async function repackBundleInMemory() {
     if (!cachedRawFiles || cachedRawFiles.length === 0 || !cachedRepoInfo) return;
 
@@ -294,63 +309,74 @@ dom.packBtn.addEventListener('click', async () => {
             return;
         }
 
-        log(`Starting download for ${activeSelection.length} selected file(s)...`);
+        log(`Starting parallel download for ${activeSelection.length} selected file(s) (concurrency: 5)...`);
 
         const collectedFiles = [];
         let emptyCount = 0;
         let failedCount = 0;
+        let completedCount = 0;
 
-        for (let i = 0; i < activeSelection.length; i++) {
-            const node = activeSelection[i];
-            log(`[${i + 1}/${activeSelection.length}] Fetching ${node.path}...`);
+        const concurrency = 5;
+        let index = 0;
 
-            let retries = 0;
-            let result = null;
+        async function worker() {
+            while (index < activeSelection.length) {
+                if (abortController.signal && abortController.signal.aborted) break;
+                const i = index++;
+                const node = activeSelection[i];
+                log(`[${i + 1}/${activeSelection.length}] Fetching ${node.path}...`);
 
-            while (retries < 3) {
-                result = await fetchFileContent(
-                    repoInfo.owner,
-                    repoInfo.repo,
-                    targetBranch,
-                    node.path,
-                    pat,
-                    abortController.signal,
-                    updateRateLimitUI
-                );
+                let retries = 0;
+                let result = null;
 
-                if (result.backoff) {
-                    retries++;
-                    const backoffTime = Math.min(result.backoff, 60);
-                    log(`🚨 Rate limit warning for ${node.path}. Retry ${retries}/3 cooling down for ${backoffTime}s...`);
-                    await sleep(backoffTime * 1000, abortController.signal);
-                    continue;
+                while (retries < 3) {
+                    result = await fetchFileContent(
+                        repoInfo.owner,
+                        repoInfo.repo,
+                        targetBranch,
+                        node.path,
+                        pat,
+                        abortController.signal,
+                        updateRateLimitUI
+                    );
+
+                    if (result.backoff) {
+                        retries++;
+                        const backoffTime = Math.min(result.backoff, 60);
+                        log(`🚨 Rate limit warning for ${node.path}. Retry ${retries}/3 cooling down for ${backoffTime}s...`);
+                        await sleep(backoffTime * 1000, abortController.signal);
+                        continue;
+                    }
+                    break;
                 }
-                break;
-            }
 
-            if (result && result.success) {
-                const rawContent = result.content;
-                if (rawContent.length === 0) {
-                    emptyCount++;
+                if (result && result.success) {
+                    const rawContent = result.content;
+                    if (rawContent.length === 0) {
+                        emptyCount++;
+                    }
+                    const sample = rawContent.slice(0, 512);
+                    if (sample.includes('\0')) {
+                        log(`⚠️ Skipping ${node.path}: Binary content detected (null bytes).`);
+                    } else {
+                        collectedFiles.push({ path: node.path, rawContent: rawContent });
+                    }
+                } else {
+                    failedCount++;
+                    log(`❌ Failed to fetch ${node.path}${result && result.error ? `: ${result.error}` : ''}`);
                 }
-                // Inspect first ~512 chars for null bytes to detect binary content
-                const sample = rawContent.slice(0, 512);
-                if (sample.includes('\0')) {
-                    log(`⚠️ Skipping ${node.path}: Binary content detected (null bytes).`);
-                    continue;
+
+                completedCount++;
+                dom.progressFill.style.width = `${Math.round((completedCount / activeSelection.length) * 100)}%`;
+
+                if (throttleMs > 0) {
+                    await sleep(throttleMs, abortController.signal);
                 }
-                collectedFiles.push({ path: node.path, rawContent: rawContent });
-            } else {
-                failedCount++;
-                log(`❌ Failed to fetch ${node.path}${result && result.error ? `: ${result.error}` : ''}`);
-            }
-
-            dom.progressFill.style.width = `${Math.round(((i + 1) / activeSelection.length) * 100)}%`;
-
-            if (throttleMs > 0 && i < activeSelection.length - 1) {
-                await sleep(throttleMs, abortController.signal);
             }
         }
+
+        const workers = Array.from({ length: Math.min(concurrency, activeSelection.length) }, () => worker());
+        await Promise.all(workers);
 
         log(`Download complete: ${collectedFiles.length} file(s) processed (${emptyCount} empty), ${failedCount} failed.`);
 
