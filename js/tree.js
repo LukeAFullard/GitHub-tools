@@ -28,6 +28,7 @@ export function generateTree(paths) {
 }
 
 function calculateDirSize(dirItem) {
+    if (typeof dirItem._cachedSize === 'number') return dirItem._cachedSize;
     let sum = 0;
     if (!dirItem || !dirItem.children) return 0;
     for (const key of Object.keys(dirItem.children)) {
@@ -38,6 +39,7 @@ function calculateDirSize(dirItem) {
             sum += child.size || 0;
         }
     }
+    dirItem._cachedSize = sum;
     return sum;
 }
 
@@ -76,7 +78,7 @@ const SVG_FILE = `<svg class="svg-icon" width="14" height="14" viewBox="0 0 24 2
 const SVG_CHEVRON_DOWN = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
 const SVG_CHEVRON_RIGHT = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
 
-export function renderInteractiveTree(nodes, container, onSelectionChange) {
+export function renderInteractiveTree(nodes, container, onSelectionChange, largeThresholdKb = 50) {
     container.innerHTML = '';
 
     const root = { name: '', isDir: true, children: Object.create(null), path: '' };
@@ -113,7 +115,9 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
         }
     }
 
-    let matchCount = nodes.length;
+    let isFirstRow = true;
+    let allTreeRows = [];
+    let currentLargeThresholdBytes = largeThresholdKb * 1024;
 
     function createTreeNodeDOM(item, parentSiblingsMap = root.children) {
         const li = document.createElement('li');
@@ -122,7 +126,9 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
 
         const row = document.createElement('div');
         row.className = 'tree-row';
-        row.tabIndex = 0;
+        row.tabIndex = isFirstRow ? 0 : -1;
+        if (isFirstRow) isFirstRow = false;
+        allTreeRows.push(row);
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
@@ -142,7 +148,6 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
         label.appendChild(iconSpan);
         label.appendChild(nameSpan);
 
-        // Weight bar calculation relative to siblings
         const bytes = item.isDir ? calculateDirSize(item) : (item.size || 0);
         const maxSiblingBytes = getMaxSiblingSize(parentSiblingsMap);
         const pct = Math.max(4, Math.round((bytes / maxSiblingBytes) * 100));
@@ -150,7 +155,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
         const weightBg = document.createElement('span');
         weightBg.className = 'tree-weight-bar-bg';
         const weightFill = document.createElement('span');
-        const isLarge = !item.isDir && bytes > 50 * 1024;
+        const isLarge = !item.isDir && bytes > currentLargeThresholdBytes;
         weightFill.className = 'tree-weight-bar-fill' + (isLarge ? ' near' : '');
         weightFill.style.width = `${pct}%`;
         weightBg.appendChild(weightFill);
@@ -167,12 +172,17 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
         row.appendChild(sizeBadge);
         li.appendChild(row);
 
-        // Entire row tap/click toggles checkbox (unless clicking toggle button)
         row.addEventListener('click', (e) => {
             if (e.target === checkbox) return;
             if (e.target.closest('.tree-toggle-btn')) return;
             checkbox.checked = !checkbox.checked;
             checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+
+        // Roving tabindex navigation
+        row.addEventListener('focus', () => {
+            allTreeRows.forEach(r => r.tabIndex = -1);
+            row.tabIndex = 0;
         });
 
         if (item.isDir) {
@@ -237,6 +247,16 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                 } else if (e.key === 'ArrowLeft') {
                     e.preventDefault();
                     if (isExpanded) toggleExpand(false);
+                } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const visibleRows = allTreeRows.filter(r => r.offsetParent !== null);
+                    const idx = visibleRows.indexOf(row);
+                    if (idx !== -1) {
+                        const targetIdx = idx + (e.key === 'ArrowDown' ? 1 : -1);
+                        if (visibleRows[targetIdx]) {
+                            visibleRows[targetIdx].focus();
+                        }
+                    }
                 }
             });
 
@@ -325,6 +345,16 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                     e.preventDefault();
                     checkbox.checked = !checkbox.checked;
                     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const visibleRows = allTreeRows.filter(r => r.offsetParent !== null);
+                    const idx = visibleRows.indexOf(row);
+                    if (idx !== -1) {
+                        const targetIdx = idx + (e.key === 'ArrowDown' ? 1 : -1);
+                        if (visibleRows[targetIdx]) {
+                            visibleRows[targetIdx].focus();
+                        }
+                    }
                 }
             });
 
@@ -417,6 +447,9 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
     return {
         getSelectedNodes,
         getSelectedStats,
+        setLargeThresholdKb(kbVal) {
+            currentLargeThresholdBytes = kbVal * 1024;
+        },
         selectAll(val) {
             const hasFilter = Boolean(currentQuery);
             for (const rn of rootNodes) {
@@ -443,7 +476,6 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                     visibleCount++;
                 }
             }
-            matchCount = visibleCount;
             return visibleCount;
         },
         selectBySubpath(subpath) {
