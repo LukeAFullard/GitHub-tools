@@ -245,6 +245,31 @@ test('minifier: HTML textarea content is preserved during aggressive minificatio
     assert.ok(minified.includes('line 1\n\n  line 2'));
 });
 
+test('minifier: JS template literal interpolation preserves expressions and handles backticks inside interpolation', () => {
+    const code = 'const msg = `hello ${val /* comment */ || "world `nested`"}!`;';
+    const minified = minifyCode(code, 'app.js', 'aggressive');
+    assert.ok(!minified.includes('comment'), 'Minified was: ' + JSON.stringify(minified));
+    assert.ok(minified.includes('world `nested`'), 'Minified was: ' + JSON.stringify(minified));
+});
+
+test('minifier: Python inline comment without preceding space is stripped', () => {
+    const code = 'x = 1;#inline comment\ny = [1, 2]#comment2';
+    const minified = minifyCode(code, 'script.py', 'aggressive');
+    assert.equal(minified, 'x = 1;\ny = [1, 2]');
+});
+
+test('minifier: HTML script and style tags are preserved during aggressive minification', () => {
+    const code = '<script>\n  // JS comment\n  if (a <!-- b) console.log("ok");\n</script>\n<style>\n  /* CSS comment */\n  body { color: red; }\n</style>';
+    const minified = minifyCode(code, 'index.html', 'aggressive');
+    assert.ok(minified.includes('if (a <!-- b) console.log("ok");'));
+    assert.ok(minified.includes('body { color: red; }'));
+});
+
+test('github-api: parseRepoInput override branch honors explicit branch over URL tree segment', () => {
+    const parsed = parseRepoInput('https://github.com/owner/repo/tree/feature/login/src', 'main');
+    assert.deepEqual(parsed, { owner: 'owner', repo: 'repo', branch: 'main', subpath: 'feature/login/src' });
+});
+
 test('github-api: fetchFileContent with mock fetch (public raw OK, raw 404 REST fallback, 429 backoff)', async () => {
     const originalFetch = globalThis.fetch;
     try {

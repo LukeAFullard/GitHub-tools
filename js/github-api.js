@@ -51,9 +51,14 @@ export function parseRepoInput(input, overrideBranch = null) {
         const tailStr = tail.join('/');
         const cleanBranch = overrideBranch ? overrideBranch.trim() : null;
 
-        if (cleanBranch && (tailStr === cleanBranch || tailStr.startsWith(cleanBranch + '/'))) {
-            branch = cleanBranch;
-            subpath = tailStr.slice(cleanBranch.length + 1) || null;
+        if (cleanBranch) {
+            if (tailStr === cleanBranch || tailStr.startsWith(cleanBranch + '/')) {
+                branch = cleanBranch;
+                subpath = tailStr.slice(cleanBranch.length + 1) || null;
+            } else {
+                branch = cleanBranch;
+                subpath = tailStr;
+            }
         } else {
             branch = parts[3];
             if (parts.length > 4) {

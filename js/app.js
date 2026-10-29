@@ -68,6 +68,8 @@ function clearOutputState() {
     if (dom.chunkSelect) dom.chunkSelect.style.display = 'none';
     if (dom.downloadAllBtn) dom.downloadAllBtn.style.display = 'none';
     if (dom.chunkSelect) dom.chunkSelect.innerHTML = '';
+    if (dom.downloadBtn) dom.downloadBtn.disabled = true;
+    if (dom.copyBtn) dom.copyBtn.disabled = true;
 }
 
 const dom = {
@@ -162,12 +164,16 @@ function applyUrlParams() {
     const formatParam = params.get('format');
     const minifyParam = params.get('minify');
 
+    const validFormats = ['claude-xml', 'markdown', 'generic-xml', 'json'];
+    const validMinify = ['none', 'basic', 'aggressive'];
+
     if (repoParam && dom.repoUrl) dom.repoUrl.value = repoParam;
     if (branchParam && dom.branch) dom.branch.value = branchParam;
-    if (formatParam && dom.format) dom.format.value = formatParam;
-    if (minifyParam && dom.minifyMode) dom.minifyMode.value = minifyParam;
+    if (formatParam && validFormats.includes(formatParam) && dom.format) dom.format.value = formatParam;
+    if (minifyParam && validMinify.includes(minifyParam) && dom.minifyMode) dom.minifyMode.value = minifyParam;
 }
 
+clearOutputState();
 applyUrlParams();
 
 function getDeepLinkUrl() {
@@ -274,6 +280,8 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview; complete text will download] ...' : '');
     if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'none';
     if (dom.previewArea) dom.previewArea.style.display = 'block';
+    if (dom.downloadBtn) dom.downloadBtn.disabled = false;
+    if (dom.copyBtn) dom.copyBtn.disabled = false;
     log(`[SUCCESS] Context bundle ready: ${generatedChunks.length} chunk(s), ~${estTokens.toLocaleString()} tokens in active chunk.`);
 }
 
@@ -434,13 +442,11 @@ dom.packBtn.addEventListener('click', async () => {
         if (dom.collapseAllBtn) dom.collapseAllBtn.onclick = () => treeControls.expandAll(false);
         if (dom.treeFilterInput) {
             dom.treeFilterInput.value = repoInfo.subpath || '';
-            dom.treeFilterInput.oninput = () => treeControls.filter(dom.treeFilterInput.value);
+            dom.treeFilterInput.oninput = () => treeControls.filter(dom.treeFilterInput.value, false);
             if (repoInfo.subpath) {
-                treeControls.filter(repoInfo.subpath);
+                treeControls.filter(repoInfo.subpath, true);
                 if (treeControls.selectBySubpath) {
                     treeControls.selectBySubpath(repoInfo.subpath);
-                    activeSelection = treeControls.getSelectedNodes();
-                    currentActiveSelection = activeSelection;
                 }
             }
         }
@@ -463,68 +469,87 @@ dom.packBtn.addEventListener('click', async () => {
                 let index = 0;
                 const results = new Array(missingNodes.length);
 
-                const deltaAbort = new AbortController();
+                if (!abortController || abortController.signal.aborted) {
+                    abortController = new AbortController();
+                }
+                const signal = abortController.signal;
+                dom.abortBtn.style.display = 'inline-flex';
+                dom.progressTrack.style.display = 'block';
+                dom.progressFill.style.width = '0%';
+                let completedDelta = 0;
 
-                async function worker() {
-                    while (index < missingNodes.length) {
-                        if (deltaAbort.signal.aborted) break;
-                        if (thisGen !== currentGeneration) break;
-                        const i = index++;
-                        const node = missingNodes[i];
-                        log(`[FETCH] Fetching delta ${node.path}...`);
+                try {
+                    async function worker() {
+                        while (index < missingNodes.length) {
+                            if (signal.aborted) break;
+                            if (thisGen !== currentGeneration) break;
+                            const i = index++;
+                            const node = missingNodes[i];
+                            log(`[FETCH] Fetching delta ${node.path}...`);
 
-                        let retries = 0;
-                        let result = null;
-                        while (retries < 3) {
-                            result = await fetchFileContent(
-                                repoInfo.owner,
-                                repoInfo.repo,
-                                targetBranch,
-                                node.path,
-                                pat,
-                                deltaAbort.signal,
-                                updateRateLimitUI,
-                                isPrivateRepo
-                            );
-                            if (result && result.isPrivate) {
-                                isPrivateRepo = true;
+                            let retries = 0;
+                            let result = null;
+                            while (retries < 3) {
+                                result = await fetchFileContent(
+                                    repoInfo.owner,
+                                    repoInfo.repo,
+                                    targetBranch,
+                                    node.path,
+                                    pat,
+                                    signal,
+                                    updateRateLimitUI,
+                                    isPrivateRepo
+                                );
+                                if (result && result.isPrivate) {
+                                    isPrivateRepo = true;
+                                }
+                                if (result && result.backoff) {
+                                    retries++;
+                                    await sleep(Math.min(result.backoff, 60) * 1000, signal);
+                                    continue;
+                                }
+                                break;
                             }
-                            if (result && result.backoff) {
-                                retries++;
-                                await sleep(Math.min(result.backoff, 60) * 1000, deltaAbort.signal);
-                                continue;
-                            }
-                            break;
-                        }
-                        if (result && result.success) {
-                            if (isBinaryContent(result.content)) {
-                                cachedSkippedPaths.add(node.path);
-                                log(`[WARN] Delta skip ${node.path}: Binary content detected.`);
+                            if (result && result.success) {
+                                if (isBinaryContent(result.content)) {
+                                    cachedSkippedPaths.add(node.path);
+                                    log(`[WARN] Delta skip ${node.path}: Binary content detected.`);
+                                } else {
+                                    results[i] = { path: node.path, rawContent: result.content };
+                                }
                             } else {
-                                results[i] = { path: node.path, rawContent: result.content };
+                                if (result && result.status === 404) {
+                                    cachedSkippedPaths.add(node.path);
+                                }
+                                log(`[ERROR] Failed to fetch delta ${node.path}${result && result.error ? `: ${result.error}` : ''}`);
                             }
-                        } else {
-                            if (result && result.status === 404) {
-                                cachedSkippedPaths.add(node.path);
-                            }
-                            log(`[ERROR] Failed to fetch delta ${node.path}${result && result.error ? `: ${result.error}` : ''}`);
-                        }
 
-                        if (throttleMs > 0) {
-                            await sleep(throttleMs, deltaAbort.signal);
+                            completedDelta++;
+                            dom.progressFill.style.width = `${Math.round((completedDelta / missingNodes.length) * 100)}%`;
+
+                            if (throttleMs > 0) {
+                                await sleep(throttleMs, signal);
+                            }
                         }
                     }
-                }
 
-                const workers = Array.from({ length: Math.min(concurrency, missingNodes.length) }, () => worker());
-                await Promise.all(workers);
+                    const workers = Array.from({ length: Math.min(concurrency, missingNodes.length) }, () => worker());
+                    await Promise.all(workers);
 
-                if (thisGen === currentGeneration) {
-                    const newlyFetched = results.filter(Boolean);
-                    updateCachedRawFiles(newlyFetched);
+                    if (thisGen === currentGeneration) {
+                        const newlyFetched = results.filter(Boolean);
+                        updateCachedRawFiles(newlyFetched);
+                    }
+                } finally {
+                    dom.abortBtn.style.display = 'none';
                 }
             }).catch((err) => {
-                log(`[ERROR] Delta fetch error: ${err.message || err}`);
+                if (err.name === 'AbortError') {
+                    log('[CANCEL] Delta fetch cancelled by user.');
+                } else {
+                    log(`[ERROR] Delta fetch error: ${err.message || err}`);
+                }
+                dom.abortBtn.style.display = 'none';
             });
             return deltaFetchQueue;
         }
