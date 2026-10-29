@@ -226,3 +226,21 @@ test('minifier: Markdown files in aggressive mode do not strip blank lines', () 
     const minified = minifyCode(code, 'README.md', 'aggressive');
     assert.equal(minified, code);
 });
+
+test('github-api: parseRepoInput with branch containing slashes', () => {
+    const parsed = parseRepoInput('https://github.com/owner/repo/tree/feature/ui/src/app', 'feature/ui');
+    assert.deepEqual(parsed, { owner: 'owner', repo: 'repo', branch: 'feature/ui', subpath: 'src/app' });
+});
+
+test('formatters: Claude XML wraps CDATA when closing document tags exist in content', () => {
+    const repoInfo = { owner: 'owner', repo: 'repo' };
+    const files = [{ path: 'test.xml', content: '</document> inside content' }];
+    const res = formatClaudeXml(repoInfo, 'main', '', files);
+    assert.ok(res.text.includes('<![CDATA['), 'Expected CDATA block for content containing closing document tags');
+});
+
+test('minifier: HTML textarea content is preserved during aggressive minification', () => {
+    const code = '<textarea>\n  line 1\n\n  line 2\n</textarea>';
+    const minified = minifyCode(code, 'index.html', 'aggressive');
+    assert.ok(minified.includes('line 1\n\n  line 2'));
+});

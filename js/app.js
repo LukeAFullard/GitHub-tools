@@ -23,11 +23,13 @@ let outputExt = "xml";
 let outputMime = "application/xml";
 
 let cachedRawFiles = []; // [{ path: string, rawContent: string }]
+let cachedSkippedPaths = new Set(); // Set of paths that failed or were binary skips
 let cachedRepoInfo = null;
 let cachedBranch = "";
 let currentActiveSelection = [];
 let isPrivateRepo = false;
 let currentGeneration = 0;
+let repackGeneration = 0;
 
 function updateCachedRawFiles(newFiles) {
     const map = new Map(cachedRawFiles.map(f => [f.path, f]));
@@ -183,6 +185,9 @@ function getDeepLinkUrl() {
 }
 
 async function repackBundleInMemory(activeSelectionNodes = currentActiveSelection) {
+    repackGeneration++;
+    const thisRepackGen = repackGeneration;
+
     let selection = activeSelectionNodes || currentActiveSelection;
 
     if (!cachedRawFiles || cachedRawFiles.length === 0 || !cachedRepoInfo || !selection || selection.length === 0) {
@@ -215,7 +220,7 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
 
     const repoWithUrl = { ...cachedRepoInfo, url: getDeepLinkUrl() };
 
-    generatedChunks = chunkContextOutput(
+    const newChunks = chunkContextOutput(
         dom.format.value,
         repoWithUrl,
         cachedBranch,
@@ -226,20 +231,28 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     );
 
     let limitExceeded = false;
-    for (const chunk of generatedChunks) {
+    for (const chunk of newChunks) {
         if (chunk.exceedsLimit) limitExceeded = true;
     }
     if (limitExceeded) {
         log(`[WARN] Warning: One or more single files exceed your requested chunk limit of ${chunkLimitVal} tokens.`);
     }
 
+    const firstChunk = newChunks[0];
+    const newPackedOutputText = firstChunk.text;
+
+    const estTokens = await estimateTokensAsync(newPackedOutputText);
+
+    if (thisRepackGen !== repackGeneration) {
+        // Out-of-order completion, ignore
+        return;
+    }
+
+    generatedChunks = newChunks;
     activeChunkIndex = 0;
-    const firstChunk = generatedChunks[0];
-    packedOutputText = firstChunk.text;
+    packedOutputText = newPackedOutputText;
     outputExt = firstChunk.ext;
     outputMime = firstChunk.mime;
-
-    const estTokens = await estimateTokensAsync(packedOutputText);
 
     dom.statFiles.textContent = processedFiles.length;
     dom.statChars.textContent = packedOutputText.length.toLocaleString();
@@ -286,6 +299,7 @@ dom.packBtn.addEventListener('click', async () => {
 
     // Reset repo cache state on new repo lookup
     cachedRawFiles = [];
+    cachedSkippedPaths.clear();
     cachedRepoInfo = null;
     cachedBranch = "";
     currentActiveSelection = [];
@@ -293,8 +307,15 @@ dom.packBtn.addEventListener('click', async () => {
     clearOutputState();
 
     // Auto-fill branch and subpath filter if present in pasted GitHub URL
-    if (repoInfo.branch && dom.branch && !dom.branch.value.trim()) {
-        dom.branch.value = repoInfo.branch;
+    if (dom.branch) {
+        const userBranch = dom.branch.value.trim();
+        const parsedWithOverride = parseRepoInput(dom.repoUrl.value, userBranch);
+        if (parsedWithOverride && parsedWithOverride.branch) {
+            repoInfo.branch = parsedWithOverride.branch;
+            repoInfo.subpath = parsedWithOverride.subpath;
+        } else if (repoInfo.branch && !userBranch) {
+            dom.branch.value = repoInfo.branch;
+        }
     }
 
     const pat = dom.pat.value.trim();
@@ -433,7 +454,7 @@ dom.packBtn.addEventListener('click', async () => {
             deltaFetchQueue = deltaFetchQueue.then(async () => {
                 if (thisGen !== currentGeneration) return;
                 const cachedPaths = new Set(cachedRawFiles.map(f => f.path));
-                const missingNodes = selectionToFetch.filter(n => !cachedPaths.has(n.path));
+                const missingNodes = selectionToFetch.filter(n => !cachedPaths.has(n.path) && !cachedSkippedPaths.has(n.path));
 
                 if (missingNodes.length === 0) return;
 
@@ -442,11 +463,11 @@ dom.packBtn.addEventListener('click', async () => {
                 let index = 0;
                 const results = new Array(missingNodes.length);
 
-                const deltaSignal = abortController ? abortController.signal : null;
+                const deltaAbort = new AbortController();
 
                 async function worker() {
                     while (index < missingNodes.length) {
-                        if (deltaSignal && deltaSignal.aborted) break;
+                        if (deltaAbort.signal.aborted) break;
                         if (thisGen !== currentGeneration) break;
                         const i = index++;
                         const node = missingNodes[i];
@@ -461,7 +482,7 @@ dom.packBtn.addEventListener('click', async () => {
                                 targetBranch,
                                 node.path,
                                 pat,
-                                deltaSignal,
+                                deltaAbort.signal,
                                 updateRateLimitUI,
                                 isPrivateRepo
                             );
@@ -470,23 +491,25 @@ dom.packBtn.addEventListener('click', async () => {
                             }
                             if (result && result.backoff) {
                                 retries++;
-                                await sleep(Math.min(result.backoff, 60) * 1000, deltaSignal);
+                                await sleep(Math.min(result.backoff, 60) * 1000, deltaAbort.signal);
                                 continue;
                             }
                             break;
                         }
                         if (result && result.success) {
                             if (isBinaryContent(result.content)) {
+                                cachedSkippedPaths.add(node.path);
                                 log(`[WARN] Delta skip ${node.path}: Binary content detected.`);
                             } else {
                                 results[i] = { path: node.path, rawContent: result.content };
                             }
                         } else {
+                            cachedSkippedPaths.add(node.path);
                             log(`[ERROR] Failed to fetch delta ${node.path}${result && result.error ? `: ${result.error}` : ''}`);
                         }
 
                         if (throttleMs > 0) {
-                            await sleep(throttleMs, deltaSignal);
+                            await sleep(throttleMs, deltaAbort.signal);
                         }
                     }
                 }
@@ -498,7 +521,9 @@ dom.packBtn.addEventListener('click', async () => {
                     const newlyFetched = results.filter(Boolean);
                     updateCachedRawFiles(newlyFetched);
                 }
-            }).catch(() => {});
+            }).catch((err) => {
+                log(`[ERROR] Delta fetch error: ${err.message || err}`);
+            });
             return deltaFetchQueue;
         }
 
@@ -590,11 +615,13 @@ dom.packBtn.addEventListener('click', async () => {
                         emptyCount++;
                     }
                     if (isBinaryContent(rawContent)) {
+                        cachedSkippedPaths.add(node.path);
                         log(`[WARN] Skipping ${node.path}: Binary content detected.`);
                     } else {
                         results[i] = { path: node.path, rawContent: rawContent };
                     }
                 } else {
+                    cachedSkippedPaths.add(node.path);
                     failedCount++;
                     log(`[ERROR] Failed to fetch ${node.path}${result && result.error ? `: ${result.error}` : ''}`);
                 }
