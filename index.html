@@ -8,51 +8,101 @@
 </head>
 <body>
 
-<div class="container">
-    <header>
-        <h1>📦 GitHub Repo Context Packer</h1>
-        <p>Direct browser-to-GitHub packaging. Zero middleman servers, 100% client-side privacy, strict API limits compliance.</p>
+<div class="workbench">
+    <!-- Fixed Header Bar -->
+    <header class="workbench-header">
+        <div class="brand">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
+            <span class="brand-title">GitHub Repo Context Packer</span>
+            <span class="brand-tag">Industrial Dev Workbench</span>
+        </div>
+
+        <div class="header-actions">
+            <div class="rate-limit-badge">
+                <span class="rate-label">API Quota:</span>
+                <b id="quotaVal" class="rate-status rate-normal">-- / --</b>
+                <span class="rate-reset">Reset: <span id="resetVal">--:--</span></span>
+            </div>
+            <button id="shareUrlBtn" class="secondary btn-sm" title="Copy Deep-Link URL">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                </svg>
+                <span>Share Link</span>
+            </button>
+        </div>
     </header>
 
-    <!-- Configuration Card -->
-    <div class="card">
-        <div class="grid-2">
-            <div class="field">
-                <label for="repoUrl">GitHub Repository <span class="help-icon" data-tooltip="Enter the repository owner/name or URL (e.g. facebook/react).">?</span></label>
-                <input type="text" id="repoUrl" placeholder="owner/repo or https://github.com/owner/repo" value="">
-            </div>
-            <div class="field">
-                <label for="branch">Branch / Tag (Optional) <span class="help-icon" data-tooltip="Specify a Git branch or tag name. Defaults to main or master if blank.">?</span></label>
-                <input type="text" id="branch" placeholder="Defaults to main/master">
-            </div>
-        </div>
-
-        <div class="grid-2">
-            <div class="field">
-                <label for="pat">GitHub Token (Optional) <span class="help-icon" data-tooltip="Optional Personal Access Token (PAT or Fine-Grained Token) to increase API rate limit to 5,000 req/hr. Stays 100% in transient browser memory.">?</span></label>
-                <input type="password" id="pat" placeholder="ghp_... (Elevates limits from 60 to 5,000 req/hr; stays in browser)">
-            </div>
-            <div class="field">
-                <label>GitHub API Quota Status <span class="help-icon" data-tooltip="Shows your current remaining GitHub API rate limit quota and reset time.">?</span></label>
-                <div class="rate-limit-badge">
-                    <span>Remaining: <b id="quotaVal" class="rate-status rate-normal">-- / --</b></span>
-                    <span>Reset: <span id="resetVal">--:--</span></span>
+    <!-- Main Workspace Grid -->
+    <div class="workbench-body">
+        <!-- Left Sidebar: Configuration & Controls -->
+        <aside class="sidebar">
+            <section class="panel-section">
+                <div class="section-title">Repository Source</div>
+                <div class="field full-width">
+                    <label for="repoUrl">GitHub Repository <span class="help-icon" data-tooltip="Enter the repository owner/name or URL (e.g. facebook/react).">?</span></label>
+                    <input type="text" id="repoUrl" placeholder="owner/repo or https://github.com/owner/repo" value="">
                 </div>
-            </div>
-        </div>
 
-        <details>
-            <summary class="details-summary">Advanced Settings &amp; Compliance Safeguards <span class="help-icon" data-tooltip="Click to customize output schema, file filters, request pacing, code minification, and token limit chunking.">?</span></summary>
-            <div class="advanced-grid">
                 <div class="grid-2">
                     <div class="field">
-                        <label for="format">Output Format Schema <span class="help-icon" data-tooltip="Choose your desired LLM prompt structure (Claude XML, Markdown, Generic XML, or JSON).">?</span></label>
+                        <label for="branch">Branch / Tag <span class="help-icon" data-tooltip="Specify a Git branch or tag name. Defaults to main or master if blank.">?</span></label>
+                        <input type="text" id="branch" placeholder="main/master">
+                    </div>
+                    <div class="field">
+                        <label for="pat">GitHub Token <span class="help-icon" data-tooltip="Optional Personal Access Token (PAT or Fine-Grained Token) to increase API rate limit to 5,000 req/hr. Stays 100% in transient browser memory.">?</span></label>
+                        <input type="password" id="pat" placeholder="ghp_... (Optional)">
+                    </div>
+                </div>
+
+                <div class="sidebar-action-bar">
+                    <button id="packBtn" class="primary btn-full">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                        </svg>
+                        <span>Fetch &amp; Pack Repository</span>
+                    </button>
+                    <button id="abortBtn" class="danger btn-full" style="display: none;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                        <span>Cancel Fetch</span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Packaging Rules Form Layout (Unfolded Advanced Settings) -->
+            <section class="panel-section">
+                <div class="section-title">Packaging Rules</div>
+                <div class="grid-2">
+                    <div class="field">
+                        <label for="format">Output Schema <span class="help-icon" data-tooltip="Choose your desired LLM prompt structure (Claude XML, Markdown, Generic XML, or JSON).">?</span></label>
                         <select id="format">
-                            <option value="claude-xml">Anthropic Claude XML (&lt;documents&gt; standard)</option>
+                            <option value="claude-xml">Anthropic Claude XML</option>
                             <option value="markdown">Markdown Codeblocks</option>
-                            <option value="generic-xml">Generic XML (&lt;files&gt; CDATA)</option>
+                            <option value="generic-xml">Generic XML (CDATA)</option>
                             <option value="json">Structured JSON</option>
                         </select>
+                    </div>
+                    <div class="field">
+                        <label for="minifyMode">Code Minifier <span class="help-icon" data-tooltip="Optionally strip extra blank lines and language comments to optimize LLM token consumption.">?</span></label>
+                        <select id="minifyMode">
+                            <option value="none">None (Original)</option>
+                            <option value="basic">Basic (Lines)</option>
+                            <option value="aggressive">Aggressive (Comments)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid-2">
+                    <div class="field">
+                        <label for="chunkLimit">Chunk Token Limit <span class="help-icon" data-tooltip="Splits output into sequential multi-part context files if total tokens exceed this limit (e.g. 100,000 tokens). Set to 0 for a single file.">?</span></label>
+                        <input type="number" id="chunkLimit" value="0" min="0" step="10000" placeholder="0 = Single File">
                     </div>
                     <div class="field">
                         <label for="maxKb">Max File Size (KB) <span class="help-icon" data-tooltip="Files larger than this limit in kilobytes will be skipped automatically during fetch.">?</span></label>
@@ -62,84 +112,158 @@
 
                 <div class="grid-2">
                     <div class="field">
-                        <label for="throttleMs">Pacing Delay Between Fetches (ms) <span class="help-icon" data-tooltip="Sequential delay in milliseconds between file content downloads to respect secondary rate limits.">?</span></label>
+                        <label for="throttleMs">Pacing Delay (ms) <span class="help-icon" data-tooltip="Sequential delay in milliseconds between file content downloads to respect secondary rate limits.">?</span></label>
                         <input type="number" id="throttleMs" value="80" min="20" max="2000">
                     </div>
                     <div class="field">
-                        <label for="ignoreExt">Ignore File Extensions <span class="help-icon" data-tooltip="Comma-separated file extensions to exclude from source fetching (e.g. images, lockfiles, pdfs).">?</span></label>
+                        <label for="ignoreExt">Ignored Exts <span class="help-icon" data-tooltip="Comma-separated file extensions to exclude from source fetching (e.g. images, lockfiles, pdfs).">?</span></label>
                         <input type="text" id="ignoreExt" value="png, jpg, jpeg, svg, gif, zip, pdf, lock, min.js, ico, webp, woff, woff2, ttf, eot, mp4, mp3, wasm, pyc, so, dll, exe, bin, sqlite, parquet">
                     </div>
                 </div>
+            </section>
 
-                <div class="grid-2">
-                    <div class="field">
-                        <label for="minifyMode">Minify Code &amp; Strip Comments <span class="help-icon" data-tooltip="Optionally strip extra blank lines and language comments to optimize LLM token consumption.">?</span></label>
-                        <select id="minifyMode">
-                            <option value="none">None (Preserve Original Source)</option>
-                            <option value="basic">Basic (Strip Trailing Whitespace &amp; Extra Blank Lines)</option>
-                            <option value="aggressive">Aggressive (Remove Comments &amp; All Blank Lines)</option>
-                        </select>
+            <!-- Activity Log & Progress Bar -->
+            <section class="panel-section log-section">
+                <div class="section-title">Terminal Log</div>
+                <div class="progress-track" id="progressTrack">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div id="log"></div>
+            </section>
+        </aside>
+
+        <!-- Right Main Workspace -->
+        <main class="workspace">
+            <!-- Telemetry Ribbon -->
+            <div class="telemetry-ribbon">
+                <div class="telemetry-item">
+                    <span class="telemetry-label">Selected Files</span>
+                    <span class="telemetry-value" id="selectedCountDisplay"><b id="selectedCount">0</b> / <span id="manifestCount">0</span></span>
+                </div>
+                <div class="telemetry-item">
+                    <span class="telemetry-label">Est. BPE Tokens</span>
+                    <span class="telemetry-value">
+                        <b id="statTokens">0</b>
+                        <span id="selectedTokensBadge" class="badge">~0 tok</span>
+                    </span>
+                </div>
+                <div class="telemetry-item">
+                    <span class="telemetry-label">Raw Characters</span>
+                    <span class="telemetry-value"><b id="statChars">0</b></span>
+                </div>
+                <div class="telemetry-item">
+                    <span class="telemetry-label">Chunk Count</span>
+                    <span class="telemetry-value"><b id="statChunks">1</b></span>
+                </div>
+                <div class="telemetry-item text-right hidden-mobile">
+                    <span class="telemetry-label">Included Files</span>
+                    <span class="telemetry-value"><b id="statFiles">0</b></span>
+                </div>
+            </div>
+
+            <!-- Workspace Columns: File Tree + Preview -->
+            <div class="workspace-grid">
+                <!-- File Tree Explorer Panel -->
+                <div class="panel-card" id="treeCard">
+                    <div class="panel-header">
+                        <span class="panel-title">Manifest Explorer</span>
                     </div>
-                    <div class="field">
-                        <label for="chunkLimit">Chunk Token Limit (0 = Single File) <span class="help-icon" data-tooltip="Splits output into sequential multi-part context files if total tokens exceed this limit (e.g. 100,000 tokens). Set to 0 for a single file.">?</span></label>
-                        <input type="number" id="chunkLimit" value="0" min="0" step="10000" placeholder="e.g. 100000 for 100k token limits">
+
+                    <div class="tree-search-bar">
+                        <div class="search-input-wrapper">
+                            <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                            <input type="text" id="treeFilterInput" placeholder="Filter files (e.g. *.js, src/)...">
+                        </div>
+                    </div>
+
+                    <div class="tree-toolbar">
+                        <button id="selectAllBtn" class="secondary btn-xs">Select All</button>
+                        <button id="deselectAllBtn" class="secondary btn-xs">Deselect All</button>
+                        <button id="expandAllBtn" class="secondary btn-xs">Expand</button>
+                        <button id="collapseAllBtn" class="secondary btn-xs">Collapse</button>
+                        <div class="threshold-group">
+                            <button id="deselectLargeBtn" class="secondary btn-xs" title="Uncheck files larger than threshold">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                                    <line x1="12" y1="9" x2="12" y2="13"></line>
+                                    <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                                </svg>
+                                <span>Uncheck &gt;</span>
+                            </button>
+                            <input type="number" id="largeFileThresholdKb" value="50" min="1" max="5000" title="KB threshold">
+                            <span class="unit-label">KB</span>
+                        </div>
+                    </div>
+
+                    <div class="tree-viewport">
+                        <div id="treeEmptyState" class="empty-state">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                            <p>Enter a GitHub repository URL on the left to inspect and filter its file manifest.</p>
+                        </div>
+                        <div class="tree-container-box" id="treeContainer" style="display: none;"></div>
+                    </div>
+
+                    <div class="tree-footer">
+                        <button id="startDownloadBtn" class="primary btn-full">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                            </svg>
+                            <span>Pack Selected Files</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Context Output Inspector Panel -->
+                <div class="panel-card" id="outputCard">
+                    <div class="panel-header action-header">
+                        <div class="chunk-selector-group">
+                            <label for="chunkSelect" id="chunkSelectLabel" style="display:none;">Chunk:</label>
+                            <select id="chunkSelect" style="display:none;"></select>
+                            <span class="panel-title preview-title">Context Output</span>
+                        </div>
+                        <div class="output-actions">
+                            <button id="downloadBtn" class="primary btn-sm">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                                <span>Download File</span>
+                            </button>
+                            <button id="downloadAllBtn" class="secondary btn-sm" style="display:none;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                                </svg>
+                                <span>All Chunks</span>
+                            </button>
+                            <button id="copyBtn" class="secondary btn-sm">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                </svg>
+                                <span>Copy</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="output-viewport">
+                        <div id="outputEmptyState" class="empty-state">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                                <polyline points="13 2 13 9 20 9"></polyline>
+                            </svg>
+                            <p>Context output bundle will be generated here after packing selected files.</p>
+                        </div>
+                        <textarea id="previewArea" class="preview" readonly style="display: none;"></textarea>
                     </div>
                 </div>
             </div>
-        </details>
-
-        <div class="btn-group">
-            <button id="packBtn" class="primary">🚀 Fetch &amp; Pack Repository</button>
-            <button id="shareUrlBtn" class="secondary">🔗 Copy Deep-Link URL</button>
-            <button id="abortBtn" class="danger" style="display: none;">Cancel</button>
-        </div>
-
-        <div class="progress-track" id="progressTrack">
-            <div class="progress-fill" id="progressFill"></div>
-        </div>
-        <div id="log"></div>
-    </div>
-
-    <!-- Interactive Tree Selection Card -->
-    <div class="card" id="treeCard">
-        <div class="output-meta">
-            <span>Manifest Total: <b id="manifestCount">0</b> files</span>
-            <span>Selected for Download: <b id="selectedCount">0</b> files <span id="selectedTokensBadge" class="badge" style="margin-left:5px;">~0 tok</span></span>
-        </div>
-        <div class="tree-actions">
-            <input type="text" id="treeFilterInput" placeholder="🔍 Search or filter files (e.g. *.js, src/)..." style="flex: 1; min-width: 180px; padding: 0.4rem 0.6rem; font-size: 0.85rem;">
-            <button id="selectAllBtn" class="secondary">Select All</button>
-            <button id="deselectAllBtn" class="secondary">Deselect All</button>
-            <button id="expandAllBtn" class="secondary">Expand All</button>
-            <button id="collapseAllBtn" class="secondary">Collapse All</button>
-            <div style="display: flex; align-items: center; gap: 5px;">
-                <button id="deselectLargeBtn" class="secondary" style="white-space: nowrap;">⚠️ Uncheck &gt;</button>
-                <input type="number" id="largeFileThresholdKb" value="50" min="1" max="5000" style="width: 70px; padding: 0.35rem; font-size: 0.8rem;" title="KB threshold">
-                <span style="font-size: 0.8rem; color: var(--text-muted);">KB</span>
-            </div>
-            <button id="startDownloadBtn" class="primary">⚡ Pack Selected Files</button>
-        </div>
-        <div class="tree-container-box" id="treeContainer"></div>
-    </div>
-
-    <!-- Output Card -->
-    <div class="card" id="outputCard">
-        <div class="output-meta">
-            <span>Included Files: <b id="statFiles">0</b></span>
-            <span>Est. BPE Tokens: <b id="statTokens">0</b> <span class="badge">Tiktoken / Claude calibrated</span></span>
-            <span>Raw Characters: <b id="statChars">0</b></span>
-            <span>Chunk Count: <b id="statChunks">1</b></span>
-        </div>
-
-        <div class="btn-group">
-            <label for="chunkSelect" id="chunkSelectLabel" style="display:none; font-size: 0.85rem; font-weight: bold;">Select Chunk:</label>
-            <select id="chunkSelect" style="display:none; padding: 0.4rem;"></select>
-            <button id="downloadBtn" class="primary">📥 Download File</button>
-            <button id="downloadAllBtn" class="secondary" style="display:none;">📦 Download All Chunks</button>
-            <button id="copyBtn" class="secondary">📋 Copy to Clipboard</button>
-        </div>
-
-        <textarea id="previewArea" class="preview" readonly></textarea>
+        </main>
     </div>
 </div>
 
