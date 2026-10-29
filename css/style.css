@@ -363,6 +363,10 @@ html, body {
     gap: 0.35rem;
 }
 
+.option-field.full-width {
+    grid-column: 1 / -1;
+}
+
 .option-field label {
     font-size: 0.8125rem;
     font-weight: 600;
@@ -376,6 +380,125 @@ html, body {
     padding: 0.45rem 0.6rem;
     color: var(--ink);
     font-size: 0.875rem;
+}
+
+.field-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.char-count {
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    color: var(--ink-soft);
+}
+
+.instructions-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.35rem;
+}
+
+.preset-buttons {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.preset-label {
+    font-size: 0.75rem;
+    color: var(--ink-soft);
+    margin-right: 0.2rem;
+}
+
+#aiInstructions {
+    width: 100%;
+    background: var(--sheet);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-control);
+    padding: 0.5rem 0.65rem;
+    color: var(--ink);
+    font-size: 0.875rem;
+    font-family: var(--font-sans);
+    resize: vertical;
+    min-height: 70px;
+}
+
+#aiInstructions:focus {
+    border-color: var(--cobalt);
+}
+
+/* Secrets Warning Panel */
+.secrets-warning-panel {
+    background: var(--over-bg);
+    border-bottom: 2px solid var(--over);
+    padding: 0.75rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.secrets-warning-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.secrets-warning-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 700;
+    color: var(--over);
+    font-size: 0.875rem;
+}
+
+.secrets-list-wrapper {
+    max-height: 160px;
+    overflow-y: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-control);
+    background: var(--sheet);
+}
+
+.secrets-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78125rem;
+    text-align: left;
+}
+
+.secrets-table th, .secrets-table td {
+    padding: 0.35rem 0.6rem;
+    border-bottom: 1px solid var(--line);
+}
+
+.secrets-table th {
+    background: var(--page);
+    font-weight: 600;
+    color: var(--ink);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.secrets-table td {
+    font-family: var(--font-mono);
+    color: var(--ink);
+    word-break: break-all;
+}
+
+.secrets-help-text {
+    font-size: 0.75rem;
+    color: var(--ink-soft);
+    margin-top: 0.2rem;
 }
 
 /* Budget Meter Banner */
