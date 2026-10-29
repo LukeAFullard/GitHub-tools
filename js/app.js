@@ -266,7 +266,7 @@ dom.packBtn.addEventListener('click', async () => {
 
         let targetBranch = dom.branch.value.trim();
 
-        if (!targetBranch) {
+        if (!targetBranch || pat) {
             const repoMeta = await resolveDefaultBranch(
                 repoInfo.owner,
                 repoInfo.repo,
@@ -274,7 +274,7 @@ dom.packBtn.addEventListener('click', async () => {
                 abortController.signal,
                 updateRateLimitUI
             );
-            targetBranch = repoMeta.branch;
+            if (!targetBranch) targetBranch = repoMeta.branch;
             isPrivateRepo = repoMeta.isPrivate;
         }
 
@@ -321,7 +321,7 @@ dom.packBtn.addEventListener('click', async () => {
         const treeControls = renderInteractiveTree(
             processable,
             dom.treeContainer,
-            (selectedNodes) => {
+            async (selectedNodes) => {
                 activeSelection = selectedNodes;
                 currentActiveSelection = selectedNodes;
                 dom.selectedCount.textContent = activeSelection.length;
@@ -329,8 +329,11 @@ dom.packBtn.addEventListener('click', async () => {
                     const stats = treeControls.getSelectedStats();
                     dom.selectedTokensBadge.textContent = `~${stats.estTokens.toLocaleString()} tok`;
                 }
-                // If files are already cached, update packed bundle dynamically
+                // If files are already cached, fetch any missing delta files and update packed bundle dynamically
                 if (cachedRawFiles && cachedRawFiles.length > 0) {
+                    if (currentActiveSelection && currentActiveSelection.length > 0) {
+                        await fetchSelectedFilesDelta(currentActiveSelection);
+                    }
                     repackBundleInMemory(currentActiveSelection);
                 }
             }

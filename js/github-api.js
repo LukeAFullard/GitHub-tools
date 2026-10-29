@@ -162,6 +162,10 @@ export async function fetchFileContent(owner, repo, branch, path, pat, signal, o
             if (res.status === 429 || res.status === 403) {
                 return { success: false, backoff: 60, status: res.status };
             }
+            if ((res.status === 404 || res.status === 403) && pat) {
+                // Private repository detected; mark as private for remaining files
+                isPrivate = true;
+            }
         } catch (err) {
             if (err.name === 'AbortError') throw err;
         }
