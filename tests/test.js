@@ -13,7 +13,7 @@ import {
 } from '../js/formatters.js';
 
 import { minifyCode } from '../js/minifier.js';
-import { parseRepoInput, extractRateLimitHeaders } from '../js/github-api.js';
+import { parseRepoInput, extractRateLimitHeaders, fetchRepoZipball } from '../js/github-api.js';
 import { estimateTokens } from '../js/tokenizer.js';
 import { generateTree } from '../js/tree.js';
 
@@ -160,4 +160,8 @@ test('tree: generateTree handles prototype property collisions safely', () => {
     assert.ok(ascii.includes('toString'));
     assert.ok(ascii.includes('constructor'));
     assert.ok(ascii.includes('valueOf'));
+});
+
+test('github-api: fetchRepoZipball export function exists', () => {
+    assert.equal(typeof fetchRepoZipball, 'function');
 });
