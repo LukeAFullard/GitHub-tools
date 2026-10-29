@@ -24,7 +24,15 @@ export function sleep(ms, signal) {
 
 export function parseRepoInput(input) {
     if (!input || typeof input !== 'string') return null;
-    let cleaned = input.trim().replace(/^https?:\/\/github\.com\//i, '');
+    let urlStr = input.trim();
+    try {
+        if (urlStr.startsWith('http://') || urlStr.startsWith('https://')) {
+            const urlObj = new URL(urlStr);
+            urlStr = urlObj.pathname;
+        }
+    } catch (_) {}
+
+    let cleaned = urlStr.replace(/^https?:\/\/github\.com\//i, '');
     cleaned = cleaned.replace(/^\/+|\/+$/g, '');
     const parts = cleaned.split('/');
     if (parts.length < 2) return null;
@@ -38,7 +46,7 @@ export function parseRepoInput(input) {
     let branch = null;
     let subpath = null;
 
-    if (parts.length >= 4 && parts[2] === 'tree') {
+    if (parts.length >= 4 && (parts[2] === 'tree' || parts[2] === 'blob')) {
         branch = parts[3];
         if (parts.length > 4) {
             subpath = parts.slice(4).join('/');
@@ -58,12 +66,33 @@ export function extractRateLimitHeaders(response) {
         const parsed = parseInt(val, 10);
         return Number.isNaN(parsed) ? null : parsed;
     };
+    const parseRetryAfter = () => {
+        const val = response.headers.get('retry-after');
+        if (!val) return null;
+        const seconds = parseInt(val, 10);
+        if (!Number.isNaN(seconds)) return seconds;
+        const dateMs = Date.parse(val);
+        if (!Number.isNaN(dateMs)) {
+            const diffSec = Math.ceil((dateMs - Date.now()) / 1000);
+            return diffSec > 0 ? diffSec : 0;
+        }
+        return null;
+    };
     return {
         remaining: parseHeaderInt('x-ratelimit-remaining'),
         limit: parseHeaderInt('x-ratelimit-limit'),
         reset: parseHeaderInt('x-ratelimit-reset'),
-        retryAfter: parseHeaderInt('retry-after')
+        retryAfter: parseRetryAfter()
     };
+}
+
+export function isRateLimitResponse(response, headersMeta) {
+    if (response.status === 429) return true;
+    if (response.status === 403) {
+        if (headersMeta && headersMeta.remaining === 0) return true;
+        if (headersMeta && headersMeta.retryAfter) return true;
+    }
+    return false;
 }
 
 function getAuthHeader(pat) {
@@ -110,21 +139,32 @@ export async function fetchRepoTree(owner, repo, branch, pat, signal, onHeaders)
     const branchEncoded = branch.split('/').map(encodeURIComponent).join('/');
     const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${branchEncoded}?recursive=1`;
 
-    const res = await fetch(url, { headers, signal });
-    if (onHeaders) onHeaders(extractRateLimitHeaders(res));
-
-    if (!res.ok) {
+    let retries = 0;
+    while (retries < 3) {
+        const res = await fetch(url, { headers, signal });
         const headersMeta = extractRateLimitHeaders(res);
-        if (res.status === 403 || res.status === 429) {
-            throw new Error(`Rate limit hit. ${headersMeta.retryAfter ? `Backoff: ${headersMeta.retryAfter}s.` : 'Provide a PAT to continue.'}`);
+        if (onHeaders) onHeaders(headersMeta);
+
+        if (res.ok) {
+            const data = await res.json();
+            const tree = data.tree || [];
+            tree.truncated = Boolean(data.truncated);
+            return tree;
+        }
+
+        const isRateLimit = isRateLimitResponse(res, headersMeta);
+        if (isRateLimit && retries < 2) {
+            retries++;
+            const backoff = headersMeta.retryAfter || 60;
+            await sleep(Math.min(backoff, 60) * 1000, signal);
+            continue;
+        }
+
+        if (res.status === 403 && !isRateLimit) {
+            throw new Error(`Access forbidden (${res.status}): Permission denied or authentication failed.`);
         }
         throw new Error(`Tree lookup failed (${res.status}): ${res.statusText}`);
     }
-
-    const data = await res.json();
-    const tree = data.tree || [];
-    tree.truncated = Boolean(data.truncated);
-    return tree;
 }
 
 export async function fetchRepoZipball(owner, repo, branch, pat, signal, onHeaders) {
@@ -182,8 +222,8 @@ export async function fetchFileContent(owner, repo, branch, path, pat, signal, o
         const res = await fetch(url, { headers, signal });
         if (onHeaders) onHeaders(extractRateLimitHeaders(res));
 
-        if (res.status === 429 || res.status === 403) {
-            const headersMeta = extractRateLimitHeaders(res);
+        const headersMeta = extractRateLimitHeaders(res);
+        if (isRateLimitResponse(res, headersMeta)) {
             const retryAfter = headersMeta.retryAfter || 60;
             return { success: false, backoff: retryAfter, status: res.status };
         }

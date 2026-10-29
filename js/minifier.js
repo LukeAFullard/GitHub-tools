@@ -2,6 +2,15 @@
  * Lightweight Client-Side Code Minifier & Whitespace Compressor for LLM Context
  */
 
+function handleNormalNewline(output) {
+    const lastNL = output.lastIndexOf('\n');
+    const currentLine = output.slice(lastNL + 1);
+    if (currentLine.trim().length === 0) {
+        return output.slice(0, lastNL + 1);
+    }
+    return output.trimEnd() + '\n';
+}
+
 function stripJsComments(code) {
     let output = '';
     let i = 0;
@@ -14,6 +23,12 @@ function stripJsComments(code) {
 
         if (state === 'normal') {
             if (char === '/' && next === '/') {
+                const prevTrimmed = output.trimEnd();
+                if (/(?:https?|ftp|file):$/i.test(prevTrimmed)) {
+                    output += char;
+                    i++;
+                    continue;
+                }
                 state = 'line_comment';
                 i += 2;
                 continue;
@@ -22,11 +37,11 @@ function stripJsComments(code) {
                 i += 2;
                 continue;
             } else if (char === '/') {
-                // Determine if slash is start of RegExp literal or division operator
                 const prevTrimmed = output.trimEnd();
                 const lastChar = prevTrimmed[prevTrimmed.length - 1];
                 const keywordRegex = /\b(?:return|case|typeof|throw|delete|void|in|of|instanceof|new|yield|await)$/;
-                const isRegexp = !lastChar || '=(:[{},;!&|?+*^%~<>'.includes(lastChar) || keywordRegex.test(prevTrimmed);
+                const isUrl = /(?:https?|ftp|file):$/i.test(prevTrimmed);
+                const isRegexp = !isUrl && (!lastChar || '=(:[{},;!&|?+*^%~<>'.includes(lastChar) || keywordRegex.test(prevTrimmed));
 
                 if (isRegexp) {
                     state = 'regex';
@@ -47,6 +62,9 @@ function stripJsComments(code) {
             } else if (char === '`') {
                 state = 'template_string';
                 output += char;
+                i++;
+            } else if (char === '\n') {
+                output = handleNormalNewline(output);
                 i++;
             } else {
                 output += char;
@@ -129,22 +147,31 @@ function stripJsComments(code) {
         } else if (state === 'line_comment') {
             if (char === '\n') {
                 state = 'normal';
-                output += '\n';
+                output = handleNormalNewline(output);
             }
             i++;
         } else if (state === 'block_comment') {
             if (char === '*' && next === '/') {
                 state = 'normal';
                 i += 2;
+                const prevChar = output[output.length - 1];
+                const nextChar = code[i];
+                if (prevChar && nextChar && /[a-zA-Z0-9_$]/.test(prevChar) && /[a-zA-Z0-9_$]/.test(nextChar)) {
+                    output += ' ';
+                }
                 continue;
             }
             if (char === '\n') {
-                output += '\n';
+                output = handleNormalNewline(output);
             }
             i++;
         }
     }
-    return output;
+    const lastNL = output.lastIndexOf('\n');
+    if (output.slice(lastNL + 1).trim().length === 0) {
+        output = output.slice(0, lastNL + 1);
+    }
+    return output.trim();
 }
 
 function stripHashComments(code) {
@@ -166,7 +193,7 @@ function stripHashComments(code) {
         const next2 = code[i + 2];
 
         if (state === 'normal') {
-            if (char === '#' && (i === 0 || code[i - 1] !== '\\')) {
+            if (char === '#' && (i === 0 || /\s/.test(code[i - 1])) && (i === 0 || code[i - 1] !== '\\')) {
                 state = 'line_comment';
                 i++;
                 continue;
@@ -185,6 +212,9 @@ function stripHashComments(code) {
             } else if (char === '"') {
                 state = 'double_string';
                 output += char;
+                i++;
+            } else if (char === '\n') {
+                output = handleNormalNewline(output);
                 i++;
             } else {
                 output += char;
@@ -245,42 +275,41 @@ function stripHashComments(code) {
         } else if (state === 'line_comment') {
             if (char === '\n') {
                 state = 'normal';
-                output += '\n';
+                output = handleNormalNewline(output);
             }
             i++;
         }
     }
-    return output;
+    const lastNL = output.lastIndexOf('\n');
+    if (output.slice(lastNL + 1).trim().length === 0) {
+        output = output.slice(0, lastNL + 1);
+    }
+    return output.trim();
 }
 
 export function minifyCode(content, filename = '', mode = 'none') {
     if (!content || mode === 'none') return content;
 
-    let lines = content.split(/\r?\n/).map(line => line.trimEnd());
-
-    if (mode === 'basic' || mode === 'aggressive') {
-        lines = lines.filter((line, index, arr) => {
-            const isEmpty = line.trim().length === 0;
-            if (!isEmpty) return true;
-            if (mode === 'aggressive') return false;
-            const prevIsEmpty = index > 0 && arr[index - 1].trim().length === 0;
-            return !prevIsEmpty;
-        });
+    if (mode === 'basic') {
+        return content.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
     }
-
-    let result = lines.join('\n').trim();
 
     if (mode === 'aggressive') {
         const ext = filename.includes('.') ? filename.split('.').pop().toLowerCase() : '';
+        let result = content.replace(/\r\n/g, '\n');
+
         if (['js', 'ts', 'jsx', 'tsx', 'css', 'scss', 'c', 'cpp', 'h', 'java', 'go', 'rs', 'swift', 'php'].includes(ext)) {
             result = stripJsComments(result);
         } else if (['py', 'sh', 'bash', 'yaml', 'yml', 'rb'].includes(ext)) {
             result = stripHashComments(result);
         } else if (['html', 'xml', 'svg'].includes(ext)) {
             result = result.replace(/<!--[\s\S]*?-->/g, '');
+            result = result.split('\n').map(l => l.trimEnd()).filter(l => l.trim().length > 0).join('\n');
+        } else {
+            result = result.split('\n').map(l => l.trimEnd()).filter(l => l.trim().length > 0).join('\n');
         }
-        result = result.split('\n').map(l => l.trimEnd()).filter(l => l.trim().length > 0).join('\n');
+        return result.trim();
     }
 
-    return result;
+    return content;
 }

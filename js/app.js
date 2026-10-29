@@ -28,6 +28,45 @@ let cachedBranch = "";
 let currentActiveSelection = [];
 let isPrivateRepo = false;
 
+function updateCachedRawFiles(newFiles) {
+    const map = new Map(cachedRawFiles.map(f => [f.path, f]));
+    for (const f of newFiles) {
+        if (f && f.path) map.set(f.path, f);
+    }
+    cachedRawFiles = Array.from(map.values());
+}
+
+function isBinaryContent(content) {
+    if (!content) return false;
+    const sample = content.slice(0, 1024);
+    if (sample.includes('\0')) return true;
+    let nonPrintable = 0;
+    for (let i = 0; i < sample.length; i++) {
+        const code = sample.charCodeAt(i);
+        if (code < 9 || (code > 13 && code < 32) || code === 65533) {
+            nonPrintable++;
+        }
+    }
+    return sample.length > 0 && (nonPrintable / sample.length) > 0.05;
+}
+
+function clearOutputState() {
+    generatedChunks = [];
+    activeChunkIndex = 0;
+    packedOutputText = "";
+    if (dom.previewArea) dom.previewArea.value = "";
+    if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'flex';
+    if (dom.previewArea) dom.previewArea.style.display = 'none';
+    if (dom.statFiles) dom.statFiles.textContent = '0';
+    if (dom.statChars) dom.statChars.textContent = '0';
+    if (dom.statTokens) dom.statTokens.textContent = '0';
+    if (dom.statChunks) dom.statChunks.textContent = '0';
+    if (dom.chunkSelectLabel) dom.chunkSelectLabel.style.display = 'none';
+    if (dom.chunkSelect) dom.chunkSelect.style.display = 'none';
+    if (dom.downloadAllBtn) dom.downloadAllBtn.style.display = 'none';
+    if (dom.chunkSelect) dom.chunkSelect.innerHTML = '';
+}
+
 const dom = {
     repoUrl: document.getElementById('repoUrl'),
     branch: document.getElementById('branch'),
@@ -143,24 +182,21 @@ function getDeepLinkUrl() {
 }
 
 async function repackBundleInMemory(activeSelectionNodes = currentActiveSelection) {
-    if (!cachedRawFiles || cachedRawFiles.length === 0 || !cachedRepoInfo) return;
-
     let selection = activeSelectionNodes || currentActiveSelection;
-    let targetFiles = cachedRawFiles;
 
-    if (selection && Array.isArray(selection) && selection.length > 0) {
-        const selectedPaths = new Set(selection.map(n => n.path));
-        targetFiles = cachedRawFiles.filter(f => selectedPaths.has(f.path));
-    } else if (selection && Array.isArray(selection) && selection.length === 0) {
-        if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'flex';
-        if (dom.previewArea) dom.previewArea.style.display = 'none';
-        log(`[WARN] No files selected for packing.`);
+    if (!cachedRawFiles || cachedRawFiles.length === 0 || !cachedRepoInfo || !selection || selection.length === 0) {
+        clearOutputState();
+        if (selection && selection.length === 0) {
+            log(`[WARN] No files selected for packing.`);
+        }
         return;
     }
 
+    const selectedPaths = new Set(selection.map(n => n.path));
+    const targetFiles = cachedRawFiles.filter(f => selectedPaths.has(f.path));
+
     if (targetFiles.length === 0) {
-        if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'flex';
-        if (dom.previewArea) dom.previewArea.style.display = 'none';
+        clearOutputState();
         return;
     }
 
@@ -246,6 +282,7 @@ dom.packBtn.addEventListener('click', async () => {
     cachedBranch = "";
     currentActiveSelection = [];
     isPrivateRepo = false;
+    clearOutputState();
 
     // Auto-fill branch and subpath filter if present in pasted GitHub URL
     if (repoInfo.branch && dom.branch && !dom.branch.value.trim()) {
@@ -299,7 +336,7 @@ dom.packBtn.addEventListener('click', async () => {
         );
 
         if (rawTree.truncated) {
-            log(`[WARN] Warning: Git repository tree is truncated by GitHub API (>10,000 files). Some deeply nested files may not be visible.`);
+            log(`[WARN] Warning: Git repository tree is truncated by GitHub API (100,000 entries / 7MB limit). Some deeply nested files may not be visible.`);
         }
 
         // Filter valid source candidates
@@ -370,6 +407,11 @@ dom.packBtn.addEventListener('click', async () => {
             dom.treeFilterInput.oninput = () => treeControls.filter(dom.treeFilterInput.value);
             if (repoInfo.subpath) {
                 treeControls.filter(repoInfo.subpath);
+                if (treeControls.selectBySubpath) {
+                    treeControls.selectBySubpath(repoInfo.subpath);
+                    activeSelection = treeControls.getSelectedNodes();
+                    currentActiveSelection = activeSelection;
+                }
             }
         }
 
@@ -377,58 +419,68 @@ dom.packBtn.addEventListener('click', async () => {
 
         let hasDownloaded = false;
 
+        let isDeltaFetching = false;
         async function fetchSelectedFilesDelta(selectionToFetch) {
-            const cachedPaths = new Set(cachedRawFiles.map(f => f.path));
-            const missingNodes = selectionToFetch.filter(n => !cachedPaths.has(n.path));
+            if (isDeltaFetching) return;
+            isDeltaFetching = true;
+            try {
+                const cachedPaths = new Set(cachedRawFiles.map(f => f.path));
+                const missingNodes = selectionToFetch.filter(n => !cachedPaths.has(n.path));
 
-            if (missingNodes.length === 0) return;
+                if (missingNodes.length === 0) return;
 
-            log(`[FETCH] Fetching ${missingNodes.length} newly checked file(s)...`);
-            const concurrency = 5;
-            let index = 0;
-            const results = new Array(missingNodes.length);
+                log(`[FETCH] Fetching ${missingNodes.length} newly checked file(s)...`);
+                const concurrency = 5;
+                let index = 0;
+                const results = new Array(missingNodes.length);
 
-            async function worker() {
-                while (index < missingNodes.length) {
-                    if (abortController.signal && abortController.signal.aborted) break;
-                    const i = index++;
-                    const node = missingNodes[i];
-                    log(`[FETCH] Fetching delta ${node.path}...`);
+                async function worker() {
+                    while (index < missingNodes.length) {
+                        if (abortController.signal && abortController.signal.aborted) break;
+                        const i = index++;
+                        const node = missingNodes[i];
+                        log(`[FETCH] Fetching delta ${node.path}...`);
 
-                    let retries = 0;
-                    let result = null;
-                    while (retries < 3) {
-                        result = await fetchFileContent(
-                            repoInfo.owner,
-                            repoInfo.repo,
-                            targetBranch,
-                            node.path,
-                            pat,
-                            abortController.signal,
-                            updateRateLimitUI,
-                            isPrivateRepo
-                        );
-                        if (result.backoff) {
-                            retries++;
-                            await sleep(Math.min(result.backoff, 60) * 1000, abortController.signal);
-                            continue;
+                        let retries = 0;
+                        let result = null;
+                        while (retries < 3) {
+                            result = await fetchFileContent(
+                                repoInfo.owner,
+                                repoInfo.repo,
+                                targetBranch,
+                                node.path,
+                                pat,
+                                abortController.signal,
+                                updateRateLimitUI,
+                                isPrivateRepo
+                            );
+                            if (result && result.backoff) {
+                                retries++;
+                                await sleep(Math.min(result.backoff, 60) * 1000, abortController.signal);
+                                continue;
+                            }
+                            break;
                         }
-                        break;
-                    }
-                    if (result && result.success) {
-                        const sample = result.content.slice(0, 512);
-                        if (!sample.includes('\0')) {
-                            results[i] = { path: node.path, rawContent: result.content };
+                        if (result && result.success) {
+                            if (isBinaryContent(result.content)) {
+                                log(`[WARN] Delta skip ${node.path}: Binary content detected.`);
+                            } else {
+                                results[i] = { path: node.path, rawContent: result.content };
+                            }
+                        } else {
+                            log(`[ERROR] Failed to fetch delta ${node.path}${result && result.error ? `: ${result.error}` : ''}`);
                         }
                     }
                 }
+
+                const workers = Array.from({ length: Math.min(concurrency, missingNodes.length) }, () => worker());
+                await Promise.all(workers);
+
+                const newlyFetched = results.filter(Boolean);
+                updateCachedRawFiles(newlyFetched);
+            } finally {
+                isDeltaFetching = false;
             }
-
-            const workers = Array.from({ length: Math.min(concurrency, missingNodes.length) }, () => worker());
-            await Promise.all(workers);
-
-            const newlyFetched = results.filter(Boolean);
-            cachedRawFiles = [...cachedRawFiles, ...newlyFetched];
         }
 
         await new Promise((resolve, reject) => {
@@ -459,14 +511,17 @@ dom.packBtn.addEventListener('click', async () => {
             }
         });
 
-        if (activeSelection.length === 0) {
+        const selectionSnapshot = [...currentActiveSelection];
+
+        if (selectionSnapshot.length === 0) {
             log('[WARN] No files selected for packing.');
+            clearOutputState();
             return;
         }
 
-        log(`[FETCH] Starting parallel download for ${activeSelection.length} selected file(s) (concurrency: 5)...`);
+        log(`[FETCH] Starting parallel download for ${selectionSnapshot.length} selected file(s) (concurrency: 5)...`);
 
-        const results = new Array(activeSelection.length);
+        const results = new Array(selectionSnapshot.length);
         let emptyCount = 0;
         let failedCount = 0;
         let completedCount = 0;
@@ -475,11 +530,11 @@ dom.packBtn.addEventListener('click', async () => {
         let index = 0;
 
         async function worker() {
-            while (index < activeSelection.length) {
+            while (index < selectionSnapshot.length) {
                 if (abortController.signal && abortController.signal.aborted) break;
                 const i = index++;
-                const node = activeSelection[i];
-                log(`[FETCH] [${i + 1}/${activeSelection.length}] Fetching ${node.path}...`);
+                const node = selectionSnapshot[i];
+                log(`[FETCH] [${i + 1}/${selectionSnapshot.length}] Fetching ${node.path}...`);
 
                 let retries = 0;
                 let result = null;
@@ -496,7 +551,7 @@ dom.packBtn.addEventListener('click', async () => {
                         isPrivateRepo
                     );
 
-                    if (result.backoff) {
+                    if (result && result.backoff) {
                         retries++;
                         const backoffTime = Math.min(result.backoff, 60);
                         log(`[LIMIT] Rate limit warning for ${node.path}. Retry ${retries}/3 cooling down for ${backoffTime}s...`);
@@ -511,9 +566,8 @@ dom.packBtn.addEventListener('click', async () => {
                     if (rawContent.length === 0) {
                         emptyCount++;
                     }
-                    const sample = rawContent.slice(0, 512);
-                    if (sample.includes('\0')) {
-                        log(`[WARN] Skipping ${node.path}: Binary content detected (null bytes).`);
+                    if (isBinaryContent(rawContent)) {
+                        log(`[WARN] Skipping ${node.path}: Binary content detected.`);
                     } else {
                         results[i] = { path: node.path, rawContent: rawContent };
                     }
@@ -523,7 +577,7 @@ dom.packBtn.addEventListener('click', async () => {
                 }
 
                 completedCount++;
-                dom.progressFill.style.width = `${Math.round((completedCount / activeSelection.length) * 100)}%`;
+                dom.progressFill.style.width = `${Math.round((completedCount / selectionSnapshot.length) * 100)}%`;
 
                 if (throttleMs > 0) {
                     await sleep(throttleMs, abortController.signal);
@@ -531,7 +585,7 @@ dom.packBtn.addEventListener('click', async () => {
             }
         }
 
-        const workers = Array.from({ length: Math.min(concurrency, activeSelection.length) }, () => worker());
+        const workers = Array.from({ length: Math.min(concurrency, selectionSnapshot.length) }, () => worker());
         await Promise.all(workers);
 
         const collectedFiles = results.filter(Boolean);

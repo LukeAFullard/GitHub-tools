@@ -17,14 +17,15 @@ export function estimateTokensAsync(text) {
                 worker = new Worker(new URL('./tokenizer.worker.js', import.meta.url), { type: 'module' });
                 worker.onmessage = (e) => {
                     const { id, tokens } = e.data;
-                    if (callbacks.has(id)) {
-                        callbacks.get(id)(tokens);
+                    const req = callbacks.get(id);
+                    if (req) {
+                        req.resolve(tokens);
                         callbacks.delete(id);
                     }
                 };
                 worker.onerror = () => {
-                    for (const [id, cb] of callbacks.entries()) {
-                        cb(estimateTokens(text));
+                    for (const [, req] of callbacks.entries()) {
+                        req.resolve(estimateTokens(req.text));
                     }
                     callbacks.clear();
                     if (worker) {
@@ -38,7 +39,7 @@ export function estimateTokensAsync(text) {
             }
         }
         const currentId = ++msgId;
-        callbacks.set(currentId, resolve);
+        callbacks.set(currentId, { resolve, text });
         try {
             worker.postMessage({ id: currentId, text });
         } catch (_) {
