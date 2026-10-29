@@ -30,6 +30,20 @@ export function generateTree(paths) {
 /**
  * Builds an interactive HTML DOM tree with selection checkboxes from a list of file nodes.
  */
+function calculateDirSize(dirItem) {
+    let sum = 0;
+    if (!dirItem || !dirItem.children) return 0;
+    for (const key of Object.keys(dirItem.children)) {
+        const child = dirItem.children[key];
+        if (child.isDir) {
+            sum += calculateDirSize(child);
+        } else {
+            sum += child.size || 0;
+        }
+    }
+    return sum;
+}
+
 export function renderInteractiveTree(nodes, container, onSelectionChange) {
     container.innerHTML = '';
 
@@ -86,8 +100,16 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
         label.className = item.isDir ? 'tree-folder-label' : 'tree-file-label';
         label.textContent = item.isDir ? `📁 ${item.name}` : `📄 ${item.name}`;
 
+        const sizeBadge = document.createElement('span');
+        sizeBadge.className = 'tree-size-badge';
+        const bytes = item.isDir ? calculateDirSize(item) : (item.size || 0);
+        const kbStr = bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`;
+        const estTok = Math.round(bytes / 3.8);
+        sizeBadge.textContent = ` (${kbStr} ~${estTok.toLocaleString()} tok)`;
+
         row.appendChild(checkbox);
         row.appendChild(label);
+        row.appendChild(sizeBadge);
         li.appendChild(row);
 
         if (item.isDir) {

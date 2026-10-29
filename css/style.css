@@ -259,6 +259,11 @@ textarea.preview {
     color: var(--text-main);
 }
 
+.tree-size-badge {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
 .tree-actions {
     display: flex;
     gap: 10px;

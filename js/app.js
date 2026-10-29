@@ -22,6 +22,10 @@ let packedOutputText = "";
 let outputExt = "xml";
 let outputMime = "application/xml";
 
+let cachedRawFiles = []; // [{ path: string, rawContent: string }]
+let cachedRepoInfo = null;
+let cachedBranch = "";
+
 const dom = {
     repoUrl: document.getElementById('repoUrl'),
     branch: document.getElementById('branch'),
@@ -95,6 +99,74 @@ async function refreshRateLimitBadge() {
 
 dom.pat.addEventListener('change', refreshRateLimitBadge);
 refreshRateLimitBadge();
+
+async function repackBundleInMemory() {
+    if (!cachedRawFiles || cachedRawFiles.length === 0 || !cachedRepoInfo) return;
+
+    const minifyMode = dom.minifyMode ? dom.minifyMode.value : 'none';
+    log(`⚡ Re-packing cached files in memory (${dom.format.value}, minify: ${minifyMode})...`);
+
+    const processedFiles = cachedRawFiles.map(f => ({
+        path: f.path,
+        content: minifyCode(f.rawContent, f.path, minifyMode)
+    }));
+
+    const paths = processedFiles.map(f => f.path);
+    const treeAscii = generateTree(paths);
+    const chunkLimitVal = parseInt(dom.chunkLimit.value, 10) || 0;
+
+    generatedChunks = chunkContextOutput(
+        dom.format.value,
+        cachedRepoInfo,
+        cachedBranch,
+        treeAscii,
+        processedFiles,
+        chunkLimitVal,
+        estimateTokens
+    );
+
+    let limitExceeded = false;
+    for (const chunk of generatedChunks) {
+        if (chunk.exceedsLimit) limitExceeded = true;
+    }
+    if (limitExceeded) {
+        log(`⚠️ Warning: One or more single files exceed your requested chunk limit of ${chunkLimitVal} tokens.`);
+    }
+
+    activeChunkIndex = 0;
+    const firstChunk = generatedChunks[0];
+    packedOutputText = firstChunk.text;
+    outputExt = firstChunk.ext;
+    outputMime = firstChunk.mime;
+
+    const estTokens = await estimateTokensAsync(packedOutputText);
+
+    dom.statFiles.textContent = processedFiles.length;
+    dom.statChars.textContent = packedOutputText.length.toLocaleString();
+    dom.statTokens.textContent = estTokens.toLocaleString();
+    dom.statChunks.textContent = generatedChunks.length;
+
+    if (generatedChunks.length > 1) {
+        dom.chunkSelectLabel.style.display = 'inline-block';
+        dom.chunkSelect.style.display = 'inline-block';
+        dom.downloadAllBtn.style.display = 'inline-flex';
+        dom.chunkSelect.innerHTML = generatedChunks.map((_, idx) => `<option value="${idx}">Part ${idx + 1} of ${generatedChunks.length}</option>`).join('');
+    } else {
+        dom.chunkSelectLabel.style.display = 'none';
+        dom.chunkSelect.style.display = 'none';
+        dom.downloadAllBtn.style.display = 'none';
+        dom.chunkSelect.innerHTML = '';
+    }
+
+    dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview; complete text will download] ...' : '');
+    dom.outputCard.style.display = 'flex';
+    log(`✅ Context bundle ready: ${generatedChunks.length} chunk(s), ~${estTokens.toLocaleString()} tokens in active chunk.`);
+}
+
+// Auto-repack on setting changes if files are already cached
+if (dom.format) dom.format.addEventListener('change', () => repackBundleInMemory());
+if (dom.minifyMode) dom.minifyMode.addEventListener('change', () => repackBundleInMemory());
+if (dom.chunkLimit) dom.chunkLimit.addEventListener('change', () => repackBundleInMemory());
 
 // --- Main Processing Pipeline ---
 dom.packBtn.addEventListener('click', async () => {
@@ -258,8 +330,7 @@ dom.packBtn.addEventListener('click', async () => {
                     log(`⚠️ Skipping ${node.path}: Binary content detected (null bytes).`);
                     continue;
                 }
-                const processedContent = minifyCode(rawContent, node.path, minifyMode);
-                collectedFiles.push({ path: node.path, content: processedContent });
+                collectedFiles.push({ path: node.path, rawContent: rawContent });
             } else {
                 failedCount++;
                 log(`❌ Failed to fetch ${node.path}${result && result.error ? `: ${result.error}` : ''}`);
@@ -279,59 +350,11 @@ dom.packBtn.addEventListener('click', async () => {
             return;
         }
 
-        log(`Structuring bundle into ${dom.format.value}...`);
-        const paths = collectedFiles.map(f => f.path);
-        const treeAscii = generateTree(paths);
+        cachedRawFiles = collectedFiles;
+        cachedRepoInfo = repoInfo;
+        cachedBranch = targetBranch;
 
-        const chunkLimitVal = parseInt(dom.chunkLimit.value, 10) || 0;
-        generatedChunks = chunkContextOutput(
-            dom.format.value,
-            repoInfo,
-            targetBranch,
-            treeAscii,
-            collectedFiles,
-            chunkLimitVal,
-            estimateTokens
-        );
-
-        let limitExceeded = false;
-        for (const chunk of generatedChunks) {
-            if (chunk.exceedsLimit) limitExceeded = true;
-        }
-        if (limitExceeded) {
-            log(`⚠️ Warning: One or more single files exceed your requested chunk limit of ${chunkLimitVal} tokens.`);
-        }
-
-        activeChunkIndex = 0;
-        const firstChunk = generatedChunks[0];
-        packedOutputText = firstChunk.text;
-        outputExt = firstChunk.ext;
-        outputMime = firstChunk.mime;
-
-        log(`Running BPE token estimation via Web Worker...`);
-        const estTokens = await estimateTokensAsync(packedOutputText);
-
-        dom.statFiles.textContent = collectedFiles.length;
-        dom.statChars.textContent = packedOutputText.length.toLocaleString();
-        dom.statTokens.textContent = estTokens.toLocaleString();
-        dom.statChunks.textContent = generatedChunks.length;
-
-        // Chunk selection dropdown UI setup
-        if (generatedChunks.length > 1) {
-            dom.chunkSelectLabel.style.display = 'inline-block';
-            dom.chunkSelect.style.display = 'inline-block';
-            dom.downloadAllBtn.style.display = 'inline-flex';
-            dom.chunkSelect.innerHTML = generatedChunks.map((_, idx) => `<option value="${idx}">Part ${idx + 1} of ${generatedChunks.length}</option>`).join('');
-        } else {
-            dom.chunkSelectLabel.style.display = 'none';
-            dom.chunkSelect.style.display = 'none';
-            dom.downloadAllBtn.style.display = 'none';
-            dom.chunkSelect.innerHTML = '';
-        }
-
-        dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview; complete text will download] ...' : '');
-        dom.outputCard.style.display = 'flex';
-        log(`✅ Context bundle ready: ${generatedChunks.length} chunk(s), ~${estTokens.toLocaleString()} tokens (approximate BPE count) in active chunk.`);
+        await repackBundleInMemory();
 
     } catch (err) {
         if (err.name === 'AbortError') {
