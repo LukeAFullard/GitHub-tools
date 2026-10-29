@@ -63,9 +63,11 @@ export function formatMarkdown(repoInfo, branch, treeText, files) {
     }
     md += `\n## Structure\n${treeFence}text\n${treeText}${treeFence}\n\n## Files\n\n`;
     for (const file of files) {
-        const ext = file.path.includes('.') ? file.path.split('.').pop() : '';
+        const filename = file.path.split('/').pop();
+        const ext = filename.includes('.') ? filename.split('.').pop() : '';
         const fence = getMarkdownFence(file.content);
-        md += `### File: \`${file.path.replace(/`/g, '\\`')}\`\n${fence}${ext}\n${file.content}\n${fence}\n\n`;
+        const pathFence = file.path.includes('`') ? '`` ' + file.path + ' ``' : '`' + file.path + '`';
+        md += `### File: ${pathFence}\n${fence}${ext}\n${file.content}\n${fence}\n\n`;
     }
     return {
         text: md,

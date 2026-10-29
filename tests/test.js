@@ -165,3 +165,45 @@ test('tree: generateTree handles prototype property collisions safely', () => {
 test('github-api: fetchRepoZipball export function exists', () => {
     assert.equal(typeof fetchRepoZipball, 'function');
 });
+
+test('minifier: block comment removal inserts space to prevent token merging', () => {
+    const code = 'return/*comment*/x;';
+    const minified = minifyCode(code, 'app.js', 'aggressive');
+    assert.equal(minified, 'return x;');
+});
+
+test('minifier: unquoted hash in YAML value is not treated as comment', () => {
+    const code = 'value: abc#def\nurl: http://example.com/#anchor';
+    const minified = minifyCode(code, 'config.yaml', 'aggressive');
+    assert.ok(minified.includes('value: abc#def'));
+    assert.ok(minified.includes('url: http://example.com/#anchor'));
+});
+
+test('minifier: blank lines inside Python triple quoted strings are preserved', () => {
+    const code = 'x = """\nline1\n\nline3\n"""';
+    const minified = minifyCode(code, 'script.py', 'aggressive');
+    assert.ok(minified.includes('line1\n\nline3'));
+});
+
+test('github-api: parseRepoInput handles query strings and blob URLs', () => {
+    const parsedQuery = parseRepoInput('https://github.com/owner/repo/tree/main/src?ref=123');
+    assert.deepEqual(parsedQuery, { owner: 'owner', repo: 'repo', branch: 'main', subpath: 'src' });
+
+    const parsedBlob = parseRepoInput('https://github.com/owner/repo/blob/main/src/index.js');
+    assert.deepEqual(parsedBlob, { owner: 'owner', repo: 'repo', branch: 'main', subpath: 'src/index.js' });
+});
+
+test('github-api: Retry-After HTTP-date parsing', () => {
+    const futureDateStr = new Date(Date.now() + 45000).toUTCString();
+    const map = new Map([['retry-after', futureDateStr]]);
+    const response = { headers: { get: (k) => map.get(k) || null } };
+    const meta = extractRateLimitHeaders(response);
+    assert.ok(meta.retryAfter >= 40 && meta.retryAfter <= 50);
+});
+
+test('formatters: markdown file path extension extraction in directories with dots', () => {
+    const repoInfo = { owner: 'owner', repo: 'repo' };
+    const files = [{ path: 'v1.0.0/src/component.js', content: 'const a = 1;' }];
+    const res = formatMarkdown(repoInfo, 'main', '', files);
+    assert.ok(res.text.includes('```js'));
+});

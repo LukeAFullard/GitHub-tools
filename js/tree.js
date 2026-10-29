@@ -124,7 +124,12 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
 
         const label = document.createElement('span');
         label.className = item.isDir ? 'tree-folder-label' : 'tree-file-label';
-        label.innerHTML = (item.isDir ? SVG_FOLDER : SVG_FILE) + `<span>${item.name}</span>`;
+        const iconSpan = document.createElement('span');
+        iconSpan.innerHTML = item.isDir ? SVG_FOLDER : SVG_FILE;
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = item.name;
+        label.appendChild(iconSpan);
+        label.appendChild(nameSpan);
 
         const sizeBadge = document.createElement('span');
         const bytes = item.isDir ? calculateDirSize(item) : (item.size || 0);
@@ -195,6 +200,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                 isDir: true,
                 path: item.path,
                 name: item.name,
+                childElements,
                 setSubtreeChecked(val, onlyVisible = false) {
                     if (onlyVisible && li.style.display === 'none') return;
                     checkbox.checked = val;
@@ -205,13 +211,21 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                 updateStateFromChildren() {
                     let allChecked = true;
                     let noneChecked = true;
+                    let anyIndeterminate = false;
                     for (const child of childElements) {
                         child.updateStateFromChildren();
-                        if (child.checkbox.checked) noneChecked = false;
-                        else allChecked = false;
+                        if (child.checkbox.indeterminate) {
+                            anyIndeterminate = true;
+                            allChecked = false;
+                            noneChecked = false;
+                        } else if (child.checkbox.checked) {
+                            noneChecked = false;
+                        } else {
+                            allChecked = false;
+                        }
                     }
                     checkbox.checked = !noneChecked;
-                    checkbox.indeterminate = !allChecked && !noneChecked;
+                    checkbox.indeterminate = anyIndeterminate || (!allChecked && !noneChecked);
                 },
                 collectSelectedFiles(acc) {
                     for (const child of childElements) {
@@ -351,6 +365,29 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
             for (const rn of rootNodes) {
                 rn.applyFilter(currentQuery);
             }
+        },
+        selectBySubpath(subpath) {
+            const clean = (subpath || '').trim().replace(/^\/+|\/+$/g, '');
+            if (!clean) return;
+            function walk(node) {
+                if (!node.isDir) {
+                    const matches = node.path === clean || node.path.startsWith(clean + '/');
+                    node.checkbox.checked = matches;
+                } else {
+                    if (node.childElements) {
+                        for (const child of node.childElements) {
+                            walk(child);
+                        }
+                    }
+                    if (node.updateStateFromChildren) {
+                        node.updateStateFromChildren();
+                    }
+                }
+            }
+            for (const rn of rootNodes) {
+                walk(rn);
+            }
+            updateSelectionState();
         }
     };
 }
