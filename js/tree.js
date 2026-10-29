@@ -213,6 +213,11 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                         child.collectSelectedFiles(acc);
                     }
                 },
+                deselectIfLargerThan(thresholdBytes) {
+                    for (const child of childElements) {
+                        if (child.deselectIfLargerThan) child.deselectIfLargerThan(thresholdBytes);
+                    }
+                },
                 expandAll(val) {
                     toggleExpand(val);
                     for (const child of childElements) {

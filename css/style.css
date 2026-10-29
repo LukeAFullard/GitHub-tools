@@ -281,14 +281,30 @@ textarea.preview {
 
 .tree-actions {
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
+    flex-wrap: wrap;
     margin-top: 8px;
 }
 
 .tree-actions button {
-    padding: 4px 10px;
+    padding: 6px 12px;
     font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+@media (max-width: 680px) {
+    .tree-actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .tree-actions input[type="text"] {
+        width: 100%;
+    }
+    .tree-actions button {
+        width: 100%;
+        justify-content: center;
+    }
 }
 
 .badge {

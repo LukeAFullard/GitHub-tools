@@ -15,7 +15,7 @@ import {
 import { minifyCode } from '../js/minifier.js';
 import { parseRepoInput, extractRateLimitHeaders, fetchRepoZipball } from '../js/github-api.js';
 import { estimateTokens } from '../js/tokenizer.js';
-import { generateTree } from '../js/tree.js';
+import { generateTree, renderInteractiveTree } from '../js/tree.js';
 
 test('formatters: escapeXml', () => {
     assert.equal(escapeXml('<script>alert("xss & ' + "'" + '")</script>'), '&lt;script&gt;alert(&quot;xss &amp; &apos;&quot;)&lt;/script&gt;');
