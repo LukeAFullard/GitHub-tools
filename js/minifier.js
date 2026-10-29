@@ -17,6 +17,7 @@ function stripJsComments(code, ext = '') {
     const len = code.length;
     let state = 'normal';
     const isCss = ['css', 'scss'].includes(ext);
+    const templateStack = [];
 
     while (i < len) {
         const char = code[i];
@@ -62,6 +63,19 @@ function stripJsComments(code, ext = '') {
                 i++;
             } else if (char === '`') {
                 state = 'template_string';
+                output += char;
+                i++;
+            } else if (char === '{' && templateStack.length > 0) {
+                templateStack[templateStack.length - 1].braceDepth++;
+                output += char;
+                i++;
+            } else if (char === '}' && templateStack.length > 0) {
+                const top = templateStack[templateStack.length - 1];
+                top.braceDepth--;
+                if (top.braceDepth === 0) {
+                    templateStack.pop();
+                    state = top.returnState;
+                }
                 output += char;
                 i++;
             } else if (char === '\n') {
@@ -140,15 +154,22 @@ function stripJsComments(code, ext = '') {
             }
             i++;
         } else if (state === 'template_string') {
-            output += char;
             if (char === '\\') {
+                output += char;
                 if (i + 1 < len) {
                     output += code[i + 1];
                     i += 2;
                     continue;
                 }
             } else if (char === '`') {
+                output += char;
                 state = 'normal';
+            } else if (char === '$' && next === '{') {
+                output += '${';
+                i += 2;
+                templateStack.push({ returnState: 'template_string', braceDepth: 1 });
+                state = 'normal';
+                continue;
             }
             i++;
         } else if (state === 'line_comment') {
@@ -181,11 +202,12 @@ function stripJsComments(code, ext = '') {
     return output.trim();
 }
 
-function stripHashComments(code) {
+function stripHashComments(code, ext = '') {
     let output = '';
     let i = 0;
     const len = code.length;
     let state = 'normal';
+    const isShell = ['sh', 'bash'].includes(ext);
 
     if (code.startsWith('#!')) {
         const firstLineEnd = code.indexOf('\n');
@@ -200,7 +222,8 @@ function stripHashComments(code) {
         const next2 = code[i + 2];
 
         if (state === 'normal') {
-            if (char === '#' && (i === 0 || /\s/.test(code[i - 1])) && (i === 0 || code[i - 1] !== '\\')) {
+            const isParamExpand = isShell && i > 0 && (code[i - 1] === '$' || code[i - 1] === '{');
+            if (char === '#' && !isParamExpand && (i === 0 || code[i - 1] !== '\\')) {
                 state = 'line_comment';
                 i++;
                 continue;
@@ -237,6 +260,9 @@ function stripHashComments(code) {
                 }
             } else if (char === "'") {
                 state = 'normal';
+            } else if (char === '\n') {
+                state = 'normal';
+                output = handleNormalNewline(output);
             }
             i++;
         } else if (state === 'double_string') {
@@ -249,6 +275,9 @@ function stripHashComments(code) {
                 }
             } else if (char === '"') {
                 state = 'normal';
+            } else if (char === '\n') {
+                state = 'normal';
+                output = handleNormalNewline(output);
             }
             i++;
         } else if (state === 'triple_single') {
@@ -297,7 +326,7 @@ function stripHashComments(code) {
 function minifyHtml(code) {
     const rawBlocks = [];
     const nonce = '___PRE_TEXTAREA_' + Math.random().toString(36).substring(2, 9) + '_';
-    let preserved = code.replace(/<(pre|textarea)\b[\s\S]*?<\/\1>/gi, (match) => {
+    let preserved = code.replace(/<(pre|textarea|script|style)\b[\s\S]*?<\/\1>/gi, (match) => {
         rawBlocks.push(match);
         return `${nonce}${rawBlocks.length - 1}___`;
     });
@@ -327,7 +356,7 @@ export function minifyCode(content, filename = '', mode = 'none') {
         if (['js', 'ts', 'jsx', 'tsx', 'css', 'scss', 'c', 'cpp', 'h', 'java', 'go', 'rs', 'swift', 'php'].includes(ext)) {
             result = stripJsComments(result, ext);
         } else if (['py', 'sh', 'bash', 'rb'].includes(ext)) {
-            result = stripHashComments(result);
+            result = stripHashComments(result, ext);
         } else if (['html', 'xml', 'svg'].includes(ext)) {
             result = minifyHtml(result);
         } else {

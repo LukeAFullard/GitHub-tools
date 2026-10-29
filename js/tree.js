@@ -243,14 +243,25 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                         if (child.expandAll) child.expandAll(val);
                     }
                 },
-                applyFilter(query) {
-                    let hasMatchingChild = false;
-                    for (const child of childElements) {
-                        const matches = child.applyFilter(query);
-                        if (matches) hasMatchingChild = true;
+                applyFilter(query, isSubpath = false) {
+                    let isVisible = false;
+                    if (isSubpath) {
+                        const clean = (query || '').replace(/^\/+|\/+$/g, '').toLowerCase();
+                        const pLower = item.path.toLowerCase();
+                        const selfMatches = pLower === clean || pLower.startsWith(clean + '/') || clean.startsWith(pLower + '/');
+                        let hasMatchingChild = false;
+                        for (const child of childElements) {
+                            if (child.applyFilter(query, true)) hasMatchingChild = true;
+                        }
+                        isVisible = !clean || selfMatches || hasMatchingChild;
+                    } else {
+                        let hasMatchingChild = false;
+                        for (const child of childElements) {
+                            if (child.applyFilter(query, false)) hasMatchingChild = true;
+                        }
+                        const selfMatches = matchQuery(item.name, item.path, query);
+                        isVisible = !query || selfMatches || hasMatchingChild;
                     }
-                    const selfMatches = matchQuery(item.name, item.path, query);
-                    const isVisible = !query || selfMatches || hasMatchingChild;
                     li.style.display = isVisible ? 'block' : 'none';
                     if (query && isVisible) toggleExpand(true);
                     return isVisible;
@@ -282,8 +293,15 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                         acc.push(item.node);
                     }
                 },
-                applyFilter(query) {
-                    const matches = !query || matchQuery(item.name, item.path, query);
+                applyFilter(query, isSubpath = false) {
+                    let matches = false;
+                    if (isSubpath) {
+                        const clean = (query || '').replace(/^\/+|\/+$/g, '').toLowerCase();
+                        const pLower = item.path.toLowerCase();
+                        matches = !clean || pLower === clean || pLower.startsWith(clean + '/');
+                    } else {
+                        matches = !query || matchQuery(item.name, item.path, query);
+                    }
                     li.style.display = matches ? 'block' : 'none';
                     return matches;
                 }
@@ -360,10 +378,10 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                 if (rn.expandAll) rn.expandAll(val);
             }
         },
-        filter(query) {
+        filter(query, isSubpath = false) {
             currentQuery = (query || '').trim();
             for (const rn of rootNodes) {
-                rn.applyFilter(currentQuery);
+                rn.applyFilter(currentQuery, isSubpath);
             }
         },
         selectBySubpath(subpath) {

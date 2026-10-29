@@ -45,7 +45,7 @@ export function formatClaudeXml(repoInfo, branch, treeText, files) {
         doc += `  <document index="${idx + 1}">\n`;
         doc += `    <source>${escapeXml(file.path)}</source>\n`;
         let contentStr = file.content || '';
-        if (contentStr.includes('</document_content>') || contentStr.includes('</document>')) {
+        if (contentStr.includes('</document_content>') || contentStr.includes('</document>') || contentStr.includes('<') || contentStr.includes('&')) {
             contentStr = `<![CDATA[\n${escapeCdata(contentStr)}\n]]>`;
         }
         doc += `    <document_content>\n${contentStr}\n    </document_content>\n`;
