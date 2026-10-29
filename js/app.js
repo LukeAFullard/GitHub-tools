@@ -321,7 +321,8 @@ dom.packBtn.addEventListener('click', async () => {
         if (parsedWithOverride && parsedWithOverride.branch) {
             repoInfo.branch = parsedWithOverride.branch;
             repoInfo.subpath = parsedWithOverride.subpath;
-        } else if (repoInfo.branch && !userBranch) {
+        }
+        if (repoInfo.branch && !userBranch) {
             dom.branch.value = repoInfo.branch;
         }
     }
@@ -346,7 +347,7 @@ dom.packBtn.addEventListener('click', async () => {
     try {
         log(`[FETCH] Querying GitHub API for ${repoInfo.owner}/${repoInfo.repo}...`);
 
-        let targetBranch = dom.branch.value.trim();
+        let targetBranch = dom.branch.value.trim() || repoInfo.branch || '';
 
         if (!targetBranch || pat) {
             const repoMeta = await resolveDefaultBranch(

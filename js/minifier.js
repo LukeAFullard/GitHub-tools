@@ -170,6 +170,8 @@ function stripJsComments(code, ext = '') {
                 templateStack.push({ returnState: 'template_string', braceDepth: 1 });
                 state = 'normal';
                 continue;
+            } else {
+                output += char;
             }
             i++;
         } else if (state === 'line_comment') {
@@ -222,8 +224,10 @@ function stripHashComments(code, ext = '') {
         const next2 = code[i + 2];
 
         if (state === 'normal') {
-            const isParamExpand = isShell && i > 0 && (code[i - 1] === '$' || code[i - 1] === '{');
-            if (char === '#' && !isParamExpand && (i === 0 || code[i - 1] !== '\\')) {
+            const isCommentStart = isShell
+                ? (i === 0 || /[\s;&|()]/.test(code[i - 1]))
+                : (i === 0 || code[i - 1] !== '\\');
+            if (char === '#' && isCommentStart) {
                 state = 'line_comment';
                 i++;
                 continue;
