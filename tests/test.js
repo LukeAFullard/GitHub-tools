@@ -245,17 +245,27 @@ test('minifier: HTML textarea content is preserved during aggressive minificatio
     assert.ok(minified.includes('line 1\n\n  line 2'));
 });
 
-test('minifier: JS template literal interpolation preserves expressions and handles backticks inside interpolation', () => {
+test('minifier: JS template literal interpolation preserves expressions and literal text surrounding interpolation', () => {
     const code = 'const msg = `hello ${val /* comment */ || "world `nested`"}!`;';
     const minified = minifyCode(code, 'app.js', 'aggressive');
     assert.ok(!minified.includes('comment'), 'Minified was: ' + JSON.stringify(minified));
+    assert.ok(minified.includes('const msg = `hello ${'), 'Minified was: ' + JSON.stringify(minified));
     assert.ok(minified.includes('world `nested`'), 'Minified was: ' + JSON.stringify(minified));
+    assert.ok(minified.includes('}!`;'), 'Minified was: ' + JSON.stringify(minified));
 });
 
 test('minifier: Python inline comment without preceding space is stripped', () => {
     const code = 'x = 1;#inline comment\ny = [1, 2]#comment2';
     const minified = minifyCode(code, 'script.py', 'aggressive');
     assert.equal(minified, 'x = 1;\ny = [1, 2]');
+});
+
+test('minifier: Shell parameter expansion ${var#pattern} and unquoted hash are preserved', () => {
+    const code = 'echo ${var#prefix}\n echo foo#bar\n# Real comment';
+    const minified = minifyCode(code, 'script.sh', 'aggressive');
+    assert.ok(minified.includes('echo ${var#prefix}'));
+    assert.ok(minified.includes('echo foo#bar'));
+    assert.ok(!minified.includes('Real comment'));
 });
 
 test('minifier: HTML script and style tags are preserved during aggressive minification', () => {
