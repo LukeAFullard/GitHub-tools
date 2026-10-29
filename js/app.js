@@ -25,6 +25,8 @@ let outputMime = "application/xml";
 let cachedRawFiles = []; // [{ path: string, rawContent: string }]
 let cachedRepoInfo = null;
 let cachedBranch = "";
+let currentActiveSelection = [];
+let isPrivateRepo = false;
 
 const dom = {
     repoUrl: document.getElementById('repoUrl'),
@@ -136,13 +138,24 @@ function getDeepLinkUrl() {
     return url.toString();
 }
 
-async function repackBundleInMemory(activeSelectionNodes = null) {
+async function repackBundleInMemory(activeSelectionNodes = currentActiveSelection) {
     if (!cachedRawFiles || cachedRawFiles.length === 0 || !cachedRepoInfo) return;
 
+    let selection = activeSelectionNodes || currentActiveSelection;
     let targetFiles = cachedRawFiles;
-    if (activeSelectionNodes && Array.isArray(activeSelectionNodes)) {
-        const selectedPaths = new Set(activeSelectionNodes.map(n => n.path));
+
+    if (selection && Array.isArray(selection) && selection.length > 0) {
+        const selectedPaths = new Set(selection.map(n => n.path));
         targetFiles = cachedRawFiles.filter(f => selectedPaths.has(f.path));
+    } else if (selection && Array.isArray(selection) && selection.length === 0) {
+        dom.outputCard.style.display = 'none';
+        log(`⚠️ No files selected for packing.`);
+        return;
+    }
+
+    if (targetFiles.length === 0) {
+        dom.outputCard.style.display = 'none';
+        return;
     }
 
     const minifyMode = dom.minifyMode ? dom.minifyMode.value : 'none';
@@ -220,6 +233,13 @@ dom.packBtn.addEventListener('click', async () => {
         return;
     }
 
+    // Reset repo cache state on new repo lookup
+    cachedRawFiles = [];
+    cachedRepoInfo = null;
+    cachedBranch = "";
+    currentActiveSelection = [];
+    isPrivateRepo = false;
+
     // Auto-fill branch and subpath filter if present in pasted GitHub URL
     if (repoInfo.branch && dom.branch && !dom.branch.value.trim()) {
         dom.branch.value = repoInfo.branch;
@@ -245,19 +265,18 @@ dom.packBtn.addEventListener('click', async () => {
         log(`Querying GitHub API for ${repoInfo.owner}/${repoInfo.repo}...`);
 
         let targetBranch = dom.branch.value.trim();
-        let isPrivateRepo = false;
 
-        const repoMeta = await resolveDefaultBranch(
-            repoInfo.owner,
-            repoInfo.repo,
-            pat,
-            abortController.signal,
-            updateRateLimitUI
-        );
         if (!targetBranch) {
+            const repoMeta = await resolveDefaultBranch(
+                repoInfo.owner,
+                repoInfo.repo,
+                pat,
+                abortController.signal,
+                updateRateLimitUI
+            );
             targetBranch = repoMeta.branch;
+            isPrivateRepo = repoMeta.isPrivate;
         }
-        isPrivateRepo = repoMeta.isPrivate;
 
         log(`Target branch: ${targetBranch}${isPrivateRepo ? ' (Private Repository)' : ''}`);
 
@@ -304,6 +323,7 @@ dom.packBtn.addEventListener('click', async () => {
             dom.treeContainer,
             (selectedNodes) => {
                 activeSelection = selectedNodes;
+                currentActiveSelection = selectedNodes;
                 dom.selectedCount.textContent = activeSelection.length;
                 if (treeControls.getSelectedStats && dom.selectedTokensBadge) {
                     const stats = treeControls.getSelectedStats();
@@ -311,10 +331,11 @@ dom.packBtn.addEventListener('click', async () => {
                 }
                 // If files are already cached, update packed bundle dynamically
                 if (cachedRawFiles && cachedRawFiles.length > 0) {
-                    repackBundleInMemory(activeSelection);
+                    repackBundleInMemory(currentActiveSelection);
                 }
             }
         );
+        currentActiveSelection = activeSelection;
 
         // Initial token badge update
         if (treeControls.getSelectedStats && dom.selectedTokensBadge) {
@@ -344,14 +365,71 @@ dom.packBtn.addEventListener('click', async () => {
 
         let hasDownloaded = false;
 
+        async function fetchSelectedFilesDelta(selectionToFetch) {
+            const cachedPaths = new Set(cachedRawFiles.map(f => f.path));
+            const missingNodes = selectionToFetch.filter(n => !cachedPaths.has(n.path));
+
+            if (missingNodes.length === 0) return;
+
+            log(`Fetching ${missingNodes.length} newly checked file(s)...`);
+            const concurrency = 5;
+            let index = 0;
+            const results = new Array(missingNodes.length);
+
+            async function worker() {
+                while (index < missingNodes.length) {
+                    if (abortController.signal && abortController.signal.aborted) break;
+                    const i = index++;
+                    const node = missingNodes[i];
+                    log(`Fetching delta ${node.path}...`);
+
+                    let retries = 0;
+                    let result = null;
+                    while (retries < 3) {
+                        result = await fetchFileContent(
+                            repoInfo.owner,
+                            repoInfo.repo,
+                            targetBranch,
+                            node.path,
+                            pat,
+                            abortController.signal,
+                            updateRateLimitUI,
+                            isPrivateRepo
+                        );
+                        if (result.backoff) {
+                            retries++;
+                            await sleep(Math.min(result.backoff, 60) * 1000, abortController.signal);
+                            continue;
+                        }
+                        break;
+                    }
+                    if (result && result.success) {
+                        const sample = result.content.slice(0, 512);
+                        if (!sample.includes('\0')) {
+                            results[i] = { path: node.path, rawContent: result.content };
+                        }
+                    }
+                }
+            }
+
+            const workers = Array.from({ length: Math.min(concurrency, missingNodes.length) }, () => worker());
+            await Promise.all(workers);
+
+            const newlyFetched = results.filter(Boolean);
+            cachedRawFiles = [...cachedRawFiles, ...newlyFetched];
+        }
+
         await new Promise((resolve, reject) => {
-            const onStart = () => {
+            const onStart = async () => {
                 if (!hasDownloaded) {
                     hasDownloaded = true;
                     cleanup();
                     resolve();
                 } else {
-                    repackBundleInMemory(activeSelection);
+                    if (currentActiveSelection && currentActiveSelection.length > 0) {
+                        await fetchSelectedFilesDelta(currentActiveSelection);
+                    }
+                    repackBundleInMemory(currentActiveSelection);
                 }
             };
             const onAbort = () => {
