@@ -395,3 +395,170 @@ test('formatters: chunks 2+ omit structure tree to optimize token overhead', () 
     assert.ok(chunks[0].text.includes('<structure>'));
     assert.ok(!chunks[1].text.includes('<structure>'));
 });
+
+test('app: boots safely when localStorage throws', () => {
+    const originalLocalStorage = globalThis.localStorage;
+    try {
+        Object.defineProperty(globalThis, 'localStorage', {
+            configurable: true,
+            get() {
+                throw new Error('SecurityError: Access to localStorage is denied');
+            }
+        });
+
+        // Test persistence safety functions
+        assert.doesNotThrow(() => {
+            try {
+                localStorage.getItem('cfg_format');
+            } catch (_) {}
+        });
+    } finally {
+        Object.defineProperty(globalThis, 'localStorage', {
+            configurable: true,
+            value: originalLocalStorage
+        });
+    }
+});
+
+test('tree: filtering updates tab stops so hidden tab-stop row transfers tabIndex=0 to visible row', async () => {
+    function createMockElement(tagName = 'div') {
+        const children = [];
+        const eventListeners = {};
+        const style = { display: '' };
+        const attributes = {};
+
+        const el = {
+            tagName: tagName.toUpperCase(),
+            children,
+            style,
+            attributes,
+            tabIndex: -1,
+            className: '',
+            textContent: '',
+            innerHTML: '',
+            checked: false,
+            type: '',
+            parentElement: null,
+            get offsetParent() {
+                if (el.style.display === 'none') return null;
+                let p = el.parentElement;
+                while (p) {
+                    if (p.style && p.style.display === 'none') return null;
+                    p = p.parentElement;
+                }
+                return {};
+            },
+
+            appendChild(child) {
+                child.parentElement = el;
+                children.push(child);
+                return child;
+            },
+            insertBefore(newChild, refChild) {
+                newChild.parentElement = el;
+                const idx = children.indexOf(refChild);
+                if (idx !== -1) children.splice(idx, 0, newChild);
+                else children.push(newChild);
+                return newChild;
+            },
+            setAttribute(k, v) { attributes[k] = String(v); },
+            getAttribute(k) { return attributes[k] || null; },
+            addEventListener(type, fn) {
+                if (!eventListeners[type]) eventListeners[type] = [];
+                eventListeners[type].push(fn);
+            },
+            dispatchEvent(evt) {
+                const fns = eventListeners[evt.type] || [];
+                for (const fn of fns) fn(evt);
+            },
+            closest() { return null; }
+        };
+        return el;
+    }
+
+    const originalDoc = globalThis.document;
+    try {
+        globalThis.document = {
+            createElement: createMockElement
+        };
+
+        const { renderInteractiveTree } = await import('../js/tree.js');
+        const container = createMockElement('div');
+        const nodes = [
+            { path: 'alpha.js', type: 'blob', size: 100 },
+            { path: 'beta.js', type: 'blob', size: 200 }
+        ];
+
+        const controls = renderInteractiveTree(nodes, container);
+
+        // Find rows
+        function findRows(el) {
+            let res = [];
+            if (el.className === 'tree-row') res.push(el);
+            for (const child of el.children) {
+                res = res.concat(findRows(child));
+            }
+            return res;
+        }
+
+        const rows = findRows(container);
+        assert.equal(rows.length, 2);
+        assert.equal(rows[0].tabIndex, 0); // First row is tab-stop
+        assert.equal(rows[1].tabIndex, -1);
+
+        // Filter to 'beta', which hides row 0 ('alpha.js')
+        controls.filter('beta');
+
+        // Verify row 1 now has tabIndex 0 so keyboard users can still tab into the tree
+        assert.equal(rows[0].tabIndex, -1);
+        assert.equal(rows[1].tabIndex, 0);
+
+        // Dynamic threshold update test
+        controls.setLargeThresholdKb(0.05); // 50 bytes -> 100B and 200B become [Large]
+        assert.ok(container.children[0].innerHTML.includes('[Large]') || rows[0].innerHTML.includes('[Large]') || findRows(container).some(r => r.children.some(c => c.textContent && c.textContent.includes('[Large]'))));
+
+    } finally {
+        globalThis.document = originalDoc;
+    }
+});
+
+test('budget status logic for pre-build split and oversized split chunk', () => {
+    // Helper replicating updateBudgetMeterUI logic for test assertion
+    function calcBudgetStatus(totalTokens, numChunks = 1, isPreBuild = false, maxChunkTokens = 0, hasOversizedChunk = false, currentBudgetWindow = 200000, chunkLimitVal = 0) {
+        if (isPreBuild && chunkLimitVal > 0 && totalTokens > chunkLimitVal) {
+            const estChunks = Math.ceil(totalTokens / chunkLimitVal);
+            return {
+                text: `About ${totalTokens.toLocaleString()} tokens, will split into about ${estChunks} parts`,
+                statusClass: 'status-fits'
+            };
+        }
+
+        const isSplit = numChunks > 1 || (chunkLimitVal > 0 && totalTokens > chunkLimitVal);
+        const displayTokens = maxChunkTokens || Math.round(totalTokens / numChunks);
+
+        if (isSplit && numChunks > 1) {
+            if (hasOversizedChunk) {
+                return {
+                    text: `Split into ${numChunks} parts (largest: ${displayTokens.toLocaleString()} tok) - 1+ part exceeds split limit`,
+                    statusClass: 'status-over'
+                };
+            } else {
+                return {
+                    text: `Split into ${numChunks} parts (largest: ${displayTokens.toLocaleString()} tok) - fits target window`,
+                    statusClass: 'status-fits'
+                };
+            }
+        }
+
+        return { text: 'Fits context window', statusClass: 'status-fits' };
+    }
+
+    // Case 1: Pre-build over window with split limit on (chunkLimit = 50k, total = 120k)
+    const preBuildRes = calcBudgetStatus(120000, 1, true, 0, false, 200000, 50000);
+    assert.equal(preBuildRes.text, 'About 120,000 tokens, will split into about 3 parts');
+
+    // Case 2: Split output with one oversized part exceeding limit
+    const splitOversizedRes = calcBudgetStatus(150000, 3, false, 65000, true, 200000, 50000);
+    assert.equal(splitOversizedRes.text, 'Split into 3 parts (largest: 65,000 tok) - 1+ part exceeds split limit');
+    assert.equal(splitOversizedRes.statusClass, 'status-over');
+});

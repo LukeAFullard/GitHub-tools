@@ -117,9 +117,31 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
 
     let isFirstRow = true;
     let allTreeRows = [];
+    let allNodeItems = [];
     let currentLargeThresholdBytes = largeThresholdKb * 1024;
 
-    function createTreeNodeDOM(item, parentSiblingsMap = root.children) {
+    function isRowVisible(row) {
+        if (row.offsetParent !== null) return true;
+        let curr = row;
+        while (curr && curr !== container) {
+            if (curr.style && curr.style.display === 'none') return false;
+            curr = curr.parentElement;
+        }
+        return true;
+    }
+
+    function ensureValidTabStop() {
+        const visibleRows = allTreeRows.filter(isRowVisible);
+        const hasValidTabStop = visibleRows.some(r => r.tabIndex === 0);
+        if (!hasValidTabStop) {
+            allTreeRows.forEach(r => r.tabIndex = -1);
+            if (visibleRows.length > 0) {
+                visibleRows[0].tabIndex = 0;
+            }
+        }
+    }
+
+    function createTreeNodeDOM(item, maxSiblingBytes = 1) {
         const li = document.createElement('li');
         li.className = 'tree-item';
         li.setAttribute('role', 'treeitem');
@@ -149,8 +171,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
         label.appendChild(nameSpan);
 
         const bytes = item.isDir ? calculateDirSize(item) : (item.size || 0);
-        const maxSiblingBytes = getMaxSiblingSize(parentSiblingsMap);
-        const pct = Math.max(4, Math.round((bytes / maxSiblingBytes) * 100));
+        const pct = Math.max(4, Math.round((bytes / Math.max(1, maxSiblingBytes)) * 100));
 
         const weightBg = document.createElement('span');
         weightBg.className = 'tree-weight-bar-bg';
@@ -165,6 +186,17 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
         const estTok = Math.round(bytes / 3.8);
         sizeBadge.className = 'tree-size-badge' + (isLarge ? ' tree-large-badge' : '');
         sizeBadge.textContent = isLarge ? `${kbStr} (~${estTok.toLocaleString()} tok) [Large]` : `${kbStr} (~${estTok.toLocaleString()} tok)`;
+
+        if (!item.isDir) {
+            allNodeItems.push({
+                isDir: false,
+                bytes,
+                kbStr,
+                estTok,
+                weightFill,
+                sizeBadge
+            });
+        }
 
         row.appendChild(checkbox);
         row.appendChild(label);
@@ -204,6 +236,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
                 ul.style.display = isExpanded ? 'block' : 'none';
                 toggleBtn.innerHTML = isExpanded ? SVG_CHEVRON_DOWN : SVG_CHEVRON_RIGHT;
                 li.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+                ensureValidTabStop();
             };
 
             toggleBtn.addEventListener('click', (e) => {
@@ -218,10 +251,11 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
                 return a.localeCompare(b);
             });
 
+            const maxChildSiblingBytes = getMaxSiblingSize(item.children);
             const childElements = [];
             for (const key of childKeys) {
                 const childItem = item.children[key];
-                const childDOM = createTreeNodeDOM(childItem, item.children);
+                const childDOM = createTreeNodeDOM(childItem, maxChildSiblingBytes);
                 ul.appendChild(childDOM.li);
                 childElements.push(childDOM);
             }
@@ -249,13 +283,25 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
                     if (isExpanded) toggleExpand(false);
                 } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                     e.preventDefault();
-                    const visibleRows = allTreeRows.filter(r => r.offsetParent !== null);
+                    const visibleRows = allTreeRows.filter(isRowVisible);
                     const idx = visibleRows.indexOf(row);
                     if (idx !== -1) {
                         const targetIdx = idx + (e.key === 'ArrowDown' ? 1 : -1);
                         if (visibleRows[targetIdx]) {
                             visibleRows[targetIdx].focus();
                         }
+                    }
+                } else if (e.key === 'Home') {
+                    e.preventDefault();
+                    const visibleRows = allTreeRows.filter(isRowVisible);
+                    if (visibleRows.length > 0) {
+                        visibleRows[0].focus();
+                    }
+                } else if (e.key === 'End') {
+                    e.preventDefault();
+                    const visibleRows = allTreeRows.filter(isRowVisible);
+                    if (visibleRows.length > 0) {
+                        visibleRows[visibleRows.length - 1].focus();
                     }
                 }
             });
@@ -347,13 +393,25 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
                     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
                 } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                     e.preventDefault();
-                    const visibleRows = allTreeRows.filter(r => r.offsetParent !== null);
+                    const visibleRows = allTreeRows.filter(isRowVisible);
                     const idx = visibleRows.indexOf(row);
                     if (idx !== -1) {
                         const targetIdx = idx + (e.key === 'ArrowDown' ? 1 : -1);
                         if (visibleRows[targetIdx]) {
                             visibleRows[targetIdx].focus();
                         }
+                    }
+                } else if (e.key === 'Home') {
+                    e.preventDefault();
+                    const visibleRows = allTreeRows.filter(isRowVisible);
+                    if (visibleRows.length > 0) {
+                        visibleRows[0].focus();
+                    }
+                } else if (e.key === 'End') {
+                    e.preventDefault();
+                    const visibleRows = allTreeRows.filter(isRowVisible);
+                    if (visibleRows.length > 0) {
+                        visibleRows[visibleRows.length - 1].focus();
                     }
                 }
             });
@@ -406,9 +464,10 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
         return a.localeCompare(b);
     });
 
+    const maxRootSiblingBytes = getMaxSiblingSize(root.children);
     const rootNodes = [];
     for (const key of rootChildKeys) {
-        const childDOM = createTreeNodeDOM(root.children[key], root.children);
+        const childDOM = createTreeNodeDOM(root.children[key], maxRootSiblingBytes);
         rootUl.appendChild(childDOM.li);
         rootNodes.push(childDOM);
     }
@@ -449,6 +508,16 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
         getSelectedStats,
         setLargeThresholdKb(kbVal) {
             currentLargeThresholdBytes = kbVal * 1024;
+            for (const nodeItem of allNodeItems) {
+                if (!nodeItem.isDir) {
+                    const isLarge = nodeItem.bytes > currentLargeThresholdBytes;
+                    nodeItem.weightFill.className = 'tree-weight-bar-fill' + (isLarge ? ' near' : '');
+                    nodeItem.sizeBadge.className = 'tree-size-badge' + (isLarge ? ' tree-large-badge' : '');
+                    nodeItem.sizeBadge.textContent = isLarge
+                        ? `${nodeItem.kbStr} (~${nodeItem.estTok.toLocaleString()} tok) [Large]`
+                        : `${nodeItem.kbStr} (~${nodeItem.estTok.toLocaleString()} tok)`;
+                }
+            }
         },
         selectAll(val) {
             const hasFilter = Boolean(currentQuery);
@@ -467,6 +536,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
             for (const rn of rootNodes) {
                 if (rn.expandAll) rn.expandAll(val);
             }
+            ensureValidTabStop();
         },
         filter(query, isSubpath = false) {
             currentQuery = (query || '').trim();
@@ -476,6 +546,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
                     visibleCount++;
                 }
             }
+            ensureValidTabStop();
             return visibleCount;
         },
         selectBySubpath(subpath) {
