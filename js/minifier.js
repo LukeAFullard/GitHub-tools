@@ -11,18 +11,19 @@ function handleNormalNewline(output) {
     return output.trimEnd() + '\n';
 }
 
-function stripJsComments(code) {
+function stripJsComments(code, ext = '') {
     let output = '';
     let i = 0;
     const len = code.length;
     let state = 'normal';
+    const isCss = ['css', 'scss'].includes(ext);
 
     while (i < len) {
         const char = code[i];
         const next = code[i + 1];
 
         if (state === 'normal') {
-            if (char === '/' && next === '/') {
+            if (!isCss && char === '/' && next === '/') {
                 const prevTrimmed = output.trimEnd();
                 if (/(?:https?|ftp|file):$/i.test(prevTrimmed)) {
                     output += char;
@@ -118,6 +119,9 @@ function stripJsComments(code) {
                 }
             } else if (char === "'") {
                 state = 'normal';
+            } else if (char === '\n') {
+                state = 'normal';
+                output = handleNormalNewline(output);
             }
             i++;
         } else if (state === 'double_string') {
@@ -130,6 +134,9 @@ function stripJsComments(code) {
                 }
             } else if (char === '"') {
                 state = 'normal';
+            } else if (char === '\n') {
+                state = 'normal';
+                output = handleNormalNewline(output);
             }
             i++;
         } else if (state === 'template_string') {
@@ -287,24 +294,40 @@ function stripHashComments(code) {
     return output.trim();
 }
 
+function minifyHtml(code) {
+    const preBlocks = [];
+    let preserved = code.replace(/<pre\b[\s\S]*?<\/pre>/gi, (match) => {
+        preBlocks.push(match);
+        return `___PRE_BLOCK_${preBlocks.length - 1}___`;
+    });
+
+    preserved = preserved.replace(/<!--[\s\S]*?-->/g, '');
+    let lines = preserved.split('\n').map(l => l.trimEnd()).filter(l => l.trim().length > 0);
+    let result = lines.join('\n');
+
+    result = result.replace(/___PRE_BLOCK_(\d+)___/g, (_, idx) => preBlocks[parseInt(idx, 10)]);
+    return result;
+}
+
 export function minifyCode(content, filename = '', mode = 'none') {
     if (!content || mode === 'none') return content;
 
-    if (mode === 'basic') {
+    const ext = filename.includes('.') ? filename.split('.').pop().toLowerCase() : '';
+    const textExts = ['md', 'markdown', 'txt', 'json', 'yaml', 'yml', 'toml', 'ini', 'csv', 'log', 'env'];
+
+    if (mode === 'basic' || textExts.includes(ext)) {
         return content.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
     }
 
     if (mode === 'aggressive') {
-        const ext = filename.includes('.') ? filename.split('.').pop().toLowerCase() : '';
         let result = content.replace(/\r\n/g, '\n');
 
         if (['js', 'ts', 'jsx', 'tsx', 'css', 'scss', 'c', 'cpp', 'h', 'java', 'go', 'rs', 'swift', 'php'].includes(ext)) {
-            result = stripJsComments(result);
-        } else if (['py', 'sh', 'bash', 'yaml', 'yml', 'rb'].includes(ext)) {
+            result = stripJsComments(result, ext);
+        } else if (['py', 'sh', 'bash', 'rb'].includes(ext)) {
             result = stripHashComments(result);
         } else if (['html', 'xml', 'svg'].includes(ext)) {
-            result = result.replace(/<!--[\s\S]*?-->/g, '');
-            result = result.split('\n').map(l => l.trimEnd()).filter(l => l.trim().length > 0).join('\n');
+            result = minifyHtml(result);
         } else {
             result = result.split('\n').map(l => l.trimEnd()).filter(l => l.trim().length > 0).join('\n');
         }
