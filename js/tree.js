@@ -113,8 +113,29 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
         li.appendChild(row);
 
         if (item.isDir) {
+            const toggleBtn = document.createElement('span');
+            toggleBtn.className = 'tree-toggle-icon';
+            toggleBtn.textContent = '▼ ';
+            row.insertBefore(toggleBtn, label);
+
             const ul = document.createElement('ul');
             ul.className = 'tree-children';
+
+            let isExpanded = true;
+            const toggleExpand = (expand) => {
+                isExpanded = typeof expand === 'boolean' ? expand : !isExpanded;
+                ul.style.display = isExpanded ? 'block' : 'none';
+                toggleBtn.textContent = isExpanded ? '▼ ' : '▶ ';
+            };
+
+            label.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleExpand();
+            });
+            toggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleExpand();
+            });
 
             const childKeys = Object.keys(item.children).sort((a, b) => {
                 const aIsDir = item.children[a].isDir;
@@ -144,6 +165,9 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
             return {
                 li,
                 checkbox,
+                isDir: true,
+                path: item.path,
+                name: item.name,
                 setSubtreeChecked(val) {
                     checkbox.checked = val;
                     for (const child of childElements) {
@@ -165,6 +189,24 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                     for (const child of childElements) {
                         child.collectSelectedFiles(acc);
                     }
+                },
+                expandAll(val) {
+                    toggleExpand(val);
+                    for (const child of childElements) {
+                        if (child.expandAll) child.expandAll(val);
+                    }
+                },
+                applyFilter(query) {
+                    let hasMatchingChild = false;
+                    for (const child of childElements) {
+                        const matches = child.applyFilter(query);
+                        if (matches) hasMatchingChild = true;
+                    }
+                    const selfMatches = item.name.toLowerCase().includes(query) || item.path.toLowerCase().includes(query);
+                    const isVisible = !query || selfMatches || hasMatchingChild;
+                    li.style.display = isVisible ? 'block' : 'none';
+                    if (query && isVisible) toggleExpand(true);
+                    return isVisible;
                 }
             };
         } else {
@@ -175,6 +217,9 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
             return {
                 li,
                 checkbox,
+                isDir: false,
+                path: item.path,
+                name: item.name,
                 setSubtreeChecked(val) {
                     checkbox.checked = val;
                 },
@@ -183,6 +228,11 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                     if (checkbox.checked) {
                         acc.push(item.node);
                     }
+                },
+                applyFilter(query) {
+                    const matches = !query || item.name.toLowerCase().includes(query) || item.path.toLowerCase().includes(query);
+                    li.style.display = matches ? 'block' : 'none';
+                    return matches;
                 }
             };
         }
@@ -231,6 +281,17 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                 rn.setSubtreeChecked(val);
             }
             updateSelectionState();
+        },
+        expandAll(val) {
+            for (const rn of rootNodes) {
+                if (rn.expandAll) rn.expandAll(val);
+            }
+        },
+        filter(query) {
+            const q = (query || '').trim().toLowerCase();
+            for (const rn of rootNodes) {
+                rn.applyFilter(q);
+            }
         }
     };
 }

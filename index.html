@@ -106,8 +106,11 @@
             <span>Selected for Download: <b id="selectedCount">0</b> files</span>
         </div>
         <div class="tree-actions">
+            <input type="text" id="treeFilterInput" placeholder="🔍 Search or filter files (e.g. *.js, src/)..." style="flex: 1; padding: 0.4rem 0.6rem; font-size: 0.85rem;">
             <button id="selectAllBtn" class="secondary">Select All</button>
             <button id="deselectAllBtn" class="secondary">Deselect All</button>
+            <button id="expandAllBtn" class="secondary">Expand All</button>
+            <button id="collapseAllBtn" class="secondary">Collapse All</button>
             <button id="startDownloadBtn" class="primary">⚡ Pack Selected Files</button>
         </div>
         <div class="tree-container-box" id="treeContainer"></div>

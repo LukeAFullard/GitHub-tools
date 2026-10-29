@@ -250,9 +250,19 @@ textarea.preview {
     accent-color: var(--accent);
 }
 
+.tree-toggle-icon {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    user-select: none;
+    cursor: pointer;
+    width: 12px;
+    display: inline-block;
+}
+
 .tree-folder-label {
     color: var(--primary);
     font-weight: 600;
+    cursor: pointer;
 }
 
 .tree-file-label {

@@ -49,6 +49,9 @@ const dom = {
     selectedCount: document.getElementById('selectedCount'),
     selectAllBtn: document.getElementById('selectAllBtn'),
     deselectAllBtn: document.getElementById('deselectAllBtn'),
+    expandAllBtn: document.getElementById('expandAllBtn'),
+    collapseAllBtn: document.getElementById('collapseAllBtn'),
+    treeFilterInput: document.getElementById('treeFilterInput'),
     startDownloadBtn: document.getElementById('startDownloadBtn'),
     outputCard: document.getElementById('outputCard'),
     statFiles: document.getElementById('statFiles'),
@@ -256,6 +259,12 @@ dom.packBtn.addEventListener('click', async () => {
 
         dom.selectAllBtn.onclick = () => treeControls.selectAll(true);
         dom.deselectAllBtn.onclick = () => treeControls.selectAll(false);
+        if (dom.expandAllBtn) dom.expandAllBtn.onclick = () => treeControls.expandAll(true);
+        if (dom.collapseAllBtn) dom.collapseAllBtn.onclick = () => treeControls.expandAll(false);
+        if (dom.treeFilterInput) {
+            dom.treeFilterInput.value = '';
+            dom.treeFilterInput.oninput = () => treeControls.filter(dom.treeFilterInput.value);
+        }
 
         log(`🔍 Review file selection in tree above and click "⚡ Pack Selected Files" when ready.`);
 
