@@ -224,7 +224,11 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     const treeAscii = generateTree(paths);
     const chunkLimitVal = parseInt(dom.chunkLimit.value, 10) || 0;
 
-    const repoWithUrl = { ...cachedRepoInfo, url: getDeepLinkUrl() };
+    const repoUrl = (cachedRepoInfo && cachedRepoInfo.owner && cachedRepoInfo.repo)
+        ? `https://github.com/${cachedRepoInfo.owner}/${cachedRepoInfo.repo}`
+        : getDeepLinkUrl();
+
+    const repoWithUrl = { ...cachedRepoInfo, url: repoUrl };
 
     const newChunks = chunkContextOutput(
         dom.format.value,
@@ -260,9 +264,13 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     outputExt = firstChunk.ext;
     outputMime = firstChunk.mime;
 
+    const totalChars = newChunks.reduce((acc, c) => acc + c.text.length, 0);
+    const chunkTokensPromises = newChunks.map(c => estimateTokensAsync(c.text));
+    const totalTokens = (await Promise.all(chunkTokensPromises)).reduce((a, b) => a + b, 0);
+
     dom.statFiles.textContent = processedFiles.length;
-    dom.statChars.textContent = packedOutputText.length.toLocaleString();
-    dom.statTokens.textContent = estTokens.toLocaleString();
+    dom.statChars.textContent = totalChars.toLocaleString();
+    dom.statTokens.textContent = totalTokens.toLocaleString();
     dom.statChunks.textContent = generatedChunks.length;
 
     if (generatedChunks.length > 1) {
@@ -378,22 +386,39 @@ dom.packBtn.addEventListener('click', async () => {
         }
 
         // Filter valid source candidates
+        let ignoredDirCount = 0;
+        let ignoredFileCount = 0;
+        let ignoredExtCount = 0;
+        let ignoredSizeCount = 0;
+
         const processable = rawTree.filter(node => {
             if (node.type !== 'blob') return false;
             if (node.mode === '120000') return false; // Exclude symlinks
             const pathParts = node.path.split('/');
             const filename = pathParts[pathParts.length - 1].toLowerCase();
+            const dirParts = pathParts.slice(0, -1);
 
-            if (pathParts.some(p => IGNORED_DIRS.has(p.toLowerCase()))) return false;
-            if (IGNORED_FILES.has(filename)) return false;
-
-            if (customIgnoredExts.some(ext => filename === ext || filename.endsWith('.' + ext))) return false;
-            if (node.size !== undefined && node.size > maxKb * 1024) return false;
+            if (dirParts.some(p => IGNORED_DIRS.has(p.toLowerCase()))) {
+                ignoredDirCount++;
+                return false;
+            }
+            if (IGNORED_FILES.has(filename)) {
+                ignoredFileCount++;
+                return false;
+            }
+            if (customIgnoredExts.some(ext => filename === ext || filename.endsWith('.' + ext))) {
+                ignoredExtCount++;
+                return false;
+            }
+            if (node.size !== undefined && node.size > maxKb * 1024) {
+                ignoredSizeCount++;
+                return false;
+            }
 
             return true;
         });
 
-        log(`[FETCH] Discovered ${rawTree.length} objects. Filtered to ${processable.length} text source files.`);
+        log(`[FETCH] Discovered ${rawTree.length} objects. Excluded: ${ignoredDirCount} in ignored dirs, ${ignoredFileCount} ignored files, ${ignoredExtCount} ignored exts, ${ignoredSizeCount} >${maxKb}KB. Selected ${processable.length} files.`);
 
         // Render Interactive Pre-Download Selection Tree
         dom.manifestCount.textContent = processable.length;
@@ -681,6 +706,11 @@ dom.packBtn.addEventListener('click', async () => {
         cachedRepoInfo = repoInfo;
         cachedBranch = targetBranch;
 
+        // Fetch any missing files if selection changed mid-download
+        if (currentActiveSelection && currentActiveSelection.length > 0) {
+            await fetchSelectedFilesDelta(currentActiveSelection);
+        }
+
         await repackBundleInMemory();
 
     } catch (err) {
@@ -714,30 +744,33 @@ dom.chunkSelect.addEventListener('change', async () => {
     dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview; complete text will download] ...' : '');
 });
 
-dom.downloadBtn.addEventListener('click', () => {
-    const repoInfo = parseRepoInput(dom.repoUrl.value) || { repo: 'bundle' };
-    const blob = new Blob([packedOutputText], { type: outputMime });
+function triggerDownload(content, filename, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const suffix = generatedChunks.length > 1 ? `-part${activeChunkIndex + 1}-of-${generatedChunks.length}` : '';
-    a.download = `${repoInfo.repo}${suffix}-llm-context.${outputExt}`;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+dom.downloadBtn.addEventListener('click', () => {
+    const repoInfo = parseRepoInput(dom.repoUrl.value) || { repo: 'bundle' };
+    const suffix = generatedChunks.length > 1 ? `-part${activeChunkIndex + 1}-of-${generatedChunks.length}` : '';
+    const filename = `${repoInfo.repo}${suffix}-llm-context.${outputExt}`;
+    triggerDownload(packedOutputText, filename, outputMime);
 });
 
 dom.downloadAllBtn.addEventListener('click', async () => {
     const repoInfo = parseRepoInput(dom.repoUrl.value) || { repo: 'bundle' };
     for (let i = 0; i < generatedChunks.length; i++) {
         const chunk = generatedChunks[i];
-        const blob = new Blob([chunk.text], { type: chunk.mime });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${repoInfo.repo}-part${i + 1}-of-${generatedChunks.length}-llm-context.${chunk.ext}`;
-        a.click();
-        URL.revokeObjectURL(url);
-        await sleep(150, abortController ? abortController.signal : null);
+        const filename = `${repoInfo.repo}-part${i + 1}-of-${generatedChunks.length}-llm-context.${chunk.ext}`;
+        triggerDownload(chunk.text, filename, chunk.mime);
+        await sleep(150);
     }
 });
 
