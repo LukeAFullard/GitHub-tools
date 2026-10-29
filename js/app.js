@@ -133,13 +133,19 @@ function getDeepLinkUrl() {
     return url.toString();
 }
 
-async function repackBundleInMemory() {
+async function repackBundleInMemory(activeSelectionNodes = null) {
     if (!cachedRawFiles || cachedRawFiles.length === 0 || !cachedRepoInfo) return;
 
-    const minifyMode = dom.minifyMode ? dom.minifyMode.value : 'none';
-    log(`⚡ Re-packing cached files in memory (${dom.format.value}, minify: ${minifyMode})...`);
+    let targetFiles = cachedRawFiles;
+    if (activeSelectionNodes && Array.isArray(activeSelectionNodes)) {
+        const selectedPaths = new Set(activeSelectionNodes.map(n => n.path));
+        targetFiles = cachedRawFiles.filter(f => selectedPaths.has(f.path));
+    }
 
-    const processedFiles = cachedRawFiles.map(f => ({
+    const minifyMode = dom.minifyMode ? dom.minifyMode.value : 'none';
+    log(`⚡ Re-packing ${targetFiles.length} cached files in memory (${dom.format.value}, minify: ${minifyMode})...`);
+
+    const processedFiles = targetFiles.map(f => ({
         path: f.path,
         content: minifyCode(f.rawContent, f.path, minifyMode)
     }));
@@ -231,16 +237,21 @@ dom.packBtn.addEventListener('click', async () => {
         log(`Querying GitHub API for ${repoInfo.owner}/${repoInfo.repo}...`);
 
         let targetBranch = dom.branch.value.trim();
+        let isPrivateRepo = false;
+
+        const repoMeta = await resolveDefaultBranch(
+            repoInfo.owner,
+            repoInfo.repo,
+            pat,
+            abortController.signal,
+            updateRateLimitUI
+        );
         if (!targetBranch) {
-            targetBranch = await resolveDefaultBranch(
-                repoInfo.owner,
-                repoInfo.repo,
-                pat,
-                abortController.signal,
-                updateRateLimitUI
-            );
+            targetBranch = repoMeta.branch;
         }
-        log(`Target branch: ${targetBranch}`);
+        isPrivateRepo = repoMeta.isPrivate;
+
+        log(`Target branch: ${targetBranch}${isPrivateRepo ? ' (Private Repository)' : ''}`);
 
         log(`Fetching recursive file manifest...`);
         const rawTree = await fetchRepoTree(
@@ -286,6 +297,10 @@ dom.packBtn.addEventListener('click', async () => {
             (selectedNodes) => {
                 activeSelection = selectedNodes;
                 dom.selectedCount.textContent = activeSelection.length;
+                // If files are already cached, update packed bundle dynamically
+                if (cachedRawFiles && cachedRawFiles.length > 0) {
+                    repackBundleInMemory(activeSelection);
+                }
             }
         );
 
@@ -300,22 +315,28 @@ dom.packBtn.addEventListener('click', async () => {
 
         log(`🔍 Review file selection in tree above and click "⚡ Pack Selected Files" when ready.`);
 
+        let hasDownloaded = false;
+
         await new Promise((resolve, reject) => {
             const onStart = () => {
-                cleanup();
-                resolve();
+                if (!hasDownloaded) {
+                    hasDownloaded = true;
+                    cleanup();
+                    resolve();
+                } else {
+                    repackBundleInMemory(activeSelection);
+                }
             };
             const onAbort = () => {
                 cleanup();
                 reject(new DOMException('Aborted by user', 'AbortError'));
             };
             const cleanup = () => {
-                dom.startDownloadBtn.removeEventListener('click', onStart);
                 if (abortController.signal) {
                     abortController.signal.removeEventListener('abort', onAbort);
                 }
             };
-            dom.startDownloadBtn.addEventListener('click', onStart);
+            dom.startDownloadBtn.onclick = onStart;
             if (abortController.signal) {
                 abortController.signal.addEventListener('abort', onAbort);
             }
@@ -328,7 +349,7 @@ dom.packBtn.addEventListener('click', async () => {
 
         log(`Starting parallel download for ${activeSelection.length} selected file(s) (concurrency: 5)...`);
 
-        const collectedFiles = [];
+        const results = new Array(activeSelection.length);
         let emptyCount = 0;
         let failedCount = 0;
         let completedCount = 0;
@@ -354,7 +375,8 @@ dom.packBtn.addEventListener('click', async () => {
                         node.path,
                         pat,
                         abortController.signal,
-                        updateRateLimitUI
+                        updateRateLimitUI,
+                        isPrivateRepo
                     );
 
                     if (result.backoff) {
@@ -376,7 +398,7 @@ dom.packBtn.addEventListener('click', async () => {
                     if (sample.includes('\0')) {
                         log(`⚠️ Skipping ${node.path}: Binary content detected (null bytes).`);
                     } else {
-                        collectedFiles.push({ path: node.path, rawContent: rawContent });
+                        results[i] = { path: node.path, rawContent: rawContent };
                     }
                 } else {
                     failedCount++;
@@ -394,6 +416,8 @@ dom.packBtn.addEventListener('click', async () => {
 
         const workers = Array.from({ length: Math.min(concurrency, activeSelection.length) }, () => worker());
         await Promise.all(workers);
+
+        const collectedFiles = results.filter(Boolean);
 
         log(`Download complete: ${collectedFiles.length} file(s) processed (${emptyCount} empty), ${failedCount} failed.`);
 

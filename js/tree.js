@@ -44,6 +44,27 @@ function calculateDirSize(dirItem) {
     return sum;
 }
 
+function matchQuery(name, path, query) {
+    if (!query) return true;
+    const nameLower = name.toLowerCase();
+    const pathLower = path.toLowerCase();
+    const qLower = query.toLowerCase();
+
+    // Handle glob extension syntax like *.js, *.py, .js
+    if (qLower.startsWith('*.')) {
+        const ext = qLower.slice(1); // e.g. .js
+        return nameLower.endsWith(ext) || pathLower.endsWith(ext);
+    }
+    if (qLower.includes('*')) {
+        const regexStr = '^' + qLower.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$';
+        try {
+            const re = new RegExp(regexStr);
+            return re.test(nameLower) || re.test(pathLower);
+        } catch (_) {}
+    }
+    return nameLower.includes(qLower) || pathLower.includes(qLower);
+}
+
 export function renderInteractiveTree(nodes, container, onSelectionChange) {
     container.innerHTML = '';
 
@@ -168,10 +189,11 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                 isDir: true,
                 path: item.path,
                 name: item.name,
-                setSubtreeChecked(val) {
+        setSubtreeChecked(val, onlyVisible = false) {
+            if (onlyVisible && li.style.display === 'none') return;
                     checkbox.checked = val;
                     for (const child of childElements) {
-                        child.setSubtreeChecked(val);
+                child.setSubtreeChecked(val, onlyVisible);
                     }
                 },
                 updateStateFromChildren() {
@@ -202,7 +224,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                         const matches = child.applyFilter(query);
                         if (matches) hasMatchingChild = true;
                     }
-                    const selfMatches = item.name.toLowerCase().includes(query) || item.path.toLowerCase().includes(query);
+                    const selfMatches = matchQuery(item.name, item.path, query);
                     const isVisible = !query || selfMatches || hasMatchingChild;
                     li.style.display = isVisible ? 'block' : 'none';
                     if (query && isVisible) toggleExpand(true);
@@ -220,7 +242,8 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                 isDir: false,
                 path: item.path,
                 name: item.name,
-                setSubtreeChecked(val) {
+        setSubtreeChecked(val, onlyVisible = false) {
+            if (onlyVisible && li.style.display === 'none') return;
                     checkbox.checked = val;
                 },
                 updateStateFromChildren() {},
@@ -230,7 +253,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                     }
                 },
                 applyFilter(query) {
-                    const matches = !query || item.name.toLowerCase().includes(query) || item.path.toLowerCase().includes(query);
+                    const matches = !query || matchQuery(item.name, item.path, query);
                     li.style.display = matches ? 'block' : 'none';
                     return matches;
                 }
@@ -274,11 +297,14 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
         }
     }
 
+    let currentQuery = '';
+
     return {
         getSelectedNodes,
         selectAll(val) {
+            const hasFilter = Boolean(currentQuery);
             for (const rn of rootNodes) {
-                rn.setSubtreeChecked(val);
+                rn.setSubtreeChecked(val, hasFilter);
             }
             updateSelectionState();
         },
@@ -288,9 +314,9 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
             }
         },
         filter(query) {
-            const q = (query || '').trim().toLowerCase();
+            currentQuery = (query || '').trim();
             for (const rn of rootNodes) {
-                rn.applyFilter(q);
+                rn.applyFilter(currentQuery);
             }
         }
     };
