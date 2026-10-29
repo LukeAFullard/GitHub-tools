@@ -33,7 +33,7 @@ let outputExt = "xml";
 let outputMime = "application/xml";
 
 let cachedRawFiles = []; // [{ path: string, rawContent: string }]
-let cachedSkippedPaths = new Set(); // Set of paths that failed or were binary skips
+let cachedSkippedPaths = new Set();
 let cachedRepoInfo = null;
 let cachedBranch = "";
 let currentActiveSelection = [];
@@ -42,6 +42,316 @@ let currentGeneration = 0;
 let repackGeneration = 0;
 let isDownloading = false;
 let activeFetchCount = 0;
+
+let currentBudgetWindow = 200000;
+let currentAppState = 'empty'; // 'empty' | 'loaded' | 'built'
+
+const dom = {
+    repoUrl: document.getElementById('repoUrl'),
+    branch: document.getElementById('branch'),
+    pat: document.getElementById('pat'),
+    quotaVal: document.getElementById('quotaVal'),
+    resetVal: document.getElementById('resetVal'),
+    format: document.getElementById('format'),
+    maxKb: document.getElementById('maxKb'),
+    throttleMs: document.getElementById('throttleMs'),
+    ignoreExt: document.getElementById('ignoreExt'),
+    minifyMode: document.getElementById('minifyMode'),
+    chunkLimit: document.getElementById('chunkLimit'),
+    packBtn: document.getElementById('packBtn'),
+    shareUrlBtn: document.getElementById('shareUrlBtn'),
+    abortBtn: document.getElementById('abortBtn'),
+    optionsToggleBtn: document.getElementById('optionsToggleBtn'),
+    optionsDrawer: document.getElementById('optionsDrawer'),
+    themeToggleBtn: document.getElementById('themeToggleBtn'),
+    repoInputError: document.getElementById('repoInputError'),
+    progressTrack: document.getElementById('progressTrack'),
+    progressFill: document.getElementById('progressFill'),
+    logHeader: document.getElementById('logHeader'),
+    logSummary: document.getElementById('logSummary'),
+    logToggleBtn: document.getElementById('logToggleBtn'),
+    log: document.getElementById('log'),
+    treeCard: document.getElementById('treeCard'),
+    treeEmptyState: document.getElementById('treeEmptyState'),
+    treeContainer: document.getElementById('treeContainer'),
+    manifestCount: document.getElementById('manifestCount'),
+    selectedCount: document.getElementById('selectedCount'),
+    selectedTokensBadge: document.getElementById('selectedTokensBadge'),
+    selectAllBtn: document.getElementById('selectAllBtn'),
+    deselectAllBtn: document.getElementById('deselectAllBtn'),
+    deselectLargeBtn: document.getElementById('deselectLargeBtn'),
+    largeFileThresholdKb: document.getElementById('largeFileThresholdKb'),
+    expandAllBtn: document.getElementById('expandAllBtn'),
+    collapseAllBtn: document.getElementById('collapseAllBtn'),
+    treeFilterInput: document.getElementById('treeFilterInput'),
+    searchMatchCount: document.getElementById('searchMatchCount'),
+    startDownloadBtn: document.getElementById('startDownloadBtn'),
+    outputCard: document.getElementById('outputCard'),
+    outputEmptyState: document.getElementById('outputEmptyState'),
+    statFiles: document.getElementById('statFiles'),
+    statTokens: document.getElementById('statTokens'),
+    statChars: document.getElementById('statChars'),
+    statChunks: document.getElementById('statChunks'),
+    targetBudgetDisplay: document.getElementById('targetBudgetDisplay'),
+    budgetFill: document.getElementById('budgetFill'),
+    budgetStatusText: document.getElementById('budgetStatusText'),
+    chunkSelectLabel: document.getElementById('chunkSelectLabel'),
+    chunkSelect: document.getElementById('chunkSelect'),
+    previewNotice: document.getElementById('previewNotice'),
+    previewArea: document.getElementById('previewArea'),
+    wrapToggleBtn: document.getElementById('wrapToggleBtn'),
+    downloadBtn: document.getElementById('downloadBtn'),
+    downloadAllBtn: document.getElementById('downloadAllBtn'),
+    copyBtn: document.getElementById('copyBtn'),
+    toastContainer: document.getElementById('toastContainer'),
+    tabFilesBtn: document.getElementById('tabFilesBtn'),
+    tabOutputBtn: document.getElementById('tabOutputBtn'),
+    stickyActionBar: document.getElementById('stickyActionBar'),
+    mobilePrimaryBtn: document.getElementById('mobilePrimaryBtn'),
+    step1: document.getElementById('step1'),
+    step2: document.getElementById('step2'),
+    step3: document.getElementById('step3')
+};
+
+// --- Toast & Inline Notifications ---
+function showToast(message, type = 'info') {
+    if (!dom.toastContainer) return;
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    dom.toastContainer.appendChild(toast);
+    setTimeout(() => toast.classList.add('show'), 10);
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 250);
+    }, 3500);
+}
+
+function showInlineError(msg) {
+    if (dom.repoInputError) {
+        if (msg) {
+            dom.repoInputError.textContent = msg;
+            dom.repoInputError.style.display = 'block';
+        } else {
+            dom.repoInputError.style.display = 'none';
+        }
+    }
+}
+
+// --- Theme Management ---
+function initTheme() {
+    const savedTheme = localStorage.getItem('app_theme');
+    if (savedTheme === 'dark' || savedTheme === 'light') {
+        document.documentElement.setAttribute('data-theme', savedTheme);
+    }
+}
+
+if (dom.themeToggleBtn) {
+    dom.themeToggleBtn.addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme');
+        let next = 'dark';
+        if (current === 'dark') next = 'light';
+        else if (current === 'light') next = 'dark';
+        else {
+            const isDarkSystem = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            next = isDarkSystem ? 'light' : 'dark';
+        }
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('app_theme', next);
+    });
+}
+initTheme();
+
+// --- Persistence (Non-sensitive Settings) ---
+function loadSavedSettings() {
+    try {
+        if (dom.format && localStorage.getItem('cfg_format')) dom.format.value = localStorage.getItem('cfg_format');
+        if (dom.minifyMode && localStorage.getItem('cfg_minifyMode')) dom.minifyMode.value = localStorage.getItem('cfg_minifyMode');
+        if (dom.chunkLimit && localStorage.getItem('cfg_chunkLimit')) dom.chunkLimit.value = localStorage.getItem('cfg_chunkLimit');
+        if (dom.maxKb && localStorage.getItem('cfg_maxKb')) dom.maxKb.value = localStorage.getItem('cfg_maxKb');
+        if (dom.throttleMs && localStorage.getItem('cfg_throttleMs')) dom.throttleMs.value = localStorage.getItem('cfg_throttleMs');
+        if (dom.ignoreExt && localStorage.getItem('cfg_ignoreExt')) dom.ignoreExt.value = localStorage.getItem('cfg_ignoreExt');
+        if (localStorage.getItem('cfg_budgetWindow')) {
+            currentBudgetWindow = parseInt(localStorage.getItem('cfg_budgetWindow'), 10) || 200000;
+        }
+    } catch (_) {}
+}
+
+function saveSettings() {
+    try {
+        if (dom.format) localStorage.setItem('cfg_format', dom.format.value);
+        if (dom.minifyMode) localStorage.setItem('cfg_minifyMode', dom.minifyMode.value);
+        if (dom.chunkLimit) localStorage.setItem('cfg_chunkLimit', dom.chunkLimit.value);
+        if (dom.maxKb) localStorage.setItem('cfg_maxKb', dom.maxKb.value);
+        if (dom.throttleMs) localStorage.setItem('cfg_throttleMs', dom.throttleMs.value);
+        if (dom.ignoreExt) localStorage.setItem('cfg_ignoreExt', dom.ignoreExt.value);
+        localStorage.setItem('cfg_budgetWindow', currentBudgetWindow.toString());
+    } catch (_) {}
+}
+
+// Save options on change
+['format', 'minifyMode', 'chunkLimit', 'maxKb', 'throttleMs', 'ignoreExt'].forEach(id => {
+    if (dom[id]) {
+        dom[id].addEventListener('change', () => {
+            saveSettings();
+            if (id === 'chunkLimit') {
+                const val = parseInt(dom.chunkLimit.value, 10) || 0;
+                if (val > 0) {
+                    currentBudgetWindow = val;
+                    updateBudgetMeterUI(parseInt(dom.statTokens.textContent.replace(/,/g, ''), 10) || 0);
+                }
+            }
+        });
+    }
+});
+
+// Options Drawer Toggle
+if (dom.optionsToggleBtn && dom.optionsDrawer) {
+    dom.optionsToggleBtn.addEventListener('click', () => {
+        const isOpen = dom.optionsDrawer.classList.contains('open');
+        if (isOpen) {
+            dom.optionsDrawer.classList.remove('open');
+            dom.optionsToggleBtn.setAttribute('aria-expanded', 'false');
+        } else {
+            dom.optionsDrawer.classList.add('open');
+            dom.optionsToggleBtn.setAttribute('aria-expanded', 'true');
+        }
+    });
+}
+
+// Log Details Toggle
+let logOpen = false;
+if (dom.logToggleBtn && dom.log) {
+    dom.logToggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        logOpen = !logOpen;
+        dom.log.style.display = logOpen ? 'block' : 'none';
+        dom.logToggleBtn.textContent = logOpen ? 'Hide log' : 'Details';
+    });
+}
+if (dom.logHeader) {
+    dom.logHeader.addEventListener('click', () => {
+        if (dom.logToggleBtn) dom.logToggleBtn.click();
+    });
+}
+
+function log(msg) {
+    if (dom.log) {
+        dom.log.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+        dom.log.scrollTop = dom.log.scrollHeight;
+    }
+    if (dom.logSummary) {
+        const cleanMsg = msg.replace(/^\[[A-Z]+\]\s*/, '');
+        dom.logSummary.textContent = cleanMsg;
+    }
+}
+
+// --- App State & Sequence Steps ---
+function setAppState(state) {
+    currentAppState = state;
+    if (dom.step1) dom.step1.classList.toggle('active', state === 'empty');
+    if (dom.step2) dom.step2.classList.toggle('active', state === 'loaded');
+    if (dom.step3) dom.step3.classList.toggle('active', state === 'built');
+
+    if (dom.mobilePrimaryBtn) {
+        if (state === 'empty') {
+            dom.mobilePrimaryBtn.textContent = 'Load files';
+        } else if (state === 'loaded') {
+            dom.mobilePrimaryBtn.textContent = 'Build context';
+        } else if (state === 'built') {
+            dom.mobilePrimaryBtn.textContent = 'Copy context';
+        }
+    }
+}
+
+// --- Mobile Tab Switching ---
+if (dom.tabFilesBtn && dom.tabOutputBtn) {
+    dom.tabFilesBtn.addEventListener('click', () => {
+        dom.tabFilesBtn.classList.add('active');
+        dom.tabOutputBtn.classList.remove('active');
+        if (dom.treeCard) dom.treeCard.classList.add('active-mobile');
+        if (dom.outputCard) dom.outputCard.classList.remove('active-mobile');
+    });
+
+    dom.tabOutputBtn.addEventListener('click', () => {
+        dom.tabOutputBtn.classList.add('active');
+        dom.tabFilesBtn.classList.remove('active');
+        if (dom.outputCard) dom.outputCard.classList.add('active-mobile');
+        if (dom.treeCard) dom.treeCard.classList.remove('active-mobile');
+    });
+}
+
+if (dom.mobilePrimaryBtn) {
+    dom.mobilePrimaryBtn.addEventListener('click', () => {
+        if (currentAppState === 'empty') {
+            dom.packBtn.click();
+        } else if (currentAppState === 'loaded') {
+            dom.startDownloadBtn.click();
+            if (dom.tabOutputBtn) dom.tabOutputBtn.click();
+        } else if (currentAppState === 'built') {
+            dom.copyBtn.click();
+        }
+    });
+}
+
+// Wrap toggle
+if (dom.wrapToggleBtn && dom.previewArea) {
+    dom.wrapToggleBtn.addEventListener('click', () => {
+        const isWrapped = dom.previewArea.classList.contains('wrap');
+        if (isWrapped) {
+            dom.previewArea.classList.remove('wrap');
+            dom.wrapToggleBtn.classList.remove('primary');
+            dom.wrapToggleBtn.classList.add('secondary');
+        } else {
+            dom.previewArea.classList.add('wrap');
+            dom.wrapToggleBtn.classList.add('primary');
+            dom.wrapToggleBtn.classList.remove('secondary');
+        }
+    });
+}
+
+// Budget Meter Presets
+document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const val = parseInt(btn.getAttribute('data-preset'), 10);
+        if (val) {
+            currentBudgetWindow = val;
+            if (dom.chunkLimit) dom.chunkLimit.value = val.toString();
+            saveSettings();
+            updateBudgetMeterUI(parseInt(dom.statTokens.textContent.replace(/,/g, ''), 10) || 0);
+        }
+    });
+});
+
+function updateBudgetMeterUI(tokenCount) {
+    if (dom.targetBudgetDisplay) {
+        dom.targetBudgetDisplay.textContent = `of ${currentBudgetWindow.toLocaleString()} estimated tokens`;
+    }
+
+    const ratio = currentBudgetWindow > 0 ? (tokenCount / currentBudgetWindow) : 0;
+    const pct = Math.min(Math.round(ratio * 100), 100);
+
+    if (dom.budgetFill) {
+        dom.budgetFill.style.width = `${pct}%`;
+        dom.budgetFill.className = 'budget-fill ' + (
+            ratio <= 0.85 ? 'fits' : ratio <= 1.0 ? 'near' : 'over'
+        );
+    }
+
+    if (dom.budgetStatusText) {
+        if (ratio <= 0.85) {
+            dom.budgetStatusText.textContent = 'Fits context window';
+            dom.budgetStatusText.className = 'budget-status-text status-fits';
+        } else if (ratio <= 1.0) {
+            dom.budgetStatusText.textContent = 'Near context limit';
+            dom.budgetStatusText.className = 'budget-status-text status-near';
+        } else {
+            const overTokens = (tokenCount - currentBudgetWindow).toLocaleString();
+            dom.budgetStatusText.textContent = `Over by ${overTokens} tokens. Split into parts or deselect files.`;
+            dom.budgetStatusText.className = 'budget-status-text status-over';
+        }
+    }
+}
 
 function incrementActiveFetches() {
     activeFetchCount++;
@@ -83,6 +393,7 @@ function clearOutputState() {
     packedOutputText = "";
     if (dom.previewArea) dom.previewArea.value = "";
     if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'flex';
+    if (dom.previewNotice) dom.previewNotice.style.display = 'none';
     if (dom.previewArea) dom.previewArea.style.display = 'none';
     if (dom.statFiles) dom.statFiles.textContent = '0';
     if (dom.statChars) dom.statChars.textContent = '0';
@@ -94,60 +405,7 @@ function clearOutputState() {
     if (dom.chunkSelect) dom.chunkSelect.innerHTML = '';
     if (dom.downloadBtn) dom.downloadBtn.disabled = true;
     if (dom.copyBtn) dom.copyBtn.disabled = true;
-}
-
-const dom = {
-    repoUrl: document.getElementById('repoUrl'),
-    branch: document.getElementById('branch'),
-    pat: document.getElementById('pat'),
-    quotaVal: document.getElementById('quotaVal'),
-    resetVal: document.getElementById('resetVal'),
-    format: document.getElementById('format'),
-    maxKb: document.getElementById('maxKb'),
-    throttleMs: document.getElementById('throttleMs'),
-    ignoreExt: document.getElementById('ignoreExt'),
-    minifyMode: document.getElementById('minifyMode'),
-    chunkLimit: document.getElementById('chunkLimit'),
-    packBtn: document.getElementById('packBtn'),
-    shareUrlBtn: document.getElementById('shareUrlBtn'),
-    abortBtn: document.getElementById('abortBtn'),
-    progressTrack: document.getElementById('progressTrack'),
-    progressFill: document.getElementById('progressFill'),
-    log: document.getElementById('log'),
-    treeCard: document.getElementById('treeCard'),
-    treeEmptyState: document.getElementById('treeEmptyState'),
-    treeContainer: document.getElementById('treeContainer'),
-    manifestCount: document.getElementById('manifestCount'),
-    selectedCount: document.getElementById('selectedCount'),
-    selectedTokensBadge: document.getElementById('selectedTokensBadge'),
-    selectAllBtn: document.getElementById('selectAllBtn'),
-    deselectAllBtn: document.getElementById('deselectAllBtn'),
-    deselectLargeBtn: document.getElementById('deselectLargeBtn'),
-    largeFileThresholdKb: document.getElementById('largeFileThresholdKb'),
-    expandAllBtn: document.getElementById('expandAllBtn'),
-    collapseAllBtn: document.getElementById('collapseAllBtn'),
-    treeFilterInput: document.getElementById('treeFilterInput'),
-    startDownloadBtn: document.getElementById('startDownloadBtn'),
-    outputCard: document.getElementById('outputCard'),
-    outputEmptyState: document.getElementById('outputEmptyState'),
-    statFiles: document.getElementById('statFiles'),
-    statTokens: document.getElementById('statTokens'),
-    statChars: document.getElementById('statChars'),
-    statChunks: document.getElementById('statChunks'),
-    chunkSelectLabel: document.getElementById('chunkSelectLabel'),
-    chunkSelect: document.getElementById('chunkSelect'),
-    previewArea: document.getElementById('previewArea'),
-    downloadBtn: document.getElementById('downloadBtn'),
-    downloadAllBtn: document.getElementById('downloadAllBtn'),
-    copyBtn: document.getElementById('copyBtn')
-};
-
-function log(msg) {
-    if (dom.log) {
-        dom.log.style.display = 'block';
-        dom.log.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-        dom.log.scrollTop = dom.log.scrollHeight;
-    }
+    updateBudgetMeterUI(0);
 }
 
 function updateRateLimitUI(meta) {
@@ -156,7 +414,7 @@ function updateRateLimitUI(meta) {
         const limit = typeof meta.limit === 'number' ? meta.limit : parseInt(meta.limit, 10);
         if (!Number.isNaN(remaining) && !Number.isNaN(limit)) {
             dom.quotaVal.textContent = `${remaining} / ${limit}`;
-            dom.quotaVal.className = 'rate-status ' + (
+            dom.quotaVal.className = (
                 remaining < 5 ? 'rate-critical' : remaining < 20 ? 'rate-warning' : 'rate-normal'
             );
         }
@@ -180,6 +438,7 @@ async function refreshRateLimitBadge() {
 
 dom.pat.addEventListener('change', refreshRateLimitBadge);
 refreshRateLimitBadge();
+loadSavedSettings();
 
 function applyUrlParams() {
     const params = new URLSearchParams(window.location.search);
@@ -223,7 +482,7 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     if (!cachedRawFiles || cachedRawFiles.length === 0 || !cachedRepoInfo || !selection || selection.length === 0) {
         clearOutputState();
         if (selection && selection.length === 0) {
-            log(`[WARN] No files selected for packing.`);
+            log(`[WARN] No files selected for context build.`);
         }
         return;
     }
@@ -237,7 +496,7 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     }
 
     const minifyMode = dom.minifyMode ? dom.minifyMode.value : 'none';
-    log(`[PACK] Re-packing ${targetFiles.length} cached files in memory (${dom.format.value}, minify: ${minifyMode})...`);
+    log(`[PACK] Building context from ${targetFiles.length} files (${dom.format.value}, shrink: ${minifyMode})...`);
 
     const processedFiles = targetFiles.map(f => ({
         path: f.path,
@@ -277,9 +536,9 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
         }
     }
     if (singleFileExceeded) {
-        log(`[WARN] Warning: One or more single files exceed your requested chunk limit of ${chunkLimitVal} tokens.`);
+        log(`[WARN] Warning: One or more single files exceed your requested split limit of ${chunkLimitVal} tokens.`);
     } else if (overheadExceeded) {
-        log(`[WARN] Warning: Context header or structure tree exceeds your requested chunk limit of ${chunkLimitVal} tokens.`);
+        log(`[WARN] Warning: Context structure exceeds your requested split limit of ${chunkLimitVal} tokens.`);
     }
 
     const firstChunk = newChunks[0];
@@ -288,7 +547,6 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     const estTokens = await estimateTokensAsync(newPackedOutputText);
 
     if (thisRepackGen !== repackGeneration) {
-        // Out-of-order completion, ignore
         return;
     }
 
@@ -307,6 +565,8 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     dom.statTokens.textContent = totalTokens.toLocaleString();
     dom.statChunks.textContent = generatedChunks.length;
 
+    updateBudgetMeterUI(totalTokens);
+
     if (generatedChunks.length > 1) {
         dom.chunkSelectLabel.style.display = 'inline-block';
         dom.chunkSelect.style.display = 'inline-block';
@@ -321,10 +581,13 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
 
     dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview; complete text will download] ...' : '');
     if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'none';
+    if (dom.previewNotice) dom.previewNotice.style.display = 'block';
     if (dom.previewArea) dom.previewArea.style.display = 'block';
     if (dom.downloadBtn) dom.downloadBtn.disabled = false;
     if (dom.copyBtn) dom.copyBtn.disabled = false;
-    log(`[SUCCESS] Context bundle ready: ${generatedChunks.length} chunk(s), ~${estTokens.toLocaleString()} tokens in active chunk.`);
+
+    setAppState('built');
+    log(`[SUCCESS] Context ready: ${generatedChunks.length} part(s), ~${estTokens.toLocaleString()} tokens.`);
 }
 
 // Auto-repack on setting changes if files are already cached
@@ -334,20 +597,20 @@ if (dom.chunkLimit) dom.chunkLimit.addEventListener('change', () => repackBundle
 
 // --- Main Processing Pipeline ---
 dom.packBtn.addEventListener('click', async () => {
+    showInlineError('');
     if (abortController) {
         abortController.abort();
     }
 
     const repoInfo = parseRepoInput(dom.repoUrl.value);
     if (!repoInfo) {
-        alert('Please enter a valid owner/repo (e.g., "LukeAFullard/senti")');
+        showInlineError("Enter a repo as owner/name or a GitHub URL.");
         return;
     }
 
     currentGeneration++;
     const thisGen = currentGeneration;
 
-    // Reset repo cache state on new repo lookup
     cachedRawFiles = [];
     cachedSkippedPaths.clear();
     cachedRepoInfo = null;
@@ -358,7 +621,6 @@ dom.packBtn.addEventListener('click', async () => {
 
     const userTypedBranch = dom.branch ? dom.branch.value.trim() : '';
 
-    // Auto-fill branch and subpath filter if present in pasted GitHub URL
     if (dom.branch) {
         const parsedWithOverride = parseRepoInput(dom.repoUrl.value, userTypedBranch);
         if (parsedWithOverride && parsedWithOverride.branch) {
@@ -373,7 +635,6 @@ dom.packBtn.addEventListener('click', async () => {
     const pat = dom.pat.value.trim();
     const maxKb = parseInt(dom.maxKb.value, 10) || 150;
     const throttleMs = parseInt(dom.throttleMs.value, 10) || 80;
-    const minifyMode = dom.minifyMode ? dom.minifyMode.value : 'none';
     const customIgnoredExts = Array.from(new Set(
         dom.ignoreExt.value.split(',').map(s => s.trim().toLowerCase().replace(/^\./, '')).filter(Boolean)
     ));
@@ -403,7 +664,13 @@ dom.packBtn.addEventListener('click', async () => {
             );
             if (!targetBranch) targetBranch = repoMeta.branch;
             isPrivateRepo = repoMeta.isPrivate;
-        } catch (_) {}
+        } catch (err) {
+            if (err.message && err.message.includes('404')) {
+                showToast("Can't find that repo or branch. For a private repo, add a token with read access to contents.", "error");
+            } else if (err.message && err.message.includes('rate limit')) {
+                showToast("GitHub rate limit reached. Add a token to raise the limit.", "error");
+            }
+        }
 
         log(`[FETCH] Target branch: ${targetBranch}${isPrivateRepo ? ' (Private Repository)' : ''}`);
 
@@ -445,10 +712,10 @@ dom.packBtn.addEventListener('click', async () => {
         }
 
         if (rawTree.truncated) {
-            log(`[WARN] Warning: Git repository tree is truncated by GitHub API (100,000 entries / 7MB limit). Some deeply nested files may not be visible.`);
+            log(`[WARN] GitHub returned a partial file list. Narrow the path or pick a branch with fewer files.`);
+            showToast("GitHub returned a partial file list. Narrow the path or pick a branch with fewer files.", "warn");
         }
 
-        // Filter valid source candidates
         let ignoredDirCount = 0;
         let ignoredFileCount = 0;
         let ignoredExtCount = 0;
@@ -456,7 +723,7 @@ dom.packBtn.addEventListener('click', async () => {
 
         const processable = rawTree.filter(node => {
             if (node.type !== 'blob') return false;
-            if (node.mode === '120000') return false; // Exclude symlinks
+            if (node.mode === '120000') return false;
             const pathParts = node.path.split('/');
             const filename = pathParts[pathParts.length - 1].toLowerCase();
             const dirParts = pathParts.slice(0, -1);
@@ -483,7 +750,6 @@ dom.packBtn.addEventListener('click', async () => {
 
         log(`[FETCH] Discovered ${rawTree.length} objects. Excluded: ${ignoredDirCount} in ignored dirs, ${ignoredFileCount} ignored files, ${ignoredExtCount} ignored exts, ${ignoredSizeCount} >${maxKb}KB. Selected ${processable.length} files.`);
 
-        // Render Interactive Pre-Download Selection Tree
         dom.manifestCount.textContent = processable.length;
         dom.selectedCount.textContent = processable.length;
         if (dom.treeEmptyState) dom.treeEmptyState.style.display = 'none';
@@ -500,9 +766,9 @@ dom.packBtn.addEventListener('click', async () => {
                 dom.selectedCount.textContent = activeSelection.length;
                 if (treeControls.getSelectedStats && dom.selectedTokensBadge) {
                     const stats = treeControls.getSelectedStats();
-                    dom.selectedTokensBadge.textContent = `~${stats.estTokens.toLocaleString()} tok`;
+                    dom.selectedTokensBadge.textContent = `~${stats.estTokens.toLocaleString()} tokens selected`;
+                    updateBudgetMeterUI(stats.estTokens);
                 }
-                // If files are already cached, fetch any missing delta files and update packed bundle dynamically
                 if (cachedRawFiles && cachedRawFiles.length > 0) {
                     if (currentActiveSelection && currentActiveSelection.length > 0) {
                         await fetchSelectedFilesDelta(currentActiveSelection);
@@ -513,10 +779,10 @@ dom.packBtn.addEventListener('click', async () => {
         );
         currentActiveSelection = activeSelection;
 
-        // Initial token badge update
         if (treeControls.getSelectedStats && dom.selectedTokensBadge) {
             const stats = treeControls.getSelectedStats();
-            dom.selectedTokensBadge.textContent = `~${stats.estTokens.toLocaleString()} tok`;
+            dom.selectedTokensBadge.textContent = `~${stats.estTokens.toLocaleString()} tokens selected`;
+            updateBudgetMeterUI(stats.estTokens);
         }
 
         dom.selectAllBtn.onclick = () => treeControls.selectAll(true);
@@ -529,9 +795,16 @@ dom.packBtn.addEventListener('click', async () => {
         }
         if (dom.expandAllBtn) dom.expandAllBtn.onclick = () => treeControls.expandAll(true);
         if (dom.collapseAllBtn) dom.collapseAllBtn.onclick = () => treeControls.expandAll(false);
+
         if (dom.treeFilterInput) {
             dom.treeFilterInput.value = repoInfo.subpath || '';
-            dom.treeFilterInput.oninput = () => treeControls.filter(dom.treeFilterInput.value, false);
+            const doFilter = () => {
+                const count = treeControls.filter(dom.treeFilterInput.value, false);
+                if (dom.searchMatchCount) {
+                    dom.searchMatchCount.textContent = dom.treeFilterInput.value ? `${count} matches` : '';
+                }
+            };
+            dom.treeFilterInput.oninput = doFilter;
             if (repoInfo.subpath) {
                 treeControls.filter(repoInfo.subpath, true);
                 if (treeControls.selectBySubpath) {
@@ -540,7 +813,16 @@ dom.packBtn.addEventListener('click', async () => {
             }
         }
 
-        log(`[INSPECT] Review file selection in tree above and click "Pack Selected Files" when ready.`);
+        // Global shortcut: '/' focuses search filter
+        window.onkeydown = (e) => {
+            if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+                e.preventDefault();
+                if (dom.treeFilterInput) dom.treeFilterInput.focus();
+            }
+        };
+
+        setAppState('loaded');
+        showToast(`Loaded manifest: ${processable.length} files.`, 'info');
 
         let hasDownloaded = false;
 
@@ -574,7 +856,6 @@ dom.packBtn.addEventListener('click', async () => {
                             if (thisGen !== currentGeneration) break;
                             const i = index++;
                             const node = missingNodes[i];
-                            log(`[FETCH] Fetching delta ${node.path}...`);
 
                             let retries = 0;
                             let result = null;
@@ -634,7 +915,7 @@ dom.packBtn.addEventListener('click', async () => {
                 }
             }).catch((err) => {
                 if (err.name === 'AbortError') {
-                    log('[CANCEL] Delta fetch cancelled by user.');
+                    log('[CANCEL] Delta fetch cancelled.');
                 } else {
                     log(`[ERROR] Delta fetch error: ${err.message || err}`);
                 }
@@ -684,12 +965,12 @@ dom.packBtn.addEventListener('click', async () => {
         const selectionSnapshot = [...currentActiveSelection];
 
         if (selectionSnapshot.length === 0) {
-            log('[WARN] No files selected for packing.');
+            log('[WARN] No files selected for context build.');
             clearOutputState();
             return;
         }
 
-        log(`[FETCH] Starting parallel download for ${selectionSnapshot.length} selected file(s) (concurrency: 5)...`);
+        log(`[FETCH] Starting download for ${selectionSnapshot.length} selected file(s)...`);
 
         const results = new Array(selectionSnapshot.length);
         let emptyCount = 0;
@@ -704,7 +985,6 @@ dom.packBtn.addEventListener('click', async () => {
                 if (abortController.signal && abortController.signal.aborted) break;
                 const i = index++;
                 const node = selectionSnapshot[i];
-                log(`[FETCH] [${i + 1}/${selectionSnapshot.length}] Fetching ${node.path}...`);
 
                 let retries = 0;
                 let result = null;
@@ -728,8 +1008,7 @@ dom.packBtn.addEventListener('click', async () => {
                     if (result && result.backoff) {
                         retries++;
                         const backoffTime = Math.min(result.backoff, 60);
-                        const reasonMsg = (result.status >= 500) ? `Server error (HTTP ${result.status})` : 'Rate limit warning';
-                        log(`[RETRY] ${reasonMsg} for ${node.path}. Retry ${retries}/3 cooling down for ${backoffTime}s...`);
+                        log(`[RETRY] Cooling down for ${backoffTime}s...`);
                         await sleep(backoffTime * 1000, abortController.signal);
                         continue;
                     }
@@ -743,7 +1022,7 @@ dom.packBtn.addEventListener('click', async () => {
                     }
                     if (isBinaryContent(rawContent)) {
                         cachedSkippedPaths.add(node.path);
-                        log(`[WARN] Skipping ${node.path}: Binary content detected.`);
+                        log(`[WARN] Skipping ${node.path}: Binary content.`);
                     } else {
                         results[i] = { path: node.path, rawContent: rawContent };
                     }
@@ -769,10 +1048,10 @@ dom.packBtn.addEventListener('click', async () => {
 
         const collectedFiles = results.filter(Boolean);
 
-        log(`[SUCCESS] Download complete: ${collectedFiles.length} file(s) processed (${emptyCount} empty), ${failedCount} failed.`);
+        log(`[SUCCESS] Download complete: ${collectedFiles.length} file(s) fetched.`);
 
         if (collectedFiles.length === 0) {
-            log('[WARN] No content could be fetched from the selected files.');
+            showToast("No content could be fetched from selected files.", "warn");
             return;
         }
 
@@ -780,7 +1059,6 @@ dom.packBtn.addEventListener('click', async () => {
         cachedRepoInfo = repoInfo;
         cachedBranch = targetBranch;
 
-        // Fetch any missing files if selection changed mid-download
         if (currentActiveSelection && currentActiveSelection.length > 0) {
             await fetchSelectedFilesDelta(currentActiveSelection);
         }
@@ -789,9 +1067,11 @@ dom.packBtn.addEventListener('click', async () => {
 
     } catch (err) {
         if (err.name === 'AbortError') {
-            log('[CANCEL] Process cancelled by user.');
+            log('[CANCEL] Process cancelled.');
+            showToast("Cancelled.", "info");
         } else {
             log(`[ERROR] Error: ${err.message}`);
+            showToast(`Error: ${err.message}`, "error");
         }
     } finally {
         isDownloading = false;
@@ -837,6 +1117,7 @@ dom.downloadBtn.addEventListener('click', () => {
     const suffix = generatedChunks.length > 1 ? `-part${activeChunkIndex + 1}-of-${generatedChunks.length}` : '';
     const filename = `${repoInfo.repo}${suffix}-llm-context.${outputExt}`;
     triggerDownload(packedOutputText, filename, outputMime);
+    showToast(`Downloaded ${filename}`, 'info');
 });
 
 dom.downloadAllBtn.addEventListener('click', async () => {
@@ -847,16 +1128,18 @@ dom.downloadAllBtn.addEventListener('click', async () => {
         triggerDownload(chunk.text, filename, chunk.mime);
         await sleep(150);
     }
+    showToast("Downloaded all parts", "info");
 });
 
 dom.copyBtn.addEventListener('click', async () => {
     try {
         await navigator.clipboard.writeText(packedOutputText);
-        const originalHTML = dom.copyBtn.innerHTML;
-        dom.copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span>Copied!</span>`;
-        setTimeout(() => { dom.copyBtn.innerHTML = originalHTML; }, 2000);
+        showToast("Copied context to clipboard!", "info");
+        const originalText = dom.copyBtn.textContent;
+        dom.copyBtn.textContent = 'Copied!';
+        setTimeout(() => { dom.copyBtn.textContent = originalText; }, 2000);
     } catch (_) {
-        alert('Unable to copy automatically. Please copy directly from the preview textarea.');
+        showToast('Unable to copy automatically. Please copy directly from preview.', 'error');
     }
 });
 
@@ -865,11 +1148,9 @@ if (dom.shareUrlBtn) {
         const deepLink = getDeepLinkUrl();
         try {
             await navigator.clipboard.writeText(deepLink);
-            const originalHTML = dom.shareUrlBtn.innerHTML;
-            dom.shareUrlBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span>Link Copied!</span>`;
-            setTimeout(() => { dom.shareUrlBtn.innerHTML = originalHTML; }, 2000);
+            showToast("Deep-link URL copied!", "info");
         } catch (_) {
-            alert(`Deep-Link URL:\n${deepLink}`);
+            showToast(`Link: ${deepLink}`, "info");
         }
     });
 }

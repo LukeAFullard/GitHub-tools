@@ -27,9 +27,6 @@ export function generateTree(paths) {
     return print(tree);
 }
 
-/**
- * Builds an interactive HTML DOM tree with selection checkboxes from a list of file nodes.
- */
 function calculateDirSize(dirItem) {
     let sum = 0;
     if (!dirItem || !dirItem.children) return 0;
@@ -44,15 +41,24 @@ function calculateDirSize(dirItem) {
     return sum;
 }
 
+function getMaxSiblingSize(siblingsMap) {
+    let max = 1;
+    for (const k of Object.keys(siblingsMap)) {
+        const child = siblingsMap[k];
+        const sz = child.isDir ? calculateDirSize(child) : (child.size || 0);
+        if (sz > max) max = sz;
+    }
+    return max;
+}
+
 function matchQuery(name, path, query) {
     if (!query) return true;
     const nameLower = name.toLowerCase();
     const pathLower = path.toLowerCase();
     const qLower = query.toLowerCase();
 
-    // Handle glob extension syntax like *.js, *.py, .js
     if (qLower.startsWith('*.')) {
-        const ext = qLower.slice(1); // e.g. .js
+        const ext = qLower.slice(1);
         return nameLower.endsWith(ext) || pathLower.endsWith(ext);
     }
     if (qLower.includes('*')) {
@@ -65,15 +71,14 @@ function matchQuery(name, path, query) {
     return nameLower.includes(qLower) || pathLower.includes(qLower);
 }
 
-const SVG_FOLDER = `<svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
-const SVG_FILE = `<svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
-const SVG_CHEVRON_DOWN = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
-const SVG_CHEVRON_RIGHT = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+const SVG_FOLDER = `<svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
+const SVG_FILE = `<svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
+const SVG_CHEVRON_DOWN = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+const SVG_CHEVRON_RIGHT = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
 
 export function renderInteractiveTree(nodes, container, onSelectionChange) {
     container.innerHTML = '';
 
-    // Build hierarchy using prototype-safe objects
     const root = { name: '', isDir: true, children: Object.create(null), path: '' };
 
     for (const node of nodes) {
@@ -108,62 +113,89 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
         }
     }
 
-    const selectedPaths = new Set(nodes.map(n => n.path));
+    let matchCount = nodes.length;
 
-    function createTreeNodeDOM(item) {
+    function createTreeNodeDOM(item, parentSiblingsMap = root.children) {
         const li = document.createElement('li');
         li.className = 'tree-item';
+        li.setAttribute('role', 'treeitem');
 
         const row = document.createElement('div');
         row.className = 'tree-row';
+        row.tabIndex = 0;
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.checked = true;
         checkbox.className = 'tree-checkbox';
+        checkbox.setAttribute('aria-label', `Select ${item.name}`);
 
         const label = document.createElement('span');
         label.className = item.isDir ? 'tree-folder-label' : 'tree-file-label';
+
         const iconSpan = document.createElement('span');
         iconSpan.innerHTML = item.isDir ? SVG_FOLDER : SVG_FILE;
+
         const nameSpan = document.createElement('span');
         nameSpan.textContent = item.name;
+
         label.appendChild(iconSpan);
         label.appendChild(nameSpan);
 
-        const sizeBadge = document.createElement('span');
+        // Weight bar calculation relative to siblings
         const bytes = item.isDir ? calculateDirSize(item) : (item.size || 0);
+        const maxSiblingBytes = getMaxSiblingSize(parentSiblingsMap);
+        const pct = Math.max(4, Math.round((bytes / maxSiblingBytes) * 100));
+
+        const weightBg = document.createElement('span');
+        weightBg.className = 'tree-weight-bar-bg';
+        const weightFill = document.createElement('span');
+        const isLarge = !item.isDir && bytes > 50 * 1024;
+        weightFill.className = 'tree-weight-bar-fill' + (isLarge ? ' near' : '');
+        weightFill.style.width = `${pct}%`;
+        weightBg.appendChild(weightFill);
+
+        const sizeBadge = document.createElement('span');
         const kbStr = bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`;
         const estTok = Math.round(bytes / 3.8);
-        const isLarge = !item.isDir && bytes > 50 * 1024; // 50 KB warning
-        sizeBadge.className = 'tree-size-badge' + (isLarge ? ' tree-large-warning' : '');
-        sizeBadge.textContent = ` (${kbStr} ~${estTok.toLocaleString()} tok)`;
+        sizeBadge.className = 'tree-size-badge' + (isLarge ? ' tree-large-badge' : '');
+        sizeBadge.textContent = isLarge ? `${kbStr} (~${estTok.toLocaleString()} tok) [Large]` : `${kbStr} (~${estTok.toLocaleString()} tok)`;
 
         row.appendChild(checkbox);
         row.appendChild(label);
+        row.appendChild(weightBg);
         row.appendChild(sizeBadge);
         li.appendChild(row);
 
+        // Entire row tap/click toggles checkbox (unless clicking toggle button)
+        row.addEventListener('click', (e) => {
+            if (e.target === checkbox) return;
+            if (e.target.closest('.tree-toggle-btn')) return;
+            checkbox.checked = !checkbox.checked;
+            checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+
         if (item.isDir) {
-            const toggleBtn = document.createElement('span');
-            toggleBtn.className = 'tree-toggle-icon';
+            li.setAttribute('aria-expanded', 'true');
+            const toggleBtn = document.createElement('button');
+            toggleBtn.type = 'button';
+            toggleBtn.className = 'tree-toggle-btn';
+            toggleBtn.setAttribute('aria-label', `Toggle folder ${item.name}`);
             toggleBtn.innerHTML = SVG_CHEVRON_DOWN;
             row.insertBefore(toggleBtn, label);
 
             const ul = document.createElement('ul');
             ul.className = 'tree-children';
+            ul.setAttribute('role', 'group');
 
             let isExpanded = true;
             const toggleExpand = (expand) => {
                 isExpanded = typeof expand === 'boolean' ? expand : !isExpanded;
                 ul.style.display = isExpanded ? 'block' : 'none';
                 toggleBtn.innerHTML = isExpanded ? SVG_CHEVRON_DOWN : SVG_CHEVRON_RIGHT;
+                li.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
             };
 
-            label.addEventListener('click', (e) => {
-                e.stopPropagation();
-                toggleExpand();
-            });
             toggleBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 toggleExpand();
@@ -179,7 +211,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
             const childElements = [];
             for (const key of childKeys) {
                 const childItem = item.children[key];
-                const childDOM = createTreeNodeDOM(childItem);
+                const childDOM = createTreeNodeDOM(childItem, item.children);
                 ul.appendChild(childDOM.li);
                 childElements.push(childDOM);
             }
@@ -194,6 +226,20 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                 updateSelectionState();
             });
 
+            row.addEventListener('keydown', (e) => {
+                if (e.key === ' ' || e.key === 'Spacebar') {
+                    e.preventDefault();
+                    checkbox.checked = !checkbox.checked;
+                    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                } else if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    if (!isExpanded) toggleExpand(true);
+                } else if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    if (isExpanded) toggleExpand(false);
+                }
+            });
+
             return {
                 li,
                 checkbox,
@@ -201,6 +247,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                 path: item.path,
                 name: item.name,
                 childElements,
+                toggleExpand,
                 setSubtreeChecked(val, onlyVisible = false) {
                     if (onlyVisible && li.style.display === 'none') return;
                     checkbox.checked = val;
@@ -226,6 +273,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                     }
                     checkbox.checked = !noneChecked;
                     checkbox.indeterminate = anyIndeterminate || (!allChecked && !noneChecked);
+                    checkbox.setAttribute('aria-checked', checkbox.indeterminate ? 'mixed' : (checkbox.checked ? 'true' : 'false'));
                 },
                 collectSelectedFiles(acc) {
                     for (const child of childElements) {
@@ -272,6 +320,14 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                 updateSelectionState();
             });
 
+            row.addEventListener('keydown', (e) => {
+                if (e.key === ' ' || e.key === 'Spacebar') {
+                    e.preventDefault();
+                    checkbox.checked = !checkbox.checked;
+                    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            });
+
             return {
                 li,
                 checkbox,
@@ -311,6 +367,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
 
     const rootUl = document.createElement('ul');
     rootUl.className = 'tree-root';
+    rootUl.setAttribute('role', 'tree');
 
     const rootChildKeys = Object.keys(root.children).sort((a, b) => {
         const aIsDir = root.children[a].isDir;
@@ -321,7 +378,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
 
     const rootNodes = [];
     for (const key of rootChildKeys) {
-        const childDOM = createTreeNodeDOM(root.children[key]);
+        const childDOM = createTreeNodeDOM(root.children[key], root.children);
         rootUl.appendChild(childDOM.li);
         rootNodes.push(childDOM);
     }
@@ -380,9 +437,14 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
         },
         filter(query, isSubpath = false) {
             currentQuery = (query || '').trim();
+            let visibleCount = 0;
             for (const rn of rootNodes) {
-                rn.applyFilter(currentQuery, isSubpath);
+                if (rn.applyFilter(currentQuery, isSubpath)) {
+                    visibleCount++;
+                }
             }
+            matchCount = visibleCount;
+            return visibleCount;
         },
         selectBySubpath(subpath) {
             const clean = (subpath || '').trim().replace(/^\/+|\/+$/g, '');
