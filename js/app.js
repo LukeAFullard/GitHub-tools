@@ -48,8 +48,11 @@ const dom = {
     treeContainer: document.getElementById('treeContainer'),
     manifestCount: document.getElementById('manifestCount'),
     selectedCount: document.getElementById('selectedCount'),
+    selectedTokensBadge: document.getElementById('selectedTokensBadge'),
     selectAllBtn: document.getElementById('selectAllBtn'),
     deselectAllBtn: document.getElementById('deselectAllBtn'),
+    deselectLargeBtn: document.getElementById('deselectLargeBtn'),
+    largeFileThresholdKb: document.getElementById('largeFileThresholdKb'),
     expandAllBtn: document.getElementById('expandAllBtn'),
     collapseAllBtn: document.getElementById('collapseAllBtn'),
     treeFilterInput: document.getElementById('treeFilterInput'),
@@ -217,6 +220,11 @@ dom.packBtn.addEventListener('click', async () => {
         return;
     }
 
+    // Auto-fill branch and subpath filter if present in pasted GitHub URL
+    if (repoInfo.branch && dom.branch && !dom.branch.value.trim()) {
+        dom.branch.value = repoInfo.branch;
+    }
+
     const pat = dom.pat.value.trim();
     const maxKb = parseInt(dom.maxKb.value, 10) || 150;
     const throttleMs = parseInt(dom.throttleMs.value, 10) || 80;
@@ -297,6 +305,10 @@ dom.packBtn.addEventListener('click', async () => {
             (selectedNodes) => {
                 activeSelection = selectedNodes;
                 dom.selectedCount.textContent = activeSelection.length;
+                if (treeControls.getSelectedStats && dom.selectedTokensBadge) {
+                    const stats = treeControls.getSelectedStats();
+                    dom.selectedTokensBadge.textContent = `~${stats.estTokens.toLocaleString()} tok`;
+                }
                 // If files are already cached, update packed bundle dynamically
                 if (cachedRawFiles && cachedRawFiles.length > 0) {
                     repackBundleInMemory(activeSelection);
@@ -304,13 +316,28 @@ dom.packBtn.addEventListener('click', async () => {
             }
         );
 
+        // Initial token badge update
+        if (treeControls.getSelectedStats && dom.selectedTokensBadge) {
+            const stats = treeControls.getSelectedStats();
+            dom.selectedTokensBadge.textContent = `~${stats.estTokens.toLocaleString()} tok`;
+        }
+
         dom.selectAllBtn.onclick = () => treeControls.selectAll(true);
         dom.deselectAllBtn.onclick = () => treeControls.selectAll(false);
+        if (dom.deselectLargeBtn) {
+            dom.deselectLargeBtn.onclick = () => {
+                const kbVal = parseInt(dom.largeFileThresholdKb ? dom.largeFileThresholdKb.value : '50', 10) || 50;
+                treeControls.deselectLarge(kbVal * 1024);
+            };
+        }
         if (dom.expandAllBtn) dom.expandAllBtn.onclick = () => treeControls.expandAll(true);
         if (dom.collapseAllBtn) dom.collapseAllBtn.onclick = () => treeControls.expandAll(false);
         if (dom.treeFilterInput) {
-            dom.treeFilterInput.value = '';
+            dom.treeFilterInput.value = repoInfo.subpath || '';
             dom.treeFilterInput.oninput = () => treeControls.filter(dom.treeFilterInput.value);
+            if (repoInfo.subpath) {
+                treeControls.filter(repoInfo.subpath);
+            }
         }
 
         log(`🔍 Review file selection in tree above and click "⚡ Pack Selected Files" when ready.`);

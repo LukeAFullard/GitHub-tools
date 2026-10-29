@@ -104,14 +104,19 @@
     <div class="card" id="treeCard">
         <div class="output-meta">
             <span>Manifest Total: <b id="manifestCount">0</b> files</span>
-            <span>Selected for Download: <b id="selectedCount">0</b> files</span>
+            <span>Selected for Download: <b id="selectedCount">0</b> files <span id="selectedTokensBadge" class="badge" style="margin-left:5px;">~0 tok</span></span>
         </div>
         <div class="tree-actions">
-            <input type="text" id="treeFilterInput" placeholder="🔍 Search or filter files (e.g. *.js, src/)..." style="flex: 1; padding: 0.4rem 0.6rem; font-size: 0.85rem;">
+            <input type="text" id="treeFilterInput" placeholder="🔍 Search or filter files (e.g. *.js, src/)..." style="flex: 1; min-width: 180px; padding: 0.4rem 0.6rem; font-size: 0.85rem;">
             <button id="selectAllBtn" class="secondary">Select All</button>
             <button id="deselectAllBtn" class="secondary">Deselect All</button>
             <button id="expandAllBtn" class="secondary">Expand All</button>
             <button id="collapseAllBtn" class="secondary">Collapse All</button>
+            <div style="display: flex; align-items: center; gap: 5px;">
+                <button id="deselectLargeBtn" class="secondary" style="white-space: nowrap;">⚠️ Uncheck &gt;</button>
+                <input type="number" id="largeFileThresholdKb" value="50" min="1" max="5000" style="width: 70px; padding: 0.35rem; font-size: 0.8rem;" title="KB threshold">
+                <span style="font-size: 0.8rem; color: var(--text-muted);">KB</span>
+            </div>
             <button id="startDownloadBtn" class="primary">⚡ Pack Selected Files</button>
         </div>
         <div class="tree-container-box" id="treeContainer"></div>
