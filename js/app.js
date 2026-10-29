@@ -1,7 +1,17 @@
 /**
  * Main Application Controller & DOM Orchestration
  */
-import { IGNORED_DIRS, IGNORED_FILES } from './config.js';
+import { ALWAYS_IGNORED_DIRS, ROOT_IGNORED_DIRS, IGNORED_FILES } from './config.js';
+
+function isIgnoredDirPath(dirParts) {
+    if (!dirParts || dirParts.length === 0) return false;
+    for (let i = 0; i < dirParts.length; i++) {
+        const seg = dirParts[i].toLowerCase();
+        if (ALWAYS_IGNORED_DIRS.has(seg)) return true;
+        if (i === 0 && ROOT_IGNORED_DIRS.has(seg)) return true;
+    }
+    return false;
+}
 import { estimateTokens, estimateTokensAsync } from './tokenizer.js';
 import { generateTree, renderInteractiveTree } from './tree.js';
 import { buildContextOutput, chunkContextOutput } from './formatters.js';
@@ -30,6 +40,20 @@ let currentActiveSelection = [];
 let isPrivateRepo = false;
 let currentGeneration = 0;
 let repackGeneration = 0;
+let isDownloading = false;
+let activeFetchCount = 0;
+
+function incrementActiveFetches() {
+    activeFetchCount++;
+    if (dom.abortBtn) dom.abortBtn.style.display = 'inline-flex';
+}
+
+function decrementActiveFetches() {
+    activeFetchCount = Math.max(0, activeFetchCount - 1);
+    if (activeFetchCount === 0 && dom.abortBtn) {
+        dom.abortBtn.style.display = 'none';
+    }
+}
 
 function updateCachedRawFiles(newFiles) {
     const map = new Map(cachedRawFiles.map(f => [f.path, f]));
@@ -240,12 +264,22 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
         estimateTokens
     );
 
-    let limitExceeded = false;
+    let singleFileExceeded = false;
+    let overheadExceeded = false;
     for (const chunk of newChunks) {
-        if (chunk.exceedsLimit) limitExceeded = true;
+        if (chunk.exceedsLimit) {
+            const oversizedFile = processedFiles.find(f => estimateTokens(f.content) > chunkLimitVal);
+            if (oversizedFile) {
+                singleFileExceeded = true;
+            } else {
+                overheadExceeded = true;
+            }
+        }
     }
-    if (limitExceeded) {
+    if (singleFileExceeded) {
         log(`[WARN] Warning: One or more single files exceed your requested chunk limit of ${chunkLimitVal} tokens.`);
+    } else if (overheadExceeded) {
+        log(`[WARN] Warning: Context header or structure tree exceeds your requested chunk limit of ${chunkLimitVal} tokens.`);
     }
 
     const firstChunk = newChunks[0];
@@ -356,30 +390,59 @@ dom.packBtn.addEventListener('click', async () => {
         log(`[FETCH] Querying GitHub API for ${repoInfo.owner}/${repoInfo.repo}...`);
 
         let targetBranch = dom.branch.value.trim() || repoInfo.branch || '';
+        let rawTree = null;
 
-        if (!targetBranch || pat) {
-            const repoMeta = await resolveDefaultBranch(
+        // If URL has treeTail and no explicit branch override was typed by user, test candidate branch prefixes
+        if (repoInfo.treeTail && !dom.branch.value.trim()) {
+            const tailParts = repoInfo.treeTail.split('/');
+            for (let len = tailParts.length; len >= 1; len--) {
+                const candidateBranch = tailParts.slice(0, len).join('/');
+                const candidateSubpath = tailParts.slice(len).join('/') || null;
+                try {
+                    rawTree = await fetchRepoTree(
+                        repoInfo.owner,
+                        repoInfo.repo,
+                        candidateBranch,
+                        pat,
+                        abortController.signal,
+                        updateRateLimitUI
+                    );
+                    targetBranch = candidateBranch;
+                    repoInfo.branch = candidateBranch;
+                    repoInfo.subpath = candidateSubpath;
+                    if (dom.branch) dom.branch.value = candidateBranch;
+                    log(`[FETCH] Resolved branch with slash: ${targetBranch}`);
+                    break;
+                } catch (_) {}
+            }
+        }
+
+        if (!rawTree) {
+            if (!targetBranch || pat) {
+                const repoMeta = await resolveDefaultBranch(
+                    repoInfo.owner,
+                    repoInfo.repo,
+                    pat,
+                    abortController.signal,
+                    updateRateLimitUI
+                );
+                if (!targetBranch) targetBranch = repoMeta.branch;
+                isPrivateRepo = repoMeta.isPrivate;
+            }
+
+            log(`[FETCH] Target branch: ${targetBranch}${isPrivateRepo ? ' (Private Repository)' : ''}`);
+            log(`[FETCH] Fetching recursive file manifest...`);
+            rawTree = await fetchRepoTree(
                 repoInfo.owner,
                 repoInfo.repo,
+                targetBranch,
                 pat,
                 abortController.signal,
                 updateRateLimitUI
             );
-            if (!targetBranch) targetBranch = repoMeta.branch;
-            isPrivateRepo = repoMeta.isPrivate;
+        } else {
+            log(`[FETCH] Target branch: ${targetBranch}${isPrivateRepo ? ' (Private Repository)' : ''}`);
         }
-
-        log(`[FETCH] Target branch: ${targetBranch}${isPrivateRepo ? ' (Private Repository)' : ''}`);
-
-        log(`[FETCH] Fetching recursive file manifest...`);
-        const rawTree = await fetchRepoTree(
-            repoInfo.owner,
-            repoInfo.repo,
-            targetBranch,
-            pat,
-            abortController.signal,
-            updateRateLimitUI
-        );
 
         if (rawTree.truncated) {
             log(`[WARN] Warning: Git repository tree is truncated by GitHub API (100,000 entries / 7MB limit). Some deeply nested files may not be visible.`);
@@ -398,7 +461,7 @@ dom.packBtn.addEventListener('click', async () => {
             const filename = pathParts[pathParts.length - 1].toLowerCase();
             const dirParts = pathParts.slice(0, -1);
 
-            if (dirParts.some(p => IGNORED_DIRS.has(p.toLowerCase()))) {
+            if (isIgnoredDirPath(dirParts)) {
                 ignoredDirCount++;
                 return false;
             }
@@ -499,7 +562,7 @@ dom.packBtn.addEventListener('click', async () => {
                     abortController = new AbortController();
                 }
                 const signal = abortController.signal;
-                dom.abortBtn.style.display = 'inline-flex';
+                incrementActiveFetches();
                 dom.progressTrack.style.display = 'block';
                 dom.progressFill.style.width = '0%';
                 let completedDelta = 0;
@@ -567,7 +630,7 @@ dom.packBtn.addEventListener('click', async () => {
                         updateCachedRawFiles(newlyFetched);
                     }
                 } finally {
-                    dom.abortBtn.style.display = 'none';
+                    decrementActiveFetches();
                 }
             }).catch((err) => {
                 if (err.name === 'AbortError') {
@@ -575,22 +638,32 @@ dom.packBtn.addEventListener('click', async () => {
                 } else {
                     log(`[ERROR] Delta fetch error: ${err.message || err}`);
                 }
-                dom.abortBtn.style.display = 'none';
+                decrementActiveFetches();
             });
             return deltaFetchQueue;
         }
 
         await new Promise((resolve, reject) => {
             const onStart = async () => {
+                if (isDownloading) {
+                    log('[WARN] Download already in progress...');
+                    return;
+                }
                 if (!hasDownloaded) {
                     hasDownloaded = true;
+                    isDownloading = true;
                     cleanup();
                     resolve();
                 } else {
-                    if (currentActiveSelection && currentActiveSelection.length > 0) {
-                        await fetchSelectedFilesDelta(currentActiveSelection);
+                    isDownloading = true;
+                    try {
+                        if (currentActiveSelection && currentActiveSelection.length > 0) {
+                            await fetchSelectedFilesDelta(currentActiveSelection);
+                        }
+                        repackBundleInMemory(currentActiveSelection);
+                    } finally {
+                        isDownloading = false;
                     }
-                    repackBundleInMemory(currentActiveSelection);
                 }
             };
             const onAbort = () => {
@@ -720,6 +793,7 @@ dom.packBtn.addEventListener('click', async () => {
             log(`[ERROR] Error: ${err.message}`);
         }
     } finally {
+        isDownloading = false;
         dom.packBtn.disabled = false;
         dom.abortBtn.style.display = 'none';
     }

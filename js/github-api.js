@@ -227,14 +227,16 @@ export async function fetchFileContent(owner, repo, branch, path, pat, signal, o
                 }
             }
             if (res.status >= 500) {
-                return { success: false, error: `HTTP ${res.status}: Server Error`, status: res.status, isPrivate: false };
+                return { success: false, backoff: 5, error: `HTTP ${res.status}: Server Error`, status: res.status, isPrivate: false };
             }
             if (res.status !== 404) {
                 return { success: false, error: `HTTP ${res.status}: ${res.statusText}`, status: res.status, isPrivate: false };
             }
         } catch (err) {
             if (err.name === 'AbortError') throw err;
-            return { success: false, error: err.message || 'Network error', status: 0, isPrivate: false };
+            if (!pat) {
+                return { success: false, error: err.message || 'Network error', status: 0, isPrivate: false };
+            }
         }
     }
 
@@ -256,7 +258,7 @@ export async function fetchFileContent(owner, repo, branch, path, pat, signal, o
                 return { success: false, backoff: retryAfter, status: res.status, isPrivate };
             }
             if (res.status >= 500) {
-                return { success: false, error: `HTTP ${res.status}: Server Error`, status: res.status, isPrivate };
+                return { success: false, backoff: 5, error: `HTTP ${res.status}: Server Error`, status: res.status, isPrivate };
             }
             if (res.ok) {
                 const text = await res.text();

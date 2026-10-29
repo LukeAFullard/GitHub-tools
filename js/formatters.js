@@ -130,23 +130,22 @@ export function chunkContextOutput(format, repoInfo, branch, treeText, files, ch
         return [output];
     }
 
-    // Estimate header/template overhead for an empty repository output
-    const emptyOutput = buildContextOutput(format, repoInfo, branch, treeText, []);
-    const baseOverheadTokens = estimateTokensFn(emptyOutput.text);
+    const firstChunkEmptyOutput = buildContextOutput(format, repoInfo, branch, treeText, []);
+    const firstChunkOverheadTokens = estimateTokensFn(firstChunkEmptyOutput.text);
 
-    // Pre-calculate token counts per single file using empty treeText to avoid re-scanning tree topology
-    const emptyBase = buildContextOutput(format, repoInfo, branch, '', []);
-    const emptyBaseTokens = estimateTokensFn(emptyBase.text);
+    const subsequentEmptyOutput = buildContextOutput(format, repoInfo, branch, '', []);
+    const subsequentOverheadTokens = estimateTokensFn(subsequentEmptyOutput.text);
 
     const fileTokens = files.map((file) => {
         const singleOutput = buildContextOutput(format, repoInfo, branch, '', [file]);
-        const tokens = estimateTokensFn(singleOutput.text) - emptyBaseTokens;
+        const tokens = estimateTokensFn(singleOutput.text) - subsequentOverheadTokens;
         return Math.max(0, tokens);
     });
 
     const chunks = [];
     let currentFiles = [];
-    let currentTokens = baseOverheadTokens;
+    let currentOverhead = firstChunkOverheadTokens;
+    let currentTokens = currentOverhead;
     let currentStartIndex = 1;
 
     for (let i = 0; i < files.length; i++) {
@@ -160,7 +159,8 @@ export function chunkContextOutput(format, repoInfo, branch, treeText, files, ch
 
             currentStartIndex += currentFiles.length;
             currentFiles = [files[i]];
-            currentTokens = baseOverheadTokens + fTokens;
+            currentOverhead = subsequentOverheadTokens;
+            currentTokens = currentOverhead + fTokens;
         } else {
             currentFiles.push(files[i]);
             currentTokens += fTokens;
