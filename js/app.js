@@ -27,6 +27,7 @@ let cachedRepoInfo = null;
 let cachedBranch = "";
 let currentActiveSelection = [];
 let isPrivateRepo = false;
+let currentGeneration = 0;
 
 function updateCachedRawFiles(newFiles) {
     const map = new Map(cachedRawFiles.map(f => [f.path, f]));
@@ -270,11 +271,18 @@ if (dom.chunkLimit) dom.chunkLimit.addEventListener('change', () => repackBundle
 
 // --- Main Processing Pipeline ---
 dom.packBtn.addEventListener('click', async () => {
+    if (abortController) {
+        abortController.abort();
+    }
+
     const repoInfo = parseRepoInput(dom.repoUrl.value);
     if (!repoInfo) {
         alert('Please enter a valid owner/repo (e.g., "LukeAFullard/senti")');
         return;
     }
+
+    currentGeneration++;
+    const thisGen = currentGeneration;
 
     // Reset repo cache state on new repo lookup
     cachedRawFiles = [];
@@ -342,6 +350,7 @@ dom.packBtn.addEventListener('click', async () => {
         // Filter valid source candidates
         const processable = rawTree.filter(node => {
             if (node.type !== 'blob') return false;
+            if (node.mode === '120000') return false; // Exclude symlinks
             const pathParts = node.path.split('/');
             const filename = pathParts[pathParts.length - 1].toLowerCase();
 
@@ -349,7 +358,7 @@ dom.packBtn.addEventListener('click', async () => {
             if (IGNORED_FILES.has(filename)) return false;
 
             if (customIgnoredExts.some(ext => filename === ext || filename.endsWith('.' + ext))) return false;
-            if (node.size && node.size > maxKb * 1024) return false;
+            if (node.size !== undefined && node.size > maxKb * 1024) return false;
 
             return true;
         });
@@ -419,11 +428,10 @@ dom.packBtn.addEventListener('click', async () => {
 
         let hasDownloaded = false;
 
-        let isDeltaFetching = false;
-        async function fetchSelectedFilesDelta(selectionToFetch) {
-            if (isDeltaFetching) return;
-            isDeltaFetching = true;
-            try {
+        let deltaFetchQueue = Promise.resolve();
+        function fetchSelectedFilesDelta(selectionToFetch) {
+            deltaFetchQueue = deltaFetchQueue.then(async () => {
+                if (thisGen !== currentGeneration) return;
                 const cachedPaths = new Set(cachedRawFiles.map(f => f.path));
                 const missingNodes = selectionToFetch.filter(n => !cachedPaths.has(n.path));
 
@@ -434,9 +442,12 @@ dom.packBtn.addEventListener('click', async () => {
                 let index = 0;
                 const results = new Array(missingNodes.length);
 
+                const deltaSignal = abortController ? abortController.signal : null;
+
                 async function worker() {
                     while (index < missingNodes.length) {
-                        if (abortController.signal && abortController.signal.aborted) break;
+                        if (deltaSignal && deltaSignal.aborted) break;
+                        if (thisGen !== currentGeneration) break;
                         const i = index++;
                         const node = missingNodes[i];
                         log(`[FETCH] Fetching delta ${node.path}...`);
@@ -450,13 +461,16 @@ dom.packBtn.addEventListener('click', async () => {
                                 targetBranch,
                                 node.path,
                                 pat,
-                                abortController.signal,
+                                deltaSignal,
                                 updateRateLimitUI,
                                 isPrivateRepo
                             );
+                            if (result && result.isPrivate) {
+                                isPrivateRepo = true;
+                            }
                             if (result && result.backoff) {
                                 retries++;
-                                await sleep(Math.min(result.backoff, 60) * 1000, abortController.signal);
+                                await sleep(Math.min(result.backoff, 60) * 1000, deltaSignal);
                                 continue;
                             }
                             break;
@@ -470,17 +484,22 @@ dom.packBtn.addEventListener('click', async () => {
                         } else {
                             log(`[ERROR] Failed to fetch delta ${node.path}${result && result.error ? `: ${result.error}` : ''}`);
                         }
+
+                        if (throttleMs > 0) {
+                            await sleep(throttleMs, deltaSignal);
+                        }
                     }
                 }
 
                 const workers = Array.from({ length: Math.min(concurrency, missingNodes.length) }, () => worker());
                 await Promise.all(workers);
 
-                const newlyFetched = results.filter(Boolean);
-                updateCachedRawFiles(newlyFetched);
-            } finally {
-                isDeltaFetching = false;
-            }
+                if (thisGen === currentGeneration) {
+                    const newlyFetched = results.filter(Boolean);
+                    updateCachedRawFiles(newlyFetched);
+                }
+            }).catch(() => {});
+            return deltaFetchQueue;
         }
 
         await new Promise((resolve, reject) => {
@@ -550,6 +569,10 @@ dom.packBtn.addEventListener('click', async () => {
                         updateRateLimitUI,
                         isPrivateRepo
                     );
+
+                    if (result && result.isPrivate) {
+                        isPrivateRepo = true;
+                    }
 
                     if (result && result.backoff) {
                         retries++;

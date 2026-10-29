@@ -190,21 +190,22 @@ export async function fetchFileContent(owner, repo, branch, path, pat, signal, o
     const pathEncoded = path.split('/').map(encodeURIComponent).join('/');
     const branchPath = branch.split('/').map(encodeURIComponent).join('/');
     const rawUrl = `${GITHUB_RAW_BASE}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${branchPath}/${pathEncoded}`;
+    let currentIsPrivate = isPrivate;
 
     // Try fetching from raw.githubusercontent.com first if repo is NOT known to be private
-    if (!isPrivate) {
+    if (!currentIsPrivate) {
         try {
             const res = await fetch(rawUrl, { signal });
             if (res.ok) {
                 const text = await res.text();
-                return { success: true, content: text, status: res.status };
+                return { success: true, content: text, status: res.status, isPrivate: currentIsPrivate };
             }
             if (res.status === 429 || res.status === 403) {
-                return { success: false, backoff: 60, status: res.status };
+                return { success: false, backoff: 60, status: res.status, isPrivate: currentIsPrivate };
             }
             if ((res.status === 404 || res.status === 403) && pat) {
                 // Private repository detected; mark as private for remaining files
-                isPrivate = true;
+                currentIsPrivate = true;
             }
         } catch (err) {
             if (err.name === 'AbortError') throw err;
@@ -225,14 +226,14 @@ export async function fetchFileContent(owner, repo, branch, path, pat, signal, o
         const headersMeta = extractRateLimitHeaders(res);
         if (isRateLimitResponse(res, headersMeta)) {
             const retryAfter = headersMeta.retryAfter || 60;
-            return { success: false, backoff: retryAfter, status: res.status };
+            return { success: false, backoff: retryAfter, status: res.status, isPrivate: currentIsPrivate };
         }
         if (res.ok) {
             const text = await res.text();
-            return { success: true, content: text, status: res.status };
+            return { success: true, content: text, status: res.status, isPrivate: currentIsPrivate };
         }
-        return { success: false, error: `HTTP ${res.status}: ${res.statusText}`, status: res.status };
+        return { success: false, error: `HTTP ${res.status}: ${res.statusText}`, status: res.status, isPrivate: currentIsPrivate };
     }
 
-    return { success: false, error: `HTTP 404: File not found`, status: 404 };
+    return { success: false, error: `HTTP 404: File not found`, status: 404, isPrivate: currentIsPrivate };
 }

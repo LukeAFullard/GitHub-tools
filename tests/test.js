@@ -33,7 +33,7 @@ test('formatters: getMarkdownFence', () => {
     assert.equal(getMarkdownFence('````nested````'), '`````');
 });
 
-test('formatters: Claude XML formatting', () => {
+test('formatters: Claude XML formatting emits raw content', () => {
     const repoInfo = { owner: 'user', repo: 'my-repo', url: 'http://localhost/?repo=user/my-repo' };
     const branch = 'main';
     const treeText = '├── index.js\n';
@@ -43,7 +43,7 @@ test('formatters: Claude XML formatting', () => {
     assert.equal(result.ext, 'xml');
     assert.match(result.text, /<repository>user\/my-repo<\/repository>/);
     assert.match(result.text, /<url>http:\/\/localhost\/\?repo=user\/my-repo<\/url>/);
-    assert.match(result.text, /&lt;hello&gt;/);
+    assert.match(result.text, /console\.log\("<hello>"\);/);
 });
 
 test('formatters: Generic XML CDATA escaping', () => {
@@ -206,4 +206,23 @@ test('formatters: markdown file path extension extraction in directories with do
     const files = [{ path: 'v1.0.0/src/component.js', content: 'const a = 1;' }];
     const res = formatMarkdown(repoInfo, 'main', '', files);
     assert.ok(res.text.includes('```js'));
+});
+
+test('minifier: CSS url(//host/a.css) is preserved and not stripped as line comment', () => {
+    const code = '@import url(//cdn.example.com/style.css);';
+    const minified = minifyCode(code, 'style.css', 'aggressive');
+    assert.ok(minified.includes('url(//cdn.example.com/style.css)'));
+});
+
+test('minifier: JSX apostrophe in text does not truncate subsequent lines', () => {
+    const code = 'const text = <p>Don\'t stop</p>;\nconst url = "//cdn.example.com/script.js";';
+    const minified = minifyCode(code, 'Component.jsx', 'aggressive');
+    assert.ok(minified.includes("Don't stop"));
+    assert.ok(minified.includes('//cdn.example.com/script.js'));
+});
+
+test('minifier: Markdown files in aggressive mode do not strip blank lines', () => {
+    const code = '# Title\n\nParagraph 1\n\nParagraph 2';
+    const minified = minifyCode(code, 'README.md', 'aggressive');
+    assert.equal(minified, code);
 });
