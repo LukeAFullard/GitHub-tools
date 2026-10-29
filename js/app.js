@@ -47,6 +47,7 @@ const dom = {
     progressFill: document.getElementById('progressFill'),
     log: document.getElementById('log'),
     treeCard: document.getElementById('treeCard'),
+    treeEmptyState: document.getElementById('treeEmptyState'),
     treeContainer: document.getElementById('treeContainer'),
     manifestCount: document.getElementById('manifestCount'),
     selectedCount: document.getElementById('selectedCount'),
@@ -60,6 +61,7 @@ const dom = {
     treeFilterInput: document.getElementById('treeFilterInput'),
     startDownloadBtn: document.getElementById('startDownloadBtn'),
     outputCard: document.getElementById('outputCard'),
+    outputEmptyState: document.getElementById('outputEmptyState'),
     statFiles: document.getElementById('statFiles'),
     statTokens: document.getElementById('statTokens'),
     statChars: document.getElementById('statChars'),
@@ -73,9 +75,11 @@ const dom = {
 };
 
 function log(msg) {
-    dom.log.style.display = 'block';
-    dom.log.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-    dom.log.scrollTop = dom.log.scrollHeight;
+    if (dom.log) {
+        dom.log.style.display = 'block';
+        dom.log.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+        dom.log.scrollTop = dom.log.scrollHeight;
+    }
 }
 
 function updateRateLimitUI(meta) {
@@ -148,18 +152,20 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
         const selectedPaths = new Set(selection.map(n => n.path));
         targetFiles = cachedRawFiles.filter(f => selectedPaths.has(f.path));
     } else if (selection && Array.isArray(selection) && selection.length === 0) {
-        dom.outputCard.style.display = 'none';
-        log(`⚠️ No files selected for packing.`);
+        if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'flex';
+        if (dom.previewArea) dom.previewArea.style.display = 'none';
+        log(`[WARN] No files selected for packing.`);
         return;
     }
 
     if (targetFiles.length === 0) {
-        dom.outputCard.style.display = 'none';
+        if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'flex';
+        if (dom.previewArea) dom.previewArea.style.display = 'none';
         return;
     }
 
     const minifyMode = dom.minifyMode ? dom.minifyMode.value : 'none';
-    log(`⚡ Re-packing ${targetFiles.length} cached files in memory (${dom.format.value}, minify: ${minifyMode})...`);
+    log(`[PACK] Re-packing ${targetFiles.length} cached files in memory (${dom.format.value}, minify: ${minifyMode})...`);
 
     const processedFiles = targetFiles.map(f => ({
         path: f.path,
@@ -187,7 +193,7 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
         if (chunk.exceedsLimit) limitExceeded = true;
     }
     if (limitExceeded) {
-        log(`⚠️ Warning: One or more single files exceed your requested chunk limit of ${chunkLimitVal} tokens.`);
+        log(`[WARN] Warning: One or more single files exceed your requested chunk limit of ${chunkLimitVal} tokens.`);
     }
 
     activeChunkIndex = 0;
@@ -216,8 +222,9 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     }
 
     dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview; complete text will download] ...' : '');
-    dom.outputCard.style.display = 'flex';
-    log(`✅ Context bundle ready: ${generatedChunks.length} chunk(s), ~${estTokens.toLocaleString()} tokens in active chunk.`);
+    if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'none';
+    if (dom.previewArea) dom.previewArea.style.display = 'block';
+    log(`[SUCCESS] Context bundle ready: ${generatedChunks.length} chunk(s), ~${estTokens.toLocaleString()} tokens in active chunk.`);
 }
 
 // Auto-repack on setting changes if files are already cached
@@ -259,10 +266,11 @@ dom.packBtn.addEventListener('click', async () => {
     dom.progressTrack.style.display = 'block';
     dom.progressFill.style.width = '0%';
     dom.log.textContent = '';
-    dom.outputCard.style.display = 'none';
+    if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'flex';
+    if (dom.previewArea) dom.previewArea.style.display = 'none';
 
     try {
-        log(`Querying GitHub API for ${repoInfo.owner}/${repoInfo.repo}...`);
+        log(`[FETCH] Querying GitHub API for ${repoInfo.owner}/${repoInfo.repo}...`);
 
         let targetBranch = dom.branch.value.trim();
 
@@ -278,9 +286,9 @@ dom.packBtn.addEventListener('click', async () => {
             isPrivateRepo = repoMeta.isPrivate;
         }
 
-        log(`Target branch: ${targetBranch}${isPrivateRepo ? ' (Private Repository)' : ''}`);
+        log(`[FETCH] Target branch: ${targetBranch}${isPrivateRepo ? ' (Private Repository)' : ''}`);
 
-        log(`Fetching recursive file manifest...`);
+        log(`[FETCH] Fetching recursive file manifest...`);
         const rawTree = await fetchRepoTree(
             repoInfo.owner,
             repoInfo.repo,
@@ -291,7 +299,7 @@ dom.packBtn.addEventListener('click', async () => {
         );
 
         if (rawTree.truncated) {
-            log(`⚠️ Warning: Git repository tree is truncated by GitHub API (>10,000 files). Some deeply nested files may not be visible.`);
+            log(`[WARN] Warning: Git repository tree is truncated by GitHub API (>10,000 files). Some deeply nested files may not be visible.`);
         }
 
         // Filter valid source candidates
@@ -309,12 +317,13 @@ dom.packBtn.addEventListener('click', async () => {
             return true;
         });
 
-        log(`Discovered ${rawTree.length} objects. Filtered to ${processable.length} text source files.`);
+        log(`[FETCH] Discovered ${rawTree.length} objects. Filtered to ${processable.length} text source files.`);
 
         // Render Interactive Pre-Download Selection Tree
         dom.manifestCount.textContent = processable.length;
         dom.selectedCount.textContent = processable.length;
-        dom.treeCard.style.display = 'flex';
+        if (dom.treeEmptyState) dom.treeEmptyState.style.display = 'none';
+        if (dom.treeContainer) dom.treeContainer.style.display = 'block';
 
         let activeSelection = [...processable];
 
@@ -364,7 +373,7 @@ dom.packBtn.addEventListener('click', async () => {
             }
         }
 
-        log(`🔍 Review file selection in tree above and click "⚡ Pack Selected Files" when ready.`);
+        log(`[INSPECT] Review file selection in tree above and click "Pack Selected Files" when ready.`);
 
         let hasDownloaded = false;
 
@@ -374,7 +383,7 @@ dom.packBtn.addEventListener('click', async () => {
 
             if (missingNodes.length === 0) return;
 
-            log(`Fetching ${missingNodes.length} newly checked file(s)...`);
+            log(`[FETCH] Fetching ${missingNodes.length} newly checked file(s)...`);
             const concurrency = 5;
             let index = 0;
             const results = new Array(missingNodes.length);
@@ -384,7 +393,7 @@ dom.packBtn.addEventListener('click', async () => {
                     if (abortController.signal && abortController.signal.aborted) break;
                     const i = index++;
                     const node = missingNodes[i];
-                    log(`Fetching delta ${node.path}...`);
+                    log(`[FETCH] Fetching delta ${node.path}...`);
 
                     let retries = 0;
                     let result = null;
@@ -451,11 +460,11 @@ dom.packBtn.addEventListener('click', async () => {
         });
 
         if (activeSelection.length === 0) {
-            log('⚠️ No files selected for packing.');
+            log('[WARN] No files selected for packing.');
             return;
         }
 
-        log(`Starting parallel download for ${activeSelection.length} selected file(s) (concurrency: 5)...`);
+        log(`[FETCH] Starting parallel download for ${activeSelection.length} selected file(s) (concurrency: 5)...`);
 
         const results = new Array(activeSelection.length);
         let emptyCount = 0;
@@ -470,7 +479,7 @@ dom.packBtn.addEventListener('click', async () => {
                 if (abortController.signal && abortController.signal.aborted) break;
                 const i = index++;
                 const node = activeSelection[i];
-                log(`[${i + 1}/${activeSelection.length}] Fetching ${node.path}...`);
+                log(`[FETCH] [${i + 1}/${activeSelection.length}] Fetching ${node.path}...`);
 
                 let retries = 0;
                 let result = null;
@@ -490,7 +499,7 @@ dom.packBtn.addEventListener('click', async () => {
                     if (result.backoff) {
                         retries++;
                         const backoffTime = Math.min(result.backoff, 60);
-                        log(`🚨 Rate limit warning for ${node.path}. Retry ${retries}/3 cooling down for ${backoffTime}s...`);
+                        log(`[LIMIT] Rate limit warning for ${node.path}. Retry ${retries}/3 cooling down for ${backoffTime}s...`);
                         await sleep(backoffTime * 1000, abortController.signal);
                         continue;
                     }
@@ -504,13 +513,13 @@ dom.packBtn.addEventListener('click', async () => {
                     }
                     const sample = rawContent.slice(0, 512);
                     if (sample.includes('\0')) {
-                        log(`⚠️ Skipping ${node.path}: Binary content detected (null bytes).`);
+                        log(`[WARN] Skipping ${node.path}: Binary content detected (null bytes).`);
                     } else {
                         results[i] = { path: node.path, rawContent: rawContent };
                     }
                 } else {
                     failedCount++;
-                    log(`❌ Failed to fetch ${node.path}${result && result.error ? `: ${result.error}` : ''}`);
+                    log(`[ERROR] Failed to fetch ${node.path}${result && result.error ? `: ${result.error}` : ''}`);
                 }
 
                 completedCount++;
@@ -527,10 +536,10 @@ dom.packBtn.addEventListener('click', async () => {
 
         const collectedFiles = results.filter(Boolean);
 
-        log(`Download complete: ${collectedFiles.length} file(s) processed (${emptyCount} empty), ${failedCount} failed.`);
+        log(`[SUCCESS] Download complete: ${collectedFiles.length} file(s) processed (${emptyCount} empty), ${failedCount} failed.`);
 
         if (collectedFiles.length === 0) {
-            log('⚠️ No content could be fetched from the selected files.');
+            log('[WARN] No content could be fetched from the selected files.');
             return;
         }
 
@@ -542,9 +551,9 @@ dom.packBtn.addEventListener('click', async () => {
 
     } catch (err) {
         if (err.name === 'AbortError') {
-            log('🛑 Process cancelled by user.');
+            log('[CANCEL] Process cancelled by user.');
         } else {
-            log(`❌ Error: ${err.message}`);
+            log(`[ERROR] Error: ${err.message}`);
         }
     } finally {
         dom.packBtn.disabled = false;
@@ -601,9 +610,9 @@ dom.downloadAllBtn.addEventListener('click', async () => {
 dom.copyBtn.addEventListener('click', async () => {
     try {
         await navigator.clipboard.writeText(packedOutputText);
-        const originalText = dom.copyBtn.textContent;
-        dom.copyBtn.textContent = '✅ Copied!';
-        setTimeout(() => { dom.copyBtn.textContent = originalText; }, 2000);
+        const originalHTML = dom.copyBtn.innerHTML;
+        dom.copyBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span>Copied!</span>`;
+        setTimeout(() => { dom.copyBtn.innerHTML = originalHTML; }, 2000);
     } catch (_) {
         alert('Unable to copy automatically. Please copy directly from the preview textarea.');
     }
@@ -614,9 +623,9 @@ if (dom.shareUrlBtn) {
         const deepLink = getDeepLinkUrl();
         try {
             await navigator.clipboard.writeText(deepLink);
-            const orig = dom.shareUrlBtn.textContent;
-            dom.shareUrlBtn.textContent = '✅ URL Copied!';
-            setTimeout(() => { dom.shareUrlBtn.textContent = orig; }, 2000);
+            const originalHTML = dom.shareUrlBtn.innerHTML;
+            dom.shareUrlBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg><span>Link Copied!</span>`;
+            setTimeout(() => { dom.shareUrlBtn.innerHTML = originalHTML; }, 2000);
         } catch (_) {
             alert(`Deep-Link URL:\n${deepLink}`);
         }

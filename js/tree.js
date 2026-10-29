@@ -65,6 +65,11 @@ function matchQuery(name, path, query) {
     return nameLower.includes(qLower) || pathLower.includes(qLower);
 }
 
+const SVG_FOLDER = `<svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
+const SVG_FILE = `<svg class="svg-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
+const SVG_CHEVRON_DOWN = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+const SVG_CHEVRON_RIGHT = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+
 export function renderInteractiveTree(nodes, container, onSelectionChange) {
     container.innerHTML = '';
 
@@ -119,7 +124,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
 
         const label = document.createElement('span');
         label.className = item.isDir ? 'tree-folder-label' : 'tree-file-label';
-        label.textContent = item.isDir ? `📁 ${item.name}` : `📄 ${item.name}`;
+        label.innerHTML = (item.isDir ? SVG_FOLDER : SVG_FILE) + `<span>${item.name}</span>`;
 
         const sizeBadge = document.createElement('span');
         const bytes = item.isDir ? calculateDirSize(item) : (item.size || 0);
@@ -127,7 +132,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
         const estTok = Math.round(bytes / 3.8);
         const isLarge = !item.isDir && bytes > 50 * 1024; // 50 KB warning
         sizeBadge.className = 'tree-size-badge' + (isLarge ? ' tree-large-warning' : '');
-        sizeBadge.textContent = ` ${isLarge ? '⚠️ ' : ''}(${kbStr} ~${estTok.toLocaleString()} tok)`;
+        sizeBadge.textContent = ` (${kbStr} ~${estTok.toLocaleString()} tok)`;
 
         row.appendChild(checkbox);
         row.appendChild(label);
@@ -137,7 +142,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
         if (item.isDir) {
             const toggleBtn = document.createElement('span');
             toggleBtn.className = 'tree-toggle-icon';
-            toggleBtn.textContent = '▼ ';
+            toggleBtn.innerHTML = SVG_CHEVRON_DOWN;
             row.insertBefore(toggleBtn, label);
 
             const ul = document.createElement('ul');
@@ -147,7 +152,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
             const toggleExpand = (expand) => {
                 isExpanded = typeof expand === 'boolean' ? expand : !isExpanded;
                 ul.style.display = isExpanded ? 'block' : 'none';
-                toggleBtn.textContent = isExpanded ? '▼ ' : '▶ ';
+                toggleBtn.innerHTML = isExpanded ? SVG_CHEVRON_DOWN : SVG_CHEVRON_RIGHT;
             };
 
             label.addEventListener('click', (e) => {
@@ -190,11 +195,11 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                 isDir: true,
                 path: item.path,
                 name: item.name,
-        setSubtreeChecked(val, onlyVisible = false) {
-            if (onlyVisible && li.style.display === 'none') return;
+                setSubtreeChecked(val, onlyVisible = false) {
+                    if (onlyVisible && li.style.display === 'none') return;
                     checkbox.checked = val;
                     for (const child of childElements) {
-                child.setSubtreeChecked(val, onlyVisible);
+                        child.setSubtreeChecked(val, onlyVisible);
                     }
                 },
                 updateStateFromChildren() {
@@ -248,15 +253,15 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                 isDir: false,
                 path: item.path,
                 name: item.name,
-        setSubtreeChecked(val, onlyVisible = false) {
-            if (onlyVisible && li.style.display === 'none') return;
+                setSubtreeChecked(val, onlyVisible = false) {
+                    if (onlyVisible && li.style.display === 'none') return;
                     checkbox.checked = val;
                 },
-        deselectIfLargerThan(thresholdBytes) {
-            if (!item.isDir && item.size > thresholdBytes) {
-                checkbox.checked = false;
-            }
-        },
+                deselectIfLargerThan(thresholdBytes) {
+                    if (!item.isDir && item.size > thresholdBytes) {
+                        checkbox.checked = false;
+                    }
+                },
                 updateStateFromChildren() {},
                 collectSelectedFiles(acc) {
                     if (checkbox.checked) {
