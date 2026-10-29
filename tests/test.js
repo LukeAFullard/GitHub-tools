@@ -34,7 +34,7 @@ test('formatters: getMarkdownFence', () => {
 });
 
 test('formatters: Claude XML formatting', () => {
-    const repoInfo = { owner: 'user', repo: 'my-repo' };
+    const repoInfo = { owner: 'user', repo: 'my-repo', url: 'http://localhost/?repo=user/my-repo' };
     const branch = 'main';
     const treeText = '├── index.js\n';
     const files = [{ path: 'index.js', content: 'console.log("<hello>");' }];
@@ -42,6 +42,7 @@ test('formatters: Claude XML formatting', () => {
     const result = formatClaudeXml(repoInfo, branch, treeText, files);
     assert.equal(result.ext, 'xml');
     assert.match(result.text, /<repository>user\/my-repo<\/repository>/);
+    assert.match(result.text, /<url>http:\/\/localhost\/\?repo=user\/my-repo<\/url>/);
     assert.match(result.text, /&lt;hello&gt;/);
 });
 
