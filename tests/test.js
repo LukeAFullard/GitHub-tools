@@ -378,3 +378,16 @@ test('minifier: basic mode preserves first line leading indentation', () => {
     const minified = minifyCode(code, 'config.yaml', 'basic');
     assert.equal(minified, '  first_line: true\n  second_line: 123');
 });
+
+test('formatters: chunks 2+ omit structure tree to optimize token overhead', () => {
+    const repoInfo = { owner: 'owner', repo: 'repo' };
+    const treeText = '├── large_tree_file_1.js\n├── large_tree_file_2.js\n';
+    const files = [
+        { path: 'f1.js', content: 'console.log("file 1 content");' },
+        { path: 'f2.js', content: 'console.log("file 2 content");' }
+    ];
+    const chunks = chunkContextOutput('claude-xml', repoInfo, 'main', treeText, files, 50, estimateTokens);
+    assert.ok(chunks.length >= 2);
+    assert.ok(chunks[0].text.includes('<structure>'));
+    assert.ok(!chunks[1].text.includes('<structure>'));
+});
