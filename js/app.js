@@ -273,10 +273,11 @@ function setAppState(state, note = '') {
         }
     }
     if (dom.startDownloadBtn) {
+        const textSpan = dom.startDownloadBtn.querySelector('span') || dom.startDownloadBtn;
         if (state === 'loaded' && note) {
-            dom.startDownloadBtn.textContent = note;
+            textSpan.textContent = note;
         } else {
-            dom.startDownloadBtn.textContent = 'Build context';
+            textSpan.textContent = 'Build context';
         }
     }
 }
@@ -361,14 +362,36 @@ document.querySelectorAll('.preset-btn').forEach(btn => {
     });
 });
 
-function updateBudgetMeterUI(totalTokens, numChunks = 1, isPreBuild = false) {
+function updateBudgetMeterUI(totalTokens, numChunks = 1, isPreBuild = false, maxChunkTokens = 0, hasOversizedChunk = false) {
     if (dom.targetBudgetDisplay) {
         dom.targetBudgetDisplay.textContent = `of ${currentBudgetWindow.toLocaleString()} estimated tokens${isPreBuild ? ' (pre-build estimate)' : ''}`;
     }
 
     const chunkLimitVal = parseInt(dom.chunkLimit ? dom.chunkLimit.value : '0', 10) || 0;
+
+    if (isPreBuild && chunkLimitVal > 0 && totalTokens > chunkLimitVal) {
+        const estChunks = Math.ceil(totalTokens / chunkLimitVal);
+        const ratio = currentBudgetWindow > 0 ? (totalTokens / currentBudgetWindow) : 0;
+        const pct = Math.min(Math.round((totalTokens / currentBudgetWindow) * 100), 100);
+
+        if (dom.budgetFill) {
+            dom.budgetFill.style.width = `${pct}%`;
+            dom.budgetFill.className = 'budget-fill ' + (
+                ratio <= 0.85 ? 'fits' : ratio <= 1.0 ? 'near' : 'over'
+            );
+        }
+
+        if (dom.budgetStatusText) {
+            dom.budgetStatusText.textContent = `About ${totalTokens.toLocaleString()} tokens, will split into about ${estChunks} parts`;
+            dom.budgetStatusText.className = 'budget-status-text ' + (
+                ratio <= 0.85 ? 'status-fits' : ratio <= 1.0 ? 'status-near' : 'status-over'
+            );
+        }
+        return;
+    }
+
     const isSplit = numChunks > 1 || (chunkLimitVal > 0 && totalTokens > chunkLimitVal);
-    const evaluatedTokens = isSplit && chunkLimitVal > 0 ? Math.min(totalTokens, chunkLimitVal) : totalTokens;
+    const evaluatedTokens = isSplit ? (maxChunkTokens || (chunkLimitVal > 0 ? Math.min(totalTokens, chunkLimitVal) : Math.round(totalTokens / numChunks))) : totalTokens;
 
     const ratio = currentBudgetWindow > 0 ? (evaluatedTokens / currentBudgetWindow) : 0;
     const pct = Math.min(Math.round((totalTokens / currentBudgetWindow) * 100), 100);
@@ -376,14 +399,20 @@ function updateBudgetMeterUI(totalTokens, numChunks = 1, isPreBuild = false) {
     if (dom.budgetFill) {
         dom.budgetFill.style.width = `${pct}%`;
         dom.budgetFill.className = 'budget-fill ' + (
-            ratio <= 0.85 ? 'fits' : ratio <= 1.0 ? 'near' : 'over'
+            (hasOversizedChunk || ratio > 1.0) ? 'over' : ratio <= 0.85 ? 'fits' : 'near'
         );
     }
 
     if (dom.budgetStatusText) {
         if (isSplit && numChunks > 1) {
-            dom.budgetStatusText.textContent = `Split into ${numChunks} parts (${Math.round(totalTokens / numChunks).toLocaleString()} tok/part) - fits target window`;
-            dom.budgetStatusText.className = 'budget-status-text status-fits';
+            const displayTokens = maxChunkTokens || Math.round(totalTokens / numChunks);
+            if (hasOversizedChunk) {
+                dom.budgetStatusText.textContent = `Split into ${numChunks} parts (largest: ${displayTokens.toLocaleString()} tok) - 1+ part exceeds split limit`;
+                dom.budgetStatusText.className = 'budget-status-text status-over';
+            } else {
+                dom.budgetStatusText.textContent = `Split into ${numChunks} parts (largest: ${displayTokens.toLocaleString()} tok) - fits target window`;
+                dom.budgetStatusText.className = 'budget-status-text status-fits';
+            }
         } else if (ratio <= 0.85) {
             dom.budgetStatusText.textContent = 'Fits context window';
             dom.budgetStatusText.className = 'budget-status-text status-fits';
@@ -586,14 +615,26 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
 
     const totalChars = newChunks.reduce((acc, c) => acc + c.text.length, 0);
     const chunkTokensPromises = newChunks.map(c => estimateTokensAsync(c.text));
-    totalTokensAllChunks = (await Promise.all(chunkTokensPromises)).reduce((a, b) => a + b, 0);
+    const chunkTokensList = await Promise.all(chunkTokensPromises);
+    totalTokensAllChunks = chunkTokensList.reduce((a, b) => a + b, 0);
+
+    let maxChunkTokens = 0;
+    let hasOversizedChunk = false;
+    newChunks.forEach((c, idx) => {
+        const cTokens = chunkTokensList[idx];
+        if (cTokens > maxChunkTokens) maxChunkTokens = cTokens;
+        if (c.exceedsLimit || (chunkLimitVal > 0 && cTokens > chunkLimitVal)) {
+            hasOversizedChunk = true;
+            log(`[WARN] Chunk part ${idx + 1}/${newChunks.length} (~${cTokens.toLocaleString()} tokens) exceeds limit of ${chunkLimitVal.toLocaleString()} tokens.`);
+        }
+    });
 
     dom.statFiles.textContent = processedFiles.length;
     dom.statChars.textContent = totalChars.toLocaleString();
     dom.statTokens.textContent = totalTokensAllChunks.toLocaleString();
     dom.statChunks.textContent = generatedChunks.length;
 
-    updateBudgetMeterUI(totalTokensAllChunks, generatedChunks.length, false);
+    updateBudgetMeterUI(totalTokensAllChunks, generatedChunks.length, false, maxChunkTokens, hasOversizedChunk);
 
     if (generatedChunks.length > 1) {
         dom.chunkSelectLabel.style.display = 'inline-block';
@@ -609,7 +650,7 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
 
     dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview; complete text will download] ...' : '');
     if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'none';
-    if (dom.previewNotice) dom.previewNotice.style.display = 'block';
+    if (dom.previewNotice) dom.previewNotice.style.display = packedOutputText.length > 45000 ? 'block' : 'none';
     if (dom.previewArea) dom.previewArea.style.display = 'block';
     if (dom.downloadBtn) dom.downloadBtn.disabled = false;
     if (dom.copyBtn) dom.copyBtn.disabled = false;
@@ -1132,7 +1173,12 @@ dom.chunkSelect.addEventListener('change', async () => {
     outputExt = chunk.ext;
     outputMime = chunk.mime;
 
-    dom.statChars.textContent = packedOutputText.length.toLocaleString();
+    const totalChars = generatedChunks.reduce((acc, c) => acc + c.text.length, 0);
+    dom.statChars.textContent = generatedChunks.length > 1
+        ? `${packedOutputText.length.toLocaleString()} (Part ${activeChunkIndex + 1}) / ${totalChars.toLocaleString()} total`
+        : totalChars.toLocaleString();
+
+    if (dom.previewNotice) dom.previewNotice.style.display = packedOutputText.length > 45000 ? 'block' : 'none';
     dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview; complete text will download] ...' : '');
 });
 
