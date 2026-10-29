@@ -41,11 +41,17 @@ export function extractRateLimitHeaders(response) {
     if (!response || !response.headers) {
         return { remaining: null, limit: null, reset: null, retryAfter: null };
     }
+    const parseHeaderInt = (name) => {
+        const val = response.headers.get(name);
+        if (val === null || val === undefined) return null;
+        const parsed = parseInt(val, 10);
+        return Number.isNaN(parsed) ? null : parsed;
+    };
     return {
-        remaining: response.headers.get('x-ratelimit-remaining'),
-        limit: response.headers.get('x-ratelimit-limit'),
-        reset: response.headers.get('x-ratelimit-reset'),
-        retryAfter: response.headers.get('retry-after')
+        remaining: parseHeaderInt('x-ratelimit-remaining'),
+        limit: parseHeaderInt('x-ratelimit-limit'),
+        reset: parseHeaderInt('x-ratelimit-reset'),
+        retryAfter: parseHeaderInt('retry-after')
     };
 }
 
@@ -110,6 +116,25 @@ export async function fetchRepoTree(owner, repo, branch, pat, signal, onHeaders)
 
 export async function fetchFileContent(owner, repo, branch, path, pat, signal, onHeaders) {
     const pathEncoded = path.split('/').map(encodeURIComponent).join('/');
+    const branchPath = branch.split('/').map(encodeURIComponent).join('/');
+    const rawUrl = `${GITHUB_RAW_BASE}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${branchPath}/${pathEncoded}`;
+
+    // Try fetching from raw.githubusercontent.com first to save API quota
+    try {
+        const res = await fetch(rawUrl, { signal });
+        if (res.ok) {
+            const text = await res.text();
+            return { success: true, content: text, status: res.status };
+        }
+        // If 429/403, back off
+        if (res.status === 429 || res.status === 403) {
+            return { success: false, backoff: 60, status: res.status };
+        }
+    } catch (err) {
+        if (err.name === 'AbortError') throw err;
+    }
+
+    // Fall back to REST API (required for private repos or fallback)
     if (pat) {
         const headers = {
             'Accept': 'application/vnd.github.raw+json',
@@ -121,7 +146,8 @@ export async function fetchFileContent(owner, repo, branch, path, pat, signal, o
         if (onHeaders) onHeaders(extractRateLimitHeaders(res));
 
         if (res.status === 429 || res.status === 403) {
-            const retryAfter = parseInt(res.headers.get('retry-after') || '60', 10);
+            const headersMeta = extractRateLimitHeaders(res);
+            const retryAfter = headersMeta.retryAfter || 60;
             return { success: false, backoff: retryAfter, status: res.status };
         }
         if (res.ok) {
@@ -129,17 +155,7 @@ export async function fetchFileContent(owner, repo, branch, path, pat, signal, o
             return { success: true, content: text, status: res.status };
         }
         return { success: false, error: `HTTP ${res.status}: ${res.statusText}`, status: res.status };
-    } else {
-        const branchPath = branch.split('/').map(encodeURIComponent).join('/');
-        const rawUrl = `${GITHUB_RAW_BASE}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${branchPath}/${pathEncoded}`;
-        const res = await fetch(rawUrl, { signal });
-        if (res.ok) {
-            const text = await res.text();
-            return { success: true, content: text, status: res.status };
-        }
-        if (res.status === 429 || res.status === 403) {
-            return { success: false, backoff: 60, status: res.status };
-        }
-        return { success: false, error: `HTTP ${res.status}: ${res.statusText}`, status: res.status };
     }
+
+    return { success: false, error: `HTTP 404: File not found`, status: 404 };
 }

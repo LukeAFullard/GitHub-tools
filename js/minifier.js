@@ -21,6 +21,21 @@ function stripJsComments(code) {
                 state = 'block_comment';
                 i += 2;
                 continue;
+            } else if (char === '/') {
+                // Determine if slash is start of RegExp literal or division operator
+                const prevTrimmed = output.trimEnd();
+                const lastChar = prevTrimmed[prevTrimmed.length - 1];
+                const isRegexp = !lastChar || '=(:[{},;!&|?+*^%~<>'.includes(lastChar) ||
+                    prevTrimmed.endsWith('return') || prevTrimmed.endsWith('case') || prevTrimmed.endsWith('typeof');
+
+                if (isRegexp) {
+                    state = 'regex';
+                    output += char;
+                    i++;
+                } else {
+                    output += char;
+                    i++;
+                }
             } else if (char === "'") {
                 state = 'single_string';
                 output += char;
@@ -37,6 +52,32 @@ function stripJsComments(code) {
                 output += char;
                 i++;
             }
+        } else if (state === 'regex') {
+            output += char;
+            if (char === '\\') {
+                if (i + 1 < len) {
+                    output += code[i + 1];
+                    i += 2;
+                    continue;
+                }
+            } else if (char === '[') {
+                state = 'regex_class';
+            } else if (char === '/') {
+                state = 'normal';
+            }
+            i++;
+        } else if (state === 'regex_class') {
+            output += char;
+            if (char === '\\') {
+                if (i + 1 < len) {
+                    output += code[i + 1];
+                    i += 2;
+                    continue;
+                }
+            } else if (char === ']') {
+                state = 'regex';
+            }
+            i++;
         } else if (state === 'single_string') {
             output += char;
             if (char === '\\') {

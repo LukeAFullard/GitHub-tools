@@ -2,11 +2,14 @@
  * Generates an ASCII directory topology from a list of relative file paths.
  */
 export function generateTree(paths) {
-    const tree = {};
+    const tree = Object.create(null);
     for (const path of paths) {
         let current = tree;
         for (const part of path.split('/')) {
-            current = current[part] = current[part] || {};
+            if (!Object.prototype.hasOwnProperty.call(current, part) || typeof current[part] !== 'object' || current[part] === null) {
+                current[part] = Object.create(null);
+            }
+            current = current[part];
         }
     }
 
@@ -30,8 +33,8 @@ export function generateTree(paths) {
 export function renderInteractiveTree(nodes, container, onSelectionChange) {
     container.innerHTML = '';
 
-    // Build hierarchy
-    const root = { name: '', isDir: true, children: {}, path: '' };
+    // Build hierarchy using prototype-safe objects
+    const root = { name: '', isDir: true, children: Object.create(null), path: '' };
 
     for (const node of nodes) {
         const parts = node.path.split('/');
@@ -52,12 +55,12 @@ export function renderInteractiveTree(nodes, container, onSelectionChange) {
                     node: node
                 };
             } else {
-                if (!current.children[part]) {
+                if (!Object.prototype.hasOwnProperty.call(current.children, part)) {
                     current.children[part] = {
                         name: part,
                         isDir: true,
                         path: currPath,
-                        children: {}
+                        children: Object.create(null)
                     };
                 }
                 current = current.children[part];
