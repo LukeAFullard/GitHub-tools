@@ -16,7 +16,8 @@ function stripJsComments(code, ext = '') {
     let i = 0;
     const len = code.length;
     let state = 'normal';
-    const isCss = ['css', 'scss'].includes(ext);
+    const isCss = ['css', 'scss', 'less'].includes(ext);
+    const isRust = ext === 'rs';
     const templateStack = [];
 
     while (i < len) {
@@ -43,7 +44,7 @@ function stripJsComments(code, ext = '') {
                 const lastChar = prevTrimmed[prevTrimmed.length - 1];
                 const keywordRegex = /\b(?:return|case|typeof|throw|delete|void|in|of|instanceof|new|yield|await)$/;
                 const isUrl = /(?:https?|ftp|file):$/i.test(prevTrimmed);
-                const isRegexp = !isUrl && (!lastChar || '=(:[{},;!&|?+*^%~<>'.includes(lastChar) || keywordRegex.test(prevTrimmed));
+                const isRegexp = !isCss && !isUrl && lastChar !== '<' && (!lastChar || '=(:[{},;!&|?+*^%~'.includes(lastChar) || keywordRegex.test(prevTrimmed));
 
                 if (isRegexp) {
                     state = 'regex';
@@ -54,6 +55,19 @@ function stripJsComments(code, ext = '') {
                     i++;
                 }
             } else if (char === "'") {
+                if (isRust) {
+                    const remainder = code.slice(i);
+                    const lifetimeMatch = remainder.match(/^'([a-zA-Z_][a-zA-Z0-9_]*)/);
+                    if (lifetimeMatch) {
+                        const name = lifetimeMatch[1];
+                        const after = code[i + 1 + name.length];
+                        if (after !== "'") {
+                            output += char;
+                            i++;
+                            continue;
+                        }
+                    }
+                }
                 state = 'single_string';
                 output += char;
                 i++;
@@ -351,7 +365,7 @@ export function minifyCode(content, filename = '', mode = 'none') {
     const textExts = ['md', 'markdown', 'txt', 'json', 'yaml', 'yml', 'toml', 'ini', 'csv', 'log', 'env'];
 
     if (mode === 'basic' || textExts.includes(ext)) {
-        return content.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        return content.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trimEnd().replace(/^\n+/, '');
     }
 
     if (mode === 'aggressive') {

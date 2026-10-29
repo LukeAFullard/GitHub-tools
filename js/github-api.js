@@ -45,10 +45,12 @@ export function parseRepoInput(input, overrideBranch = null) {
 
     let branch = null;
     let subpath = null;
+    let treeTail = null;
 
     if (parts.length >= 4 && (parts[2] === 'tree' || parts[2] === 'blob')) {
         const tail = parts.slice(3);
         const tailStr = tail.join('/');
+        treeTail = tailStr;
         const cleanBranch = overrideBranch ? overrideBranch.trim() : null;
 
         if (cleanBranch) {
@@ -69,7 +71,7 @@ export function parseRepoInput(input, overrideBranch = null) {
         branch = overrideBranch.trim();
     }
 
-    return { owner, repo, branch, subpath };
+    return { owner, repo, branch, subpath, treeTail };
 }
 
 export function extractRateLimitHeaders(response) {
@@ -224,12 +226,19 @@ export async function fetchFileContent(owner, repo, branch, path, pat, signal, o
                     return { success: false, backoff: headersMeta.retryAfter || 60, status: res.status, isPrivate: false };
                 }
             }
+            if (res.status >= 500) {
+                return { success: false, error: `HTTP ${res.status}: Server Error`, status: res.status, isPrivate: false };
+            }
+            if (res.status !== 404) {
+                return { success: false, error: `HTTP ${res.status}: ${res.statusText}`, status: res.status, isPrivate: false };
+            }
         } catch (err) {
             if (err.name === 'AbortError') throw err;
+            return { success: false, error: err.message || 'Network error', status: 0, isPrivate: false };
         }
     }
 
-    // Fall back to REST API (required for private repos)
+    // Fall back to REST API (required for private repos or 404 on raw)
     if (pat) {
         const headers = {
             'Accept': 'application/vnd.github.raw+json',
@@ -237,19 +246,27 @@ export async function fetchFileContent(owner, repo, branch, path, pat, signal, o
         };
         const branchQuery = encodeURIComponent(branch);
         const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${pathEncoded}?ref=${branchQuery}`;
-        const res = await fetch(url, { headers, signal });
-        if (onHeaders) onHeaders(extractRateLimitHeaders(res));
+        try {
+            const res = await fetch(url, { headers, signal });
+            if (onHeaders) onHeaders(extractRateLimitHeaders(res));
 
-        const headersMeta = extractRateLimitHeaders(res);
-        if (isRateLimitResponse(res, headersMeta)) {
-            const retryAfter = headersMeta.retryAfter || 60;
-            return { success: false, backoff: retryAfter, status: res.status, isPrivate };
+            const headersMeta = extractRateLimitHeaders(res);
+            if (isRateLimitResponse(res, headersMeta)) {
+                const retryAfter = headersMeta.retryAfter || 60;
+                return { success: false, backoff: retryAfter, status: res.status, isPrivate };
+            }
+            if (res.status >= 500) {
+                return { success: false, error: `HTTP ${res.status}: Server Error`, status: res.status, isPrivate };
+            }
+            if (res.ok) {
+                const text = await res.text();
+                return { success: true, content: text, status: res.status, isPrivate };
+            }
+            return { success: false, error: `HTTP ${res.status}: ${res.statusText}`, status: res.status, isPrivate };
+        } catch (err) {
+            if (err.name === 'AbortError') throw err;
+            return { success: false, error: err.message || 'Network error', status: 0, isPrivate };
         }
-        if (res.ok) {
-            const text = await res.text();
-            return { success: true, content: text, status: res.status, isPrivate };
-        }
-        return { success: false, error: `HTTP ${res.status}: ${res.statusText}`, status: res.status, isPrivate };
     }
 
     return { success: false, error: `HTTP 404: File not found`, status: 404, isPrivate };

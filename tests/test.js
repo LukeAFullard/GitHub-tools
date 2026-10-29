@@ -95,9 +95,9 @@ msg = 'hello # world'
 });
 
 test('github-api: parseRepoInput validation', () => {
-    assert.deepEqual(parseRepoInput('LukeAFullard/senti'), { owner: 'LukeAFullard', repo: 'senti', branch: null, subpath: null });
-    assert.deepEqual(parseRepoInput('https://github.com/LukeAFullard/senti.git'), { owner: 'LukeAFullard', repo: 'senti', branch: null, subpath: null });
-    assert.deepEqual(parseRepoInput('https://github.com/LukeAFullard/senti/tree/dev/src/components'), { owner: 'LukeAFullard', repo: 'senti', branch: 'dev', subpath: 'src/components' });
+    assert.deepEqual(parseRepoInput('LukeAFullard/senti'), { owner: 'LukeAFullard', repo: 'senti', branch: null, subpath: null, treeTail: null });
+    assert.deepEqual(parseRepoInput('https://github.com/LukeAFullard/senti.git'), { owner: 'LukeAFullard', repo: 'senti', branch: null, subpath: null, treeTail: null });
+    assert.deepEqual(parseRepoInput('https://github.com/LukeAFullard/senti/tree/dev/src/components'), { owner: 'LukeAFullard', repo: 'senti', branch: 'dev', subpath: 'src/components', treeTail: 'dev/src/components' });
     assert.equal(parseRepoInput('invalid-input'), null);
     assert.equal(parseRepoInput('bad owner/repo name!'), null);
     assert.equal(parseRepoInput(''), null);
@@ -187,10 +187,10 @@ test('minifier: blank lines inside Python triple quoted strings are preserved', 
 
 test('github-api: parseRepoInput handles query strings and blob URLs', () => {
     const parsedQuery = parseRepoInput('https://github.com/owner/repo/tree/main/src?ref=123');
-    assert.deepEqual(parsedQuery, { owner: 'owner', repo: 'repo', branch: 'main', subpath: 'src' });
+    assert.deepEqual(parsedQuery, { owner: 'owner', repo: 'repo', branch: 'main', subpath: 'src', treeTail: 'main/src' });
 
     const parsedBlob = parseRepoInput('https://github.com/owner/repo/blob/main/src/index.js');
-    assert.deepEqual(parsedBlob, { owner: 'owner', repo: 'repo', branch: 'main', subpath: 'src/index.js' });
+    assert.deepEqual(parsedBlob, { owner: 'owner', repo: 'repo', branch: 'main', subpath: 'src/index.js', treeTail: 'main/src/index.js' });
 });
 
 test('github-api: Retry-After HTTP-date parsing', () => {
@@ -229,7 +229,7 @@ test('minifier: Markdown files in aggressive mode do not strip blank lines', () 
 
 test('github-api: parseRepoInput with branch containing slashes', () => {
     const parsed = parseRepoInput('https://github.com/owner/repo/tree/feature/ui/src/app', 'feature/ui');
-    assert.deepEqual(parsed, { owner: 'owner', repo: 'repo', branch: 'feature/ui', subpath: 'src/app' });
+    assert.deepEqual(parsed, { owner: 'owner', repo: 'repo', branch: 'feature/ui', subpath: 'src/app', treeTail: 'feature/ui/src/app' });
 });
 
 test('formatters: Claude XML wraps CDATA when closing document tags exist in content', () => {
@@ -277,7 +277,7 @@ test('minifier: HTML script and style tags are preserved during aggressive minif
 
 test('github-api: parseRepoInput override branch honors explicit branch over URL tree segment', () => {
     const parsed = parseRepoInput('https://github.com/owner/repo/tree/feature/login/src', 'main');
-    assert.deepEqual(parsed, { owner: 'owner', repo: 'repo', branch: 'main', subpath: 'feature/login/src' });
+    assert.deepEqual(parsed, { owner: 'owner', repo: 'repo', branch: 'main', subpath: 'feature/login/src', treeTail: 'feature/login/src' });
 });
 
 test('github-api: fetchFileContent with mock fetch (public raw OK, raw 404 REST fallback, 429 backoff)', async () => {
@@ -328,4 +328,53 @@ test('github-api: fetchFileContent with mock fetch (public raw OK, raw 404 REST 
     } finally {
         globalThis.fetch = originalFetch;
     }
+});
+
+test('minifier: CSS slash is not treated as regex start', () => {
+    const code = '.box { font: 12px/1.5 sans-serif; /* comment */ background: 50% / 10%; }';
+    const minified = minifyCode(code, 'style.css', 'aggressive');
+    assert.ok(!minified.includes('comment'), 'Comment should be removed');
+    assert.ok(minified.includes('font: 12px/1.5 sans-serif;'));
+    assert.ok(minified.includes('background: 50% / 10%;'));
+});
+
+test('minifier: JSX closing tag does not prevent comment stripping', () => {
+    const code = '<div>hello</div> // trailing comment';
+    const minified = minifyCode(code, 'App.jsx', 'aggressive');
+    assert.ok(!minified.includes('trailing comment'));
+    assert.ok(minified.includes('<div>hello</div>'));
+});
+
+test('minifier: Rust lifetime annotations do not corrupt string state or comments', () => {
+    const code = "fn foo<'a>(x: &'a str) {\n    let val = 42; // Rust comment\n}";
+    const minified = minifyCode(code, 'lib.rs', 'aggressive');
+    assert.ok(!minified.includes('Rust comment'));
+    assert.ok(minified.includes("fn foo<'a>(x: &'a str)"));
+});
+
+test('formatters: invalid XML control characters are stripped', () => {
+    const repoInfo = { owner: 'owner', repo: 'repo' };
+    const files = [{ path: 'ansi.txt', content: 'hello \x1b[31mred\x1b[0m world\x07' }];
+    const res = formatClaudeXml(repoInfo, 'main', '', files);
+    assert.ok(!res.text.includes('\x1b'));
+    assert.ok(!res.text.includes('\x07'));
+    assert.ok(res.text.includes('hello [31mred[0m world'));
+});
+
+test('formatters: continuous indexing in Claude XML across chunks', () => {
+    const repoInfo = { owner: 'owner', repo: 'repo' };
+    const files = [
+        { path: 'a.js', content: 'const a = 1;' },
+        { path: 'b.js', content: 'const b = 2;' }
+    ];
+    const chunks = chunkContextOutput('claude-xml', repoInfo, 'main', '', files, 40, estimateTokens);
+    assert.ok(chunks.length >= 2, 'Expected multiple chunks');
+    assert.ok(chunks[0].text.includes('<document index="1">'));
+    assert.ok(chunks[1].text.includes('<document index="2">'));
+});
+
+test('minifier: basic mode preserves first line leading indentation', () => {
+    const code = '  first_line: true\n  second_line: 123\n\n\n';
+    const minified = minifyCode(code, 'config.yaml', 'basic');
+    assert.equal(minified, '  first_line: true\n  second_line: 123');
 });

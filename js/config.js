@@ -6,7 +6,7 @@ export const GITHUB_API_BASE = 'https://api.github.com';
 export const GITHUB_RAW_BASE = 'https://raw.githubusercontent.com';
 
 export const IGNORED_DIRS = new Set([
-    '.git', '.github', '.vscode', 'node_modules', 'dist', 'build',
+    '.git', '.vscode', 'node_modules', 'dist', 'build',
     '__pycache__', '.pytest_cache', '.venv', 'env', 'coverage', '.idea', 'target', 'vendor'
 ]);
 
