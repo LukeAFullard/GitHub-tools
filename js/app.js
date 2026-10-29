@@ -356,15 +356,16 @@ dom.packBtn.addEventListener('click', async () => {
     isPrivateRepo = false;
     clearOutputState();
 
+    const userTypedBranch = dom.branch ? dom.branch.value.trim() : '';
+
     // Auto-fill branch and subpath filter if present in pasted GitHub URL
     if (dom.branch) {
-        const userBranch = dom.branch.value.trim();
-        const parsedWithOverride = parseRepoInput(dom.repoUrl.value, userBranch);
+        const parsedWithOverride = parseRepoInput(dom.repoUrl.value, userTypedBranch);
         if (parsedWithOverride && parsedWithOverride.branch) {
             repoInfo.branch = parsedWithOverride.branch;
             repoInfo.subpath = parsedWithOverride.subpath;
         }
-        if (repoInfo.branch && !userBranch) {
+        if (repoInfo.branch && !userTypedBranch) {
             dom.branch.value = repoInfo.branch;
         }
     }
@@ -389,49 +390,24 @@ dom.packBtn.addEventListener('click', async () => {
     try {
         log(`[FETCH] Querying GitHub API for ${repoInfo.owner}/${repoInfo.repo}...`);
 
-        let targetBranch = dom.branch.value.trim() || repoInfo.branch || '';
+        let targetBranch = userTypedBranch || repoInfo.branch || '';
         let rawTree = null;
 
-        // If URL has treeTail and no explicit branch override was typed by user, test candidate branch prefixes
-        if (repoInfo.treeTail && !dom.branch.value.trim()) {
-            const tailParts = repoInfo.treeTail.split('/');
-            for (let len = tailParts.length; len >= 1; len--) {
-                const candidateBranch = tailParts.slice(0, len).join('/');
-                const candidateSubpath = tailParts.slice(len).join('/') || null;
-                try {
-                    rawTree = await fetchRepoTree(
-                        repoInfo.owner,
-                        repoInfo.repo,
-                        candidateBranch,
-                        pat,
-                        abortController.signal,
-                        updateRateLimitUI
-                    );
-                    targetBranch = candidateBranch;
-                    repoInfo.branch = candidateBranch;
-                    repoInfo.subpath = candidateSubpath;
-                    if (dom.branch) dom.branch.value = candidateBranch;
-                    log(`[FETCH] Resolved branch with slash: ${targetBranch}`);
-                    break;
-                } catch (_) {}
-            }
-        }
+        try {
+            const repoMeta = await resolveDefaultBranch(
+                repoInfo.owner,
+                repoInfo.repo,
+                pat,
+                abortController.signal,
+                updateRateLimitUI
+            );
+            if (!targetBranch) targetBranch = repoMeta.branch;
+            isPrivateRepo = repoMeta.isPrivate;
+        } catch (_) {}
 
-        if (!rawTree) {
-            if (!targetBranch || pat) {
-                const repoMeta = await resolveDefaultBranch(
-                    repoInfo.owner,
-                    repoInfo.repo,
-                    pat,
-                    abortController.signal,
-                    updateRateLimitUI
-                );
-                if (!targetBranch) targetBranch = repoMeta.branch;
-                isPrivateRepo = repoMeta.isPrivate;
-            }
+        log(`[FETCH] Target branch: ${targetBranch}${isPrivateRepo ? ' (Private Repository)' : ''}`);
 
-            log(`[FETCH] Target branch: ${targetBranch}${isPrivateRepo ? ' (Private Repository)' : ''}`);
-            log(`[FETCH] Fetching recursive file manifest...`);
+        try {
             rawTree = await fetchRepoTree(
                 repoInfo.owner,
                 repoInfo.repo,
@@ -440,8 +416,32 @@ dom.packBtn.addEventListener('click', async () => {
                 abortController.signal,
                 updateRateLimitUI
             );
-        } else {
-            log(`[FETCH] Target branch: ${targetBranch}${isPrivateRepo ? ' (Private Repository)' : ''}`);
+        } catch (err) {
+            if (!userTypedBranch && repoInfo.treeTail && repoInfo.treeTail.includes('/')) {
+                const tailParts = repoInfo.treeTail.split('/');
+                for (let len = tailParts.length; len >= 1; len--) {
+                    const candidateBranch = tailParts.slice(0, len).join('/');
+                    if (candidateBranch === targetBranch) continue;
+                    const candidateSubpath = tailParts.slice(len).join('/') || null;
+                    try {
+                        rawTree = await fetchRepoTree(
+                            repoInfo.owner,
+                            repoInfo.repo,
+                            candidateBranch,
+                            pat,
+                            abortController.signal,
+                            updateRateLimitUI
+                        );
+                        targetBranch = candidateBranch;
+                        repoInfo.branch = candidateBranch;
+                        repoInfo.subpath = candidateSubpath;
+                        if (dom.branch) dom.branch.value = candidateBranch;
+                        log(`[FETCH] Resolved branch with slash: ${targetBranch}`);
+                        break;
+                    } catch (_) {}
+                }
+            }
+            if (!rawTree) throw err;
         }
 
         if (rawTree.truncated) {
@@ -728,7 +728,8 @@ dom.packBtn.addEventListener('click', async () => {
                     if (result && result.backoff) {
                         retries++;
                         const backoffTime = Math.min(result.backoff, 60);
-                        log(`[LIMIT] Rate limit warning for ${node.path}. Retry ${retries}/3 cooling down for ${backoffTime}s...`);
+                        const reasonMsg = (result.status >= 500) ? `Server error (HTTP ${result.status})` : 'Rate limit warning';
+                        log(`[RETRY] ${reasonMsg} for ${node.path}. Retry ${retries}/3 cooling down for ${backoffTime}s...`);
                         await sleep(backoffTime * 1000, abortController.signal);
                         continue;
                     }

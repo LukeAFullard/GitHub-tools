@@ -325,6 +325,14 @@ test('github-api: fetchFileContent with mock fetch (public raw OK, raw 404 REST 
         assert.equal(res3.success, false);
         assert.equal(res3.backoff, 60);
 
+        // Case 4: Raw 500 server error triggers 5s backoff
+        globalThis.fetch = async (url) => {
+            return { ok: false, status: 500, statusText: 'Internal Server Error' };
+        };
+        const res4 = await fetchFileContent('owner', 'repo', 'main', 'file.js', '');
+        assert.equal(res4.success, false);
+        assert.equal(res4.backoff, 5);
+
     } finally {
         globalThis.fetch = originalFetch;
     }
