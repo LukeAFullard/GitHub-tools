@@ -652,15 +652,16 @@ async function buildSelectedContext(summaryOnly = false) {
                     onHeaders: updateRateLimitUI,
                     onProgress: (done, total) => updateProgressBar((done / total) * 100),
                     onThread: (num, comms) => {
+                        if (thisBuildGen !== buildGeneration || myController.signal.aborted) return;
                         cachedCommentsByIssue.set(num, comms);
                         fetchFailuresMap.delete(num);
                     }
                 });
+                if (thisBuildGen !== buildGeneration) return;
                 for (const [num, comms] of fetchedMap.entries()) {
                     cachedCommentsByIssue.set(num, comms);
                     fetchFailuresMap.delete(num);
                 }
-                if (thisBuildGen !== buildGeneration) return;
                 if (failures && failures.length > 0) {
                     for (const f of failures) {
                         fetchFailuresMap.set(f.number, f.error);
@@ -676,7 +677,7 @@ async function buildSelectedContext(summaryOnly = false) {
                 log(`[ERROR] Comment fetch error: ${err.message}`);
                 showToast(err.message, 'error');
             } finally {
-                if (buildController === myController) {
+                if (buildController === myController && thisBuildGen === buildGeneration) {
                     dom.buildContextBtn.disabled = false;
                     dom.abortBtn.style.display = 'none';
                 }

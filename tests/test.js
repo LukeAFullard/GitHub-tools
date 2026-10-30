@@ -690,6 +690,35 @@ test('github-issues-api: PR merged state mapped to stateReason completed', async
     }
 });
 
+test('minifier: cache does not return stale output for same-length edits beyond byte 1024', () => {
+    const prefix = 'const padding = "' + 'a'.repeat(1200) + '";\n';
+    const codeV1 = prefix + 'const flag = 0; // comment 1\n';
+    const codeV2 = prefix + 'const flag = 1; // comment 2\n';
+
+    assert.equal(codeV1.length, codeV2.length);
+
+    const outV1 = minifyCode(codeV1, 'bundle.js', 'aggressive');
+    const outV2 = minifyCode(codeV2, 'bundle.js', 'aggressive');
+
+    assert.ok(outV1.includes('const flag = 0;'));
+    assert.ok(outV2.includes('const flag = 1;'));
+    assert.notEqual(outV1, outV2);
+});
+
+test('minifier: O(n) slash processing performance on 600KB file', () => {
+    const line = 'const x = 10 / 2; // division\n';
+    const numLines = Math.floor(600000 / line.length);
+    const bigJs = line.repeat(numLines);
+
+    const start = Date.now();
+    const minified = minifyCode(bigJs, 'big.js', 'aggressive');
+    const duration = Date.now() - start;
+
+    assert.ok(duration < 500, `Minification took ${duration} ms (expected < 500 ms)`);
+    assert.ok(minified.includes('const x = 10 / 2;'));
+    assert.ok(!minified.includes('// division'));
+});
+
 test('budget status logic for pre-build split and oversized split chunk', () => {
     function calcBudgetStatus(totalTokens, numChunks = 1, isPreBuild = false, maxChunkTokens = 0, hasOversizedChunk = false, currentBudgetWindow = 200000, chunkLimitVal = 0) {
         if (isPreBuild && chunkLimitVal > 0 && totalTokens > chunkLimitVal) {
