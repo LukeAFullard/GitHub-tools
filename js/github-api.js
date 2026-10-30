@@ -185,24 +185,6 @@ export async function fetchRepoTree(owner, repo, branch, pat, signal, onHeaders)
     }
 }
 
-export async function fetchRepoZipball(owner, repo, branch, pat, signal, onHeaders) {
-    const headers = {
-        'Accept': 'application/vnd.github.v3+json',
-        ...getAuthHeader(pat)
-    };
-    const refEncoded = encodeURIComponent(branch);
-    const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${refEncoded}`;
-
-    const res = await fetch(url, { headers, signal });
-    if (onHeaders) onHeaders(extractRateLimitHeaders(res));
-
-    if (!res.ok) {
-        throw new Error(`Zipball download failed (${res.status}): ${res.statusText}`);
-    }
-
-    const arrayBuffer = await res.arrayBuffer();
-    return new Uint8Array(arrayBuffer);
-}
 
 export async function fetchFileContent(owner, repo, branch, path, pat, signal, onHeaders, isPrivate = false) {
     const pathEncoded = path.split('/').map(encodeURIComponent).join('/');

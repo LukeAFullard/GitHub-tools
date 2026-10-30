@@ -358,27 +358,27 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
                     }
                 },
                 applyFilter(query, isSubpath = false) {
-                    let isVisible = false;
+                    let matchingFiles = 0;
                     if (isSubpath) {
                         const clean = (query || '').replace(/^\/+|\/+$/g, '').toLowerCase();
                         const pLower = item.path.toLowerCase();
                         const selfMatches = pLower === clean || pLower.startsWith(clean + '/') || clean.startsWith(pLower + '/');
-                        let hasMatchingChild = false;
                         for (const child of childElements) {
-                            if (child.applyFilter(query, true)) hasMatchingChild = true;
+                            matchingFiles += child.applyFilter(query, true);
                         }
-                        isVisible = !clean || selfMatches || hasMatchingChild;
+                        const isVisible = !clean || selfMatches || matchingFiles > 0;
+                        li.style.display = isVisible ? 'block' : 'none';
+                        if (query && isVisible) toggleExpand(true);
                     } else {
-                        let hasMatchingChild = false;
-                        for (const child of childElements) {
-                            if (child.applyFilter(query, false)) hasMatchingChild = true;
-                        }
                         const selfMatches = matchQuery(item.name, item.path, query);
-                        isVisible = !query || selfMatches || hasMatchingChild;
+                        for (const child of childElements) {
+                            matchingFiles += child.applyFilter(query, false);
+                        }
+                        const isVisible = !query || selfMatches || matchingFiles > 0;
+                        li.style.display = isVisible ? 'block' : 'none';
+                        if (query && isVisible) toggleExpand(true);
                     }
-                    li.style.display = isVisible ? 'block' : 'none';
-                    if (query && isVisible) toggleExpand(true);
-                    return isVisible;
+                    return matchingFiles;
                 }
             };
         } else {
@@ -447,7 +447,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
                         matches = !query || matchQuery(item.name, item.path, query);
                     }
                     li.style.display = matches ? 'block' : 'none';
-                    return matches;
+                    return matches ? 1 : 0;
                 }
             };
         }
@@ -560,9 +560,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
             currentQuery = (query || '').trim();
             let visibleCount = 0;
             for (const rn of rootNodes) {
-                if (rn.applyFilter(currentQuery, isSubpath)) {
-                    visibleCount++;
-                }
+                visibleCount += rn.applyFilter(currentQuery, isSubpath);
             }
             ensureValidTabStop();
             return visibleCount;

@@ -508,7 +508,7 @@ function updateRateLimitUI(meta) {
         const limit = typeof meta.limit === 'number' ? meta.limit : parseInt(meta.limit, 10);
         if (!Number.isNaN(remaining) && !Number.isNaN(limit)) {
             dom.quotaVal.textContent = `${remaining} / ${limit}`;
-            dom.quotaVal.className = 'rate-status ' + (
+            dom.quotaVal.className = (
                 remaining < 5 ? 'rate-critical' : remaining < 20 ? 'rate-warning' : 'rate-normal'
             );
         }
@@ -753,9 +753,21 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
 }
 
 // Auto-repack on setting changes if files are already cached
-if (dom.format) dom.format.addEventListener('change', () => repackBundleInMemory());
-if (dom.minifyMode) dom.minifyMode.addEventListener('change', () => repackBundleInMemory());
-if (dom.chunkLimit) dom.chunkLimit.addEventListener('change', () => repackBundleInMemory());
+[dom.format, dom.minifyMode, dom.chunkLimit].forEach(el => {
+    if (el) {
+        el.addEventListener('change', () => {
+            saveSettings();
+            repackBundleInMemory();
+        });
+    }
+});
+[dom.maxKb, dom.throttleMs, dom.ignoreExt].forEach(el => {
+    if (el) {
+        el.addEventListener('change', () => {
+            saveSettings();
+        });
+    }
+});
 if (dom.redactSecrets) {
     dom.redactSecrets.addEventListener('change', () => {
         saveSettings();
@@ -1019,9 +1031,12 @@ dom.packBtn.addEventListener('click', async () => {
             };
             dom.treeFilterInput.oninput = doFilter;
             if (repoInfo.subpath) {
-                treeControls.filter(repoInfo.subpath, true);
+                const subpathCount = treeControls.filter(repoInfo.subpath, true);
                 if (treeControls.selectBySubpath) {
                     treeControls.selectBySubpath(repoInfo.subpath);
+                }
+                if (dom.searchMatchCount) {
+                    dom.searchMatchCount.textContent = `${subpathCount} matches`;
                 }
             }
         }

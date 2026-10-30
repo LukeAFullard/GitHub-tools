@@ -278,12 +278,14 @@ export function redactSecrets(content, path) {
 
     const sorted = [...matches].sort((a, b) => b.index - a.index);
     let redacted = content;
+    let lastStart = Infinity;
 
     for (const m of sorted) {
-        if (m.index >= 0 && m.index + m.length <= redacted.length) {
+        if (m.index >= 0 && m.index + m.length <= lastStart && m.index + m.length <= redacted.length) {
             const before = redacted.slice(0, m.index);
             const after = redacted.slice(m.index + m.length);
             redacted = before + `[REDACTED:${m.type}]` + after;
+            lastStart = m.index;
         }
     }
 

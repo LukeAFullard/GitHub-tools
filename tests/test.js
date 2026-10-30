@@ -14,7 +14,7 @@ import {
 } from '../js/formatters.js';
 
 import { minifyCode } from '../js/minifier.js';
-import { parseRepoInput, extractRateLimitHeaders, fetchRepoZipball } from '../js/github-api.js';
+import { parseRepoInput, extractRateLimitHeaders } from '../js/github-api.js';
 import { estimateTokens } from '../js/tokenizer.js';
 import { generateTree } from '../js/tree.js';
 import { scanForSecrets, redactSecrets } from '../js/secrets.js';
@@ -164,9 +164,6 @@ test('tree: generateTree handles prototype property collisions safely', () => {
     assert.ok(ascii.includes('valueOf'));
 });
 
-test('github-api: fetchRepoZipball export function exists', () => {
-    assert.equal(typeof fetchRepoZipball, 'function');
-});
 
 test('minifier: block comment removal inserts space to prevent token merging', () => {
     const code = 'return/*comment*/x;';
@@ -772,4 +769,91 @@ test('secrets: long single-line input scans in under 1 second', () => {
 
     assert.equal(findings.length, 0);
     assert.ok(duration < 1000, `Scan took ${duration} ms (expected < 1000 ms)`);
+});
+
+test('secrets: overlapping secret redaction does not corrupt output', () => {
+    // Overlapping specific pattern or multiple secrets
+    const skKey = 'sk-proj-' + '1234567890abcdefghijklmnopqrstuvwxyz';
+    const content = `const secret = "${skKey}"; password = "${skKey}";`;
+    const redacted = redactSecrets(content, 'test.js');
+
+    assert.ok(!redacted.includes('undefined'));
+    assert.ok(!redacted.includes('NaN'));
+    assert.ok(redacted.includes('[REDACTED:openai-key]'));
+    assert.ok(!redacted.includes(skKey));
+});
+
+test('tree: filter counts matching leaf files instead of top-level folder count', async () => {
+    function createMockElement(tagName = 'div') {
+        const children = [];
+        const eventListeners = {};
+        const style = { display: '' };
+        const attributes = {};
+
+        const el = {
+            tagName: tagName.toUpperCase(),
+            children,
+            style,
+            attributes,
+            tabIndex: -1,
+            className: '',
+            textContent: '',
+            innerHTML: '',
+            checked: false,
+            type: '',
+            parentElement: null,
+            get offsetParent() {
+                if (el.style.display === 'none') return null;
+                let p = el.parentElement;
+                while (p) {
+                    if (p.style && p.style.display === 'none') return null;
+                    p = p.parentElement;
+                }
+                return {};
+            },
+
+            appendChild(child) {
+                child.parentElement = el;
+                children.push(child);
+                return child;
+            },
+            insertBefore(newChild, refChild) {
+                newChild.parentElement = el;
+                const idx = children.indexOf(refChild);
+                if (idx !== -1) children.splice(idx, 0, newChild);
+                else children.push(newChild);
+                return newChild;
+            },
+            setAttribute(k, v) { attributes[k] = String(v); },
+            getAttribute(k) { return attributes[k] || null; },
+            addEventListener(type, fn) {
+                if (!eventListeners[type]) eventListeners[type] = [];
+                eventListeners[type].push(fn);
+            },
+            dispatchEvent(evt) {
+                const fns = eventListeners[evt.type] || [];
+                for (const fn of fns) fn(evt);
+            },
+            closest() { return null; }
+        };
+        return el;
+    }
+
+    const originalDoc = globalThis.document;
+    try {
+        globalThis.document = { createElement: createMockElement };
+        const { renderInteractiveTree } = await import('../js/tree.js');
+        const container = createMockElement('div');
+        const nodes = [
+            { path: 'src/a.js', type: 'blob', size: 100 },
+            { path: 'src/b.js', type: 'blob', size: 100 },
+            { path: 'src/c.js', type: 'blob', size: 100 }
+        ];
+
+        const controls = renderInteractiveTree(nodes, container);
+        const matchCount = controls.filter('.js');
+        assert.equal(matchCount, 3);
+    } finally {
+        globalThis.document = originalDoc;
+    }
 });
