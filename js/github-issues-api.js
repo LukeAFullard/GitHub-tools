@@ -131,6 +131,25 @@ async function fetchAllPages(baseUrl, pat, signal, onHeaders, maxPages = 10) {
     return { items, truncated: true };
 }
 
+/**
+ * Estimates request cost of the two comment strategies.
+ * per-issue: one request per 100 comments for every selected issue (min 1 each).
+ * bulk: GET /repos/{o}/{r}/issues/comments?since=<oldest selected issue date>, 100 per page,
+ *       covering every comment in the repo updated since then (issues AND PRs).
+ * `universe` is the loaded issue list, used to estimate how many comments fall in the window.
+ */
+export function estimateCommentFetchCost(needsComments, universe, maxCommentPages = 10) {
+    const perIssue = needsComments.reduce(
+        (sum, iss) => sum + Math.min(maxCommentPages, Math.max(1, Math.ceil(iss.commentsCount / 100))), 0);
+    const dates = needsComments.map(i => i.createdAt).filter(Boolean).sort();
+    const sinceDate = dates.length ? dates[0] : null;
+    if (!sinceDate || !Array.isArray(universe) || universe.length === 0) {
+        return { perIssue, bulkPages: Infinity, sinceDate };
+    }
+    const inWindow = universe.reduce((sum, i) => sum + (i.createdAt && i.createdAt >= sinceDate ? (i.commentsCount || 0) : 0), 0);
+    return { perIssue, bulkPages: Math.max(1, Math.ceil(inWindow / 100)), sinceDate };
+}
+
 export async function fetchCommentsForIssues(owner, repo, selectedIssues, options = {}) {
     const {
         pat = '',
@@ -139,38 +158,100 @@ export async function fetchCommentsForIssues(owner, repo, selectedIssues, option
         onProgress,
         onThread,
         throttleMs = 60,
-        maxCommentPages = 10
+        maxCommentPages = 10,
+        strategy = 'auto', // 'auto' | 'per-issue' | 'bulk'
+        universe = null
     } = options;
 
     const commentsByIssue = new Map();
     const failures = [];
+    const stats = { strategy: 'per-issue', requests: 0, bulkPages: 0, bulkVerified: 0, perIssueRequestsEstimate: 0 };
+    const countingHeaders = (meta) => { stats.requests++; if (onHeaders) onHeaders(meta); };
     const needsComments = selectedIssues.filter(iss => iss.commentsCount > 0);
 
     if (needsComments.length === 0) {
-        return { commentsByIssue, failures };
+        return { commentsByIssue, failures, stats };
+    }
+
+    const formatComment = c => ({
+        id: c.id,
+        author: c.user ? c.user.login : 'ghost',
+        authorType: c.user ? c.user.type : 'User',
+        authorAssociation: c.author_association || 'NONE',
+        createdAt: c.created_at ? c.created_at.slice(0, 10) : '',
+        reactionsPlusOne: (c.reactions && c.reactions['+1']) || 0,
+        body: c.body || ''
+    });
+
+    const cost = estimateCommentFetchCost(needsComments, universe, maxCommentPages);
+    stats.perIssueRequestsEstimate = cost.perIssue;
+    const useBulk = strategy === 'bulk'
+        || (strategy === 'auto' && cost.perIssue >= 4 && cost.bulkPages <= cost.perIssue * 0.3);
+
+    let pending = needsComments;
+
+    if (useBulk && cost.sinceDate) {
+        stats.strategy = 'bulk';
+        const budget = Math.max(2, Math.ceil(cost.perIssue * 0.35));
+        const wanted = new Set(needsComments.map(i => i.number));
+        const byIssue = new Map();
+        const baseUrl = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/comments?per_page=100&since=${cost.sinceDate}T00:00:00Z`;
+        try {
+            const { items } = await fetchAllPages(baseUrl, pat, signal, countingHeaders, budget);
+            stats.bulkPages = Math.ceil(items.length / 100);
+            for (const c of items) {
+                const m = /\/issues\/(\d+)$/.exec(c.issue_url || '');
+                if (!m) continue;
+                const num = Number(m[1]);
+                if (!wanted.has(num)) continue;
+                if (!byIssue.has(num)) byIssue.set(num, []);
+                byIssue.get(num).push(formatComment(c));
+            }
+        } catch (err) {
+            if (err.name === 'AbortError') throw err;
+            // Bulk failed (e.g. rate limit mid-way): fall back to per-issue for everything.
+            byIssue.clear();
+        }
+
+        // Accept an issue from the bulk result only when the count matches what the
+        // issues list reported; anything else (cut-off pages, new/deleted comments) is
+        // re-fetched per issue so we never emit a silently partial thread.
+        const stillPending = [];
+        let done = 0;
+        for (const iss of needsComments) {
+            const got = byIssue.get(iss.number);
+            if (got && got.length === iss.commentsCount) {
+                if (got.length > maxCommentPages * 100) {
+                    got.length = maxCommentPages * 100;
+                    got.truncated = true;
+                }
+                commentsByIssue.set(iss.number, got);
+                stats.bulkVerified++;
+                done++;
+                if (onThread) { try { onThread(iss.number, got); } catch (_) {} }
+            } else {
+                stillPending.push(iss);
+            }
+        }
+        if (onProgress && done > 0) onProgress(done, needsComments.length);
+        pending = stillPending;
+        if (pending.length === 0) return { commentsByIssue, failures, stats };
+        stats.strategy = 'bulk+per-issue';
     }
 
     const concurrency = 4;
     let idx = 0;
-    let completed = 0;
+    let completed = needsComments.length - pending.length;
 
     async function worker() {
-        while (idx < needsComments.length) {
+        while (idx < pending.length) {
             if (signal && signal.aborted) break;
-            const current = needsComments[idx++];
+            const current = pending[idx++];
             const baseUrl = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${current.number}/comments?per_page=100`;
 
             try {
-                const { items: rawComments, truncated } = await fetchAllPages(baseUrl, pat, signal, onHeaders, maxCommentPages);
-                const formatted = (rawComments || []).map(c => ({
-                    id: c.id,
-                    author: c.user ? c.user.login : 'ghost',
-                    authorType: c.user ? c.user.type : 'User',
-                    authorAssociation: c.author_association || 'NONE',
-                    createdAt: c.created_at ? c.created_at.slice(0, 10) : '',
-                    reactionsPlusOne: (c.reactions && c.reactions['+1']) || 0,
-                    body: c.body || ''
-                }));
+                const { items: rawComments, truncated } = await fetchAllPages(baseUrl, pat, signal, countingHeaders, maxCommentPages);
+                const formatted = (rawComments || []).map(formatComment);
                 if (truncated) formatted.truncated = true;
                 commentsByIssue.set(current.number, formatted);
                 if (onThread) {
@@ -187,12 +268,12 @@ export async function fetchCommentsForIssues(owner, repo, selectedIssues, option
         }
     }
 
-    const workers = Array.from({ length: Math.min(concurrency, needsComments.length) }, () => worker());
+    const workers = Array.from({ length: Math.min(concurrency, pending.length) }, () => worker());
     await Promise.all(workers);
 
     if (signal && signal.aborted) {
         throw new DOMException('Aborted', 'AbortError');
     }
 
-    return { commentsByIssue, failures };
+    return { commentsByIssue, failures, stats };
 }
