@@ -234,6 +234,12 @@ export function chunkContextOutput(format, repoInfo, branch, treeText, files, ch
                 lastTree = '';
                 lastOpts = { ...options, startIndex: lastChunk.startIndex, instructions, partNote: `Part ${chunks.length} of ${chunks.length}.` };
                 lastOutput = buildContextOutput(format, repoInfo, branch, lastTree, lastChunk.files, lastOpts);
+            } else if (lastChunk.files.length === 1) {
+                chunks.push({ files: [], startIndex: lastChunk.startIndex + 1 });
+                lastChunk = chunks[chunks.length - 1];
+                lastTree = '';
+                lastOpts = { ...options, startIndex: lastChunk.startIndex, instructions, partNote: `Part ${chunks.length} of ${chunks.length}.` };
+                lastOutput = buildContextOutput(format, repoInfo, branch, lastTree, lastChunk.files, lastOpts);
             } else {
                 break;
             }

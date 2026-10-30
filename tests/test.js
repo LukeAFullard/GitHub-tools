@@ -864,6 +864,91 @@ test('secrets: overlapping secret redaction does not corrupt output', () => {
     assert.ok(jwtRedacted.includes('[REDACTED:jwt]'));
 });
 
+test('secrets: status per finding and AWS secret key with slashes/plus/brackets', () => {
+    // AWS Secret Key (40 base64 chars)
+    const awsKey = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYzQ9d1T3k7A';
+    const awsContent = `aws_secret_access_key = "${awsKey}"`;
+    const awsScan = scanForSecrets('config.py', awsContent);
+    assert.equal(awsScan.length, 1);
+    assert.equal(awsScan[0].type, 'aws-key');
+
+    // Base64 value with + and / (32+ chars, high entropy)
+    const clientSecret = 'Qx7+vN2pLm9/Zk4Rt8Yw1Hs6Bc3Df5Gj';
+    const csContent = `client_secret = "${clientSecret}"`;
+    const csScan = scanForSecrets('config.yml', csContent);
+    assert.equal(csScan.length, 1);
+    assert.equal(csScan[0].type, 'generic-secret');
+
+    // Quoted password with brackets
+    const bracketPass = 'p@ss(w0rd){1}';
+    const bpContent = `PASSWORD = "${bracketPass}"`;
+    const bpScan = scanForSecrets('config.js', bpContent);
+    assert.equal(bpScan.length, 1);
+    assert.equal(bpScan[0].type, 'generic-secret');
+});
+
+test('secrets: panel status per finding row status calculation', () => {
+    function computePanelStatus(selectedFiles, secretsMap, isRedactOn, isAggressiveOn) {
+        let totalFindings = 0;
+        let redactedCount = 0;
+        let presentCount = 0;
+        const rows = [];
+
+        for (const file of selectedFiles) {
+            const findings = secretsMap.get(file.path) || [];
+            totalFindings += findings.length;
+            for (const f of findings) {
+                const isRedacted = isRedactOn && (f.type !== 'generic-secret' || isAggressiveOn);
+                if (isRedacted) redactedCount++;
+                else presentCount++;
+                rows.push({ path: file.path, type: f.type, isRedacted });
+            }
+        }
+        return { totalFindings, redactedCount, presentCount, rows };
+    }
+
+    const secretsMap = new Map([
+        ['app.js', [{ type: 'aws-key' }]],
+        ['config.yml', [{ type: 'generic-secret' }]]
+    ]);
+    const files = [{ path: 'app.js' }, { path: 'config.yml' }];
+
+    // Default: Redact ON, Aggressive OFF
+    const defStatus = computePanelStatus(files, secretsMap, true, false);
+    assert.equal(defStatus.redactedCount, 1);
+    assert.equal(defStatus.presentCount, 1);
+    assert.equal(defStatus.rows[0].isRedacted, true);
+    assert.equal(defStatus.rows[1].isRedacted, false);
+
+    // Aggressive ON: Redact ON, Aggressive ON
+    const aggStatus = computePanelStatus(files, secretsMap, true, true);
+    assert.equal(aggStatus.redactedCount, 2);
+    assert.equal(aggStatus.presentCount, 0);
+    assert.equal(aggStatus.rows[0].isRedacted, true);
+    assert.equal(aggStatus.rows[1].isRedacted, true);
+});
+
+test('instructions: single file exceeding limit due to instructions produces instructions-only final chunk', () => {
+    const repoInfo = { owner: 'owner', repo: 'repo' };
+    const files = [{ path: 'file.js', content: 'const content = "x".repeat(2000);' }];
+    const instructions = 'Long instruction block '.repeat(150);
+
+    const limit = 600;
+    const chunks = chunkContextOutput('claude-xml', repoInfo, 'main', '', files, limit, estimateTokens, { instructions });
+
+    assert.equal(chunks.length, 2, 'Should spill into 2 chunks');
+
+    // First chunk should contain file but NO instructions, with part note
+    assert.ok(chunks[0].text.includes('<source>file.js</source>'));
+    assert.ok(!chunks[0].text.includes('Long instruction block'));
+    assert.ok(chunks[0].text.includes('Part 1 of 2. Instructions are in part 2.'));
+
+    // Second chunk should contain instructions with empty files
+    assert.ok(!chunks[1].text.includes('<source>file.js</source>'));
+    assert.ok(chunks[1].text.includes('Long instruction block'));
+    assert.ok(!chunks[1].text.includes('Part 1 of'));
+});
+
 // --- Issue Cleaner & Issue Formatters Tests ---
 
 test('issue-cleaner: bot comment detection', () => {
