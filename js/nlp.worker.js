@@ -1,0 +1,272 @@
+/**
+ * Background Web Worker for Deterministic Issue NLP:
+ * 1. GitHub/Markdown boilerplate removal & technical tokenization
+ * 2. Bigram & Trigram extraction
+ * 3. TF-IDF + Spherical K-Means Topic Clustering
+ * 4. Near-Duplicate Issue Detection via Cosine Similarity
+ */
+
+const STOPWORDS = new Set([
+    'the', 'and', 'for', 'that', 'this', 'with', 'from', 'are', 'was', 'were', 'have', 'has', 'had',
+    'not', 'but', 'what', 'all', 'when', 'can', 'there', 'use', 'used', 'using', 'an', 'each', 'which',
+    'she', 'do', 'how', 'their', 'if', 'will', 'up', 'other', 'about', 'out', 'many', 'then', 'them',
+    'these', 'so', 'some', 'her', 'would', 'make', 'like', 'him', 'into', 'time', 'look', 'two', 'more',
+    'write', 'go', 'see', 'no', 'way', 'could', 'my', 'than', 'first', 'been', 'call', 'who', 'its',
+    'now', 'find', 'long', 'down', 'day', 'did', 'get', 'come', 'made', 'may', 'part', 'over', 'new',
+    'after', 'also', 'only', 'work', 'works', 'working', 'does', 'doesn', 'don', 'should', 'ried',
+    'trying', 'tried', 'just', 'still', 'even', 'when', 'where', 'why', 'while', 'here', 'very',
+    'any', 'same', 'able', 'need', 'want', 'know', 'think', 'seem', 'seems', 'getting', 'got',
+    'bug', 'issue', 'feature', 'request', 'describe', 'description', 'expected', 'behavior', 'behaviour',
+    'actual', 'steps', 'reproduce', 'reproduction', 'environment', 'version', 'operating', 'system',
+    'additional', 'context', 'screenshots', 'screenshot', 'code', 'example', 'problem', 'solution',
+    'please', 'thanks', 'thank', 'hello', 'hi', 'hey', 'summary', 'checklist', 'search', 'searched',
+    'existing', 'issues', 'current', 'currently', 'running', 'follow', 'following', 'below', 'above',
+    'file', 'files', 'line', 'http', 'https', 'com', 'github', 'org', 'www', 'html', 'true', 'false'
+]);
+
+function cleanAndTokenize(title, body) {
+    const combined = `${title || ''} ${title || ''} \n ${body || ''}`
+        .replace(/<!--[\s\S]*?-->/g, ' ')
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/`[^`\n]+`/g, ' ')
+        .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/https?:\/\/\S+/g, ' ')
+        .toLowerCase();
+
+    const rawTokens = combined.match(/[a-z][a-z0-9_.-]{2,24}/g) || [];
+    const tokens = [];
+
+    for (let tok of rawTokens) {
+        tok = tok.replace(/^[._-]+|[._-]+$/g, '');
+        if (tok.length < 3) continue;
+        if (STOPWORDS.has(tok)) continue;
+        if (/^\d+$/.test(tok)) continue;
+        tokens.push(tok);
+    }
+    return tokens;
+}
+
+function extractTopNGrams(docsTokens, totalDocs, topLimit = 14) {
+    const ngramDocMap = new Map();
+
+    for (const doc of docsTokens) {
+        const seenInDoc = new Set();
+        const toks = doc.tokens;
+        for (let i = 0; i < toks.length - 1; i++) {
+            const w1 = toks[i];
+            const w2 = toks[i + 1];
+            if (w1 === w2) continue;
+            const bigram = `${w1} ${w2}`;
+            seenInDoc.add(bigram);
+
+            if (i < toks.length - 2) {
+                const w3 = toks[i + 2];
+                if (w2 !== w3 && w1 !== w3) {
+                    seenInDoc.add(`${w1} ${w2} ${w3}`);
+                }
+            }
+        }
+        for (const ng of seenInDoc) {
+            if (!ngramDocMap.has(ng)) ngramDocMap.set(ng, []);
+            ngramDocMap.get(ng).push(doc.number);
+        }
+    }
+
+    const minSupport = totalDocs >= 30 ? 3 : 2;
+    const candidates = [];
+    for (const [phrase, issueNums] of ngramDocMap.entries()) {
+        if (issueNums.length >= minSupport) {
+            const wordCount = phrase.split(' ').length;
+            const score = issueNums.length * (wordCount === 3 ? 1.15 : 1.0);
+            candidates.push({ phrase, count: issueNums.length, issueNumbers: issueNums, score });
+        }
+    }
+
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates.slice(0, topLimit);
+}
+
+function clusterIssuesAndDuplicates(docsTokens) {
+    const N = docsTokens.length;
+    if (N < 4) {
+        return { clusters: [], similarMap: {} };
+    }
+
+    const df = new Map();
+    for (const doc of docsTokens) {
+        const unique = new Set(doc.tokens);
+        for (const t of unique) {
+            df.set(t, (df.get(t) || 0) + 1);
+        }
+    }
+
+    const minDf = N >= 20 ? 2 : 1;
+    const maxDf = Math.max(2, Math.floor(N * 0.65));
+    const vocabList = Array.from(df.entries())
+        .filter(([, count]) => count >= minDf && count <= maxDf)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 400)
+        .map(([term]) => term);
+
+    if (vocabList.length < 3) {
+        return { clusters: [], similarMap: {} };
+    }
+
+    const vocabIndex = new Map(vocabList.map((t, i) => [t, i]));
+    const V = vocabList.length;
+    const idf = new Float32Array(V);
+    for (let j = 0; j < V; j++) {
+        idf[j] = Math.log(1 + N / (df.get(vocabList[j]) || 1));
+    }
+
+    const vectors = new Array(N);
+    for (let i = 0; i < N; i++) {
+        const vec = new Float32Array(V);
+        const toks = docsTokens[i].tokens;
+        for (const t of toks) {
+            const idx = vocabIndex.get(t);
+            if (idx !== undefined) vec[idx] += 1;
+        }
+        let norm = 0;
+        for (let j = 0; j < V; j++) {
+            if (vec[j] > 0) {
+                vec[j] = (1 + Math.log(vec[j])) * idf[j];
+                norm += vec[j] * vec[j];
+            }
+        }
+        norm = Math.sqrt(norm);
+        if (norm > 0) {
+            for (let j = 0; j < V; j++) vec[j] /= norm;
+        }
+        vectors[i] = vec;
+    }
+
+    const similarMap = {};
+    for (let i = 0; i < N; i++) {
+        const sims = [];
+        const vA = vectors[i];
+        for (let j = 0; j < N; j++) {
+            if (i === j) continue;
+            const vB = vectors[j];
+            let dot = 0;
+            for (let k = 0; k < V; k++) dot += vA[k] * vB[k];
+            if (dot >= 0.52) {
+                sims.push({ number: docsTokens[j].number, score: dot });
+            }
+        }
+        if (sims.length > 0) {
+            sims.sort((a, b) => b.score - a.score);
+            similarMap[docsTokens[i].number] = sims.slice(0, 5).map(s => s.number);
+        }
+    }
+
+    const K = Math.min(8, Math.max(3, Math.round(Math.sqrt(N / 3))));
+    const centroids = [];
+
+    let firstIdx = 0;
+    centroids.push(new Float32Array(vectors[firstIdx]));
+
+    for (let c = 1; c < K; c++) {
+        let bestIdx = 0;
+        let minMaxSim = Infinity;
+        for (let i = 0; i < N; i++) {
+            let maxSimToExisting = -1;
+            for (const cent of centroids) {
+                let dot = 0;
+                for (let k = 0; k < V; k++) dot += vectors[i][k] * cent[k];
+                if (dot > maxSimToExisting) maxSimToExisting = dot;
+            }
+            if (maxSimToExisting < minMaxSim) {
+                minMaxSim = maxSimToExisting;
+                bestIdx = i;
+            }
+        }
+        centroids.push(new Float32Array(vectors[bestIdx]));
+    }
+
+    const assignments = new Int32Array(N);
+    for (let iter = 0; iter < 12; iter++) {
+        for (let i = 0; i < N; i++) {
+            let bestCluster = 0;
+            let bestSim = -1;
+            for (let c = 0; c < K; c++) {
+                let dot = 0;
+                for (let k = 0; k < V; k++) dot += vectors[i][k] * centroids[c][k];
+                if (dot > bestSim) {
+                    bestSim = dot;
+                    bestCluster = c;
+                }
+            }
+            assignments[i] = bestCluster;
+        }
+
+        for (let c = 0; c < K; c++) {
+            const nextCent = new Float32Array(V);
+            let count = 0;
+            for (let i = 0; i < N; i++) {
+                if (assignments[i] === c) {
+                    count++;
+                    for (let k = 0; k < V; k++) nextCent[k] += vectors[i][k];
+                }
+            }
+            if (count > 0) {
+                let norm = 0;
+                for (let k = 0; k < V; k++) norm += nextCent[k] * nextCent[k];
+                norm = Math.sqrt(norm);
+                if (norm > 0) {
+                    for (let k = 0; k < V; k++) nextCent[k] /= norm;
+                }
+                centroids[c] = nextCent;
+            }
+        }
+    }
+
+    const clusters = [];
+    for (let c = 0; c < K; c++) {
+        const memberNumbers = [];
+        for (let i = 0; i < N; i++) {
+            if (assignments[i] === c) memberNumbers.push(docsTokens[i].number);
+        }
+        if (memberNumbers.length < 2) continue;
+
+        const termWeights = [];
+        for (let k = 0; k < V; k++) {
+            if (centroids[c][k] > 0) {
+                termWeights.push({ term: vocabList[k], w: centroids[c][k] });
+            }
+        }
+        termWeights.sort((a, b) => b.w - a.w);
+        const topTerms = termWeights.slice(0, 3).map(t => t.term);
+        if (topTerms.length === 0) continue;
+
+        clusters.push({
+            id: `cluster_${c}`,
+            label: topTerms.join(' / '),
+            terms: topTerms,
+            count: memberNumbers.length,
+            issueNumbers: memberNumbers
+        });
+    }
+
+    clusters.sort((a, b) => b.count - a.count);
+    return { clusters, similarMap };
+}
+
+self.onmessage = function (e) {
+    const { issues } = e.data;
+    if (!Array.isArray(issues) || issues.length === 0) {
+        self.postMessage({ clusters: [], ngrams: [], similarMap: {} });
+        return;
+    }
+
+    const docsTokens = issues.map(iss => ({
+        number: iss.number,
+        tokens: cleanAndTokenize(iss.title, iss.body)
+    }));
+
+    const ngrams = extractTopNGrams(docsTokens, issues.length, 14);
+    const { clusters, similarMap } = clusterIssuesAndDuplicates(docsTokens);
+
+    self.postMessage({ clusters, ngrams, similarMap });
+};

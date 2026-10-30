@@ -18,6 +18,8 @@ import { parseRepoInput, extractRateLimitHeaders } from '../js/github-api.js';
 import { estimateTokens } from '../js/tokenizer.js';
 import { generateTree } from '../js/tree.js';
 import { scanForSecrets, redactSecrets } from '../js/secrets.js';
+import { isBotUser, isLowSignalComment, extractIssueReferences, sanitizeIssueText, processIssueThread } from '../js/issue-cleaner.js';
+import { formatIssuesClaudeXml, formatIssuesMarkdown, formatIssuesGenericXml, formatIssuesJson, buildIssuesOutput, chunkIssuesOutput } from '../js/issue-formatters.js';
 
 test('formatters: escapeXml', () => {
     assert.equal(escapeXml('<script>alert("xss & ' + "'" + '")</script>'), '&lt;script&gt;alert(&quot;xss &amp; &apos;&quot;)&lt;/script&gt;');
@@ -860,6 +862,163 @@ test('secrets: overlapping secret redaction does not corrupt output', () => {
     const jwtRedacted = redactSecrets(jwtContent, 'config.js');
     assert.ok(!jwtRedacted.includes(jwt));
     assert.ok(jwtRedacted.includes('[REDACTED:jwt]'));
+});
+
+// --- Issue Cleaner & Issue Formatters Tests ---
+
+test('issue-cleaner: bot comment detection', () => {
+    assert.equal(isBotUser('dependabot[bot]', 'Bot'), true);
+    assert.equal(isBotUser('github-actions[bot]', 'User'), true);
+    assert.equal(isBotUser('stale', 'Bot'), true);
+    assert.equal(isBotUser('octocat', 'User'), false);
+});
+
+test('issue-cleaner: noise comment detection', () => {
+    assert.equal(isLowSignalComment('+1'), true);
+    assert.equal(isLowSignalComment('me too'), true);
+    assert.equal(isLowSignalComment('same here'), true);
+    assert.equal(isLowSignalComment('Here is a detailed trace of the error when running npm test'), false);
+});
+
+test('issue-cleaner: issue body sanitization (media, log truncation, templates)', () => {
+    const rawBody = `
+<!-- Please describe your bug below -->
+## Bug Description
+An error occurred during build.
+
+<img src="https://user-images.githubusercontent.com/123/456.png" />
+![Screenshot](https://github.com/user/repo/assets/123.jpg)
+
+\`\`\`log
+line 1
+line 2
+line 3
+line 4
+line 5
+\`\`\`
+`;
+    const cleaned = sanitizeIssueText(rawBody, {
+        stripTemplates: true,
+        stripImages: true,
+        maxLogLines: 2
+    });
+
+    assert.ok(!cleaned.includes('Please describe your bug below'));
+    assert.ok(!cleaned.includes('<img'));
+    assert.ok(cleaned.includes('[Image: Screenshot]'));
+    assert.ok(cleaned.includes('lines of log/code truncated'));
+    assert.ok(cleaned.includes('line 1'));
+    assert.ok(cleaned.includes('line 5'));
+});
+
+test('issue-cleaner: reference extraction', () => {
+    const text = 'This fixes #123 and relates to GH-456.';
+    const refs = extractIssueReferences(text);
+    assert.deepEqual(refs.sort((a, b) => a - b), [123, 456]);
+});
+
+test('issue-formatters: Claude XML formatting for issues', () => {
+    const repoInfo = { owner: 'user', repo: 'my-repo', url: 'https://github.com/user/my-repo' };
+    const issues = [
+        {
+            number: 1,
+            title: 'Bug in authentication',
+            state: 'open',
+            author: 'alice',
+            authorAssociation: 'MEMBER',
+            createdAt: '2023-01-01T00:00:00Z',
+            closedAt: null,
+            labels: ['bug'],
+            htmlUrl: 'https://github.com/user/my-repo/issues/1',
+            cleanedBody: 'Auth fails on login',
+            cleanedComments: [
+                {
+                    id: 101,
+                    author: 'bob',
+                    role: 'CONTRIBUTOR',
+                    createdAt: '2023-01-01T10:00:00Z',
+                    body: 'I reproduced this.'
+                }
+            ]
+        }
+    ];
+
+    const res = formatIssuesClaudeXml(repoInfo, issues, { redactSecrets: false });
+    assert.equal(res.ext, 'xml');
+    assert.ok(res.text.includes('issue_number="1"'));
+    assert.ok(res.text.includes('<source>Issue #1: Bug in authentication</source>'));
+    assert.ok(res.text.includes('author role="MEMBER">alice</author>'));
+    assert.ok(res.text.includes('Auth fails on login'));
+    assert.ok(res.text.includes('author="bob"'));
+    assert.ok(res.text.includes('I reproduced this.'));
+});
+
+test('issue-formatters: Markdown formatting for issues', () => {
+    const repoInfo = { owner: 'user', repo: 'my-repo' };
+    const issues = [
+        {
+            number: 42,
+            title: 'Feature request',
+            state: 'open',
+            author: 'charlie',
+            authorAssociation: 'NONE',
+            createdAt: '2023-01-01T00:00:00Z',
+            labels: [],
+            htmlUrl: 'https://github.com/user/my-repo/issues/42',
+            cleanedBody: 'Please add dark mode',
+            cleanedComments: []
+        }
+    ];
+
+    const res = formatIssuesMarkdown(repoInfo, issues);
+    assert.equal(res.ext, 'md');
+    assert.ok(res.text.includes('### [#42] Feature request'));
+    assert.ok(res.text.includes('Please add dark mode'));
+});
+
+test('issue-formatters: Generic XML and JSON formatting for issues', () => {
+    const repoInfo = { owner: 'user', repo: 'my-repo' };
+    const issues = [
+        {
+            number: 10,
+            title: 'Sample Issue',
+            state: 'closed',
+            author: 'dave',
+            authorAssociation: 'COLLABORATOR',
+            createdAt: '2023-01-01T00:00:00Z',
+            labels: [],
+            htmlUrl: 'https://github.com/user/my-repo/issues/10',
+            cleanedBody: 'Sample body',
+            cleanedComments: []
+        }
+    ];
+
+    const resXml = formatIssuesGenericXml(repoInfo, issues);
+    assert.ok(resXml.text.includes('<issue number="10"'));
+
+    const resJson = formatIssuesJson(repoInfo, issues);
+    const parsed = JSON.parse(resJson.text);
+    assert.equal(parsed.issues[0].number, 10);
+    assert.equal(parsed.issues[0].title, 'Sample Issue');
+});
+
+test('issue-formatters: chunking issue outputs', () => {
+    const repoInfo = { owner: 'user', repo: 'my-repo' };
+    const issues = Array.from({ length: 15 }, (_, i) => ({
+        number: i + 1,
+        title: `Issue ${i + 1}`,
+        state: 'open',
+        author: 'user',
+        authorAssociation: 'MEMBER',
+        createdAt: '2023-01-01T00:00:00Z',
+        labels: [],
+        htmlUrl: `https://github.com/user/my-repo/issues/${i + 1}`,
+        cleanedBody: `Body content for issue ${i + 1} `.repeat(30),
+        cleanedComments: []
+    }));
+
+    const chunks = chunkIssuesOutput('claude-xml', repoInfo, issues, 150, estimateTokens);
+    assert.ok(chunks.length > 1, 'Expected multiple chunks for issue output');
 });
 
 test('tree: filter counts matching leaf files instead of top-level folder count', async () => {
