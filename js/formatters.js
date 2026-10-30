@@ -42,6 +42,9 @@ export function formatClaudeXml(repoInfo, branch, treeText, files, options = {})
     if (options && options.partNote) {
         doc += `    <note>${escapeXml(options.partNote)}</note>\n`;
     }
+    if (options && options.failedFilesCount > 0) {
+        doc += `    <warnings>${options.failedFilesCount} file(s) failed to download and were excluded.</warnings>\n`;
+    }
     doc += `    <repository>${escapeXml(`${repoInfo.owner}/${repoInfo.repo}`)}</repository>\n`;
     doc += `    <branch>${escapeXml(branch)}</branch>\n`;
     if (repoInfo.url) {
@@ -87,6 +90,9 @@ export function formatMarkdown(repoInfo, branch, treeText, files, options = {}) 
     if (options && options.partNote) {
         md += `Note: ${options.partNote}\n\n`;
     }
+    if (options && options.failedFilesCount > 0) {
+        md += `> **Warning:** ${options.failedFilesCount} file(s) failed to download and were excluded.\n\n`;
+    }
     md += `# Repository: ${repoInfo.owner}/${repoInfo.repo}\nBranch: ${branch}\n`;
     if (repoInfo.url) {
         md += `Source URL: ${repoInfo.url}\n`;
@@ -120,6 +126,9 @@ export function formatGenericXml(repoInfo, branch, treeText, files, options = {}
     if (options && options.partNote) {
         xml += `<note>${escapeXml(options.partNote)}</note>\n`;
     }
+    if (options && options.failedFilesCount > 0) {
+        xml += `<warnings>${options.failedFilesCount} file(s) failed to download and were excluded.</warnings>\n`;
+    }
     if (treeText) {
         xml += `<structure>\n${escapeXml(treeText)}</structure>\n`;
     }
@@ -152,6 +161,7 @@ export function formatJson(repoInfo, branch, treeText, files, options = {}) {
         repository: `${repoInfo.owner}/${repoInfo.repo}`,
         branch,
         ...(options && options.partNote ? { note: options.partNote } : {}),
+        ...(options && options.failedFilesCount > 0 ? { warnings: `${options.failedFilesCount} file(s) failed to download and were excluded.` } : {}),
         ...(repoInfo.url ? { url: repoInfo.url } : {}),
         ...(treeText ? { structure: treeText } : {}),
         files,

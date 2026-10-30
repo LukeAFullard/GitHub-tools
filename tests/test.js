@@ -37,6 +37,25 @@ test('formatters: getMarkdownFence', () => {
     assert.equal(getMarkdownFence('````nested````'), '`````');
 });
 
+test('formatters: R4 failedFilesCount notes in Code Explorer output formats', () => {
+    const repoInfo = { owner: 'owner', repo: 'repo' };
+    const files = [{ path: 'app.js', content: 'console.log(1);' }];
+    const opts = { failedFilesCount: 3 };
+
+    const xml = formatClaudeXml(repoInfo, 'main', '', files, opts);
+    assert.ok(xml.text.includes('<warnings>3 file(s) failed to download and were excluded.</warnings>'));
+
+    const md = formatMarkdown(repoInfo, 'main', '', files, opts);
+    assert.ok(md.text.includes('> **Warning:** 3 file(s) failed to download and were excluded.'));
+
+    const gxml = formatGenericXml(repoInfo, 'main', '', files, opts);
+    assert.ok(gxml.text.includes('<warnings>3 file(s) failed to download and were excluded.</warnings>'));
+
+    const json = formatJson(repoInfo, 'main', '', files, opts);
+    const parsed = JSON.parse(json.text);
+    assert.equal(parsed.warnings, '3 file(s) failed to download and were excluded.');
+});
+
 test('formatters: Claude XML formatting emits raw content', () => {
     const repoInfo = { owner: 'user', repo: 'my-repo', url: 'http://localhost/?repo=user/my-repo' };
     const branch = 'main';
@@ -1224,6 +1243,59 @@ test('issue-formatters: Markdown formatting for issues', () => {
     assert.ok(res.text.includes('Please add dark mode'));
 });
 
+test('issue-formatters: R2 failure and truncation notes in all output formats', () => {
+    const repoInfo = { owner: 'user', repo: 'my-repo' };
+    const issues = [
+        {
+            number: 1,
+            title: 'Truncated Issue',
+            state: 'open',
+            author: 'alice',
+            authorAssociation: 'NONE',
+            createdAt: '2023-01-01',
+            cleanedBody: 'Body 1',
+            cleanedComments: [{ id: 1, author: 'bob', role: 'NONE', createdAt: '2023-01-01', body: 'C1' }],
+            commentsTruncated: true
+        },
+        {
+            number: 2,
+            title: 'Failed Issue',
+            state: 'open',
+            author: 'charlie',
+            authorAssociation: 'NONE',
+            createdAt: '2023-01-01',
+            cleanedBody: 'Body 2',
+            cleanedComments: [],
+            commentsFetchFailed: true,
+            commentsFetchError: '500 Server Error'
+        }
+    ];
+
+    // Claude XML
+    const xml = formatIssuesClaudeXml(repoInfo, issues);
+    assert.ok(xml.text.includes('<warnings>'));
+    assert.ok(xml.text.includes('<comments_warning>Comment thread fetch failed (500 Server Error)</comments_warning>'));
+    assert.ok(xml.text.includes('<comments_note>Comment thread truncated at API page limit</comments_note>'));
+
+    // Markdown
+    const md = formatIssuesMarkdown(repoInfo, issues);
+    assert.ok(md.text.includes('> **Warning:**'));
+    assert.ok(md.text.includes('Comment thread fetch failed (500 Server Error)'));
+    assert.ok(md.text.includes('Only first 1 comments included (thread truncated at API limit)'));
+
+    // Generic XML
+    const gxml = formatIssuesGenericXml(repoInfo, issues);
+    assert.ok(gxml.text.includes('<warnings>'));
+    assert.ok(gxml.text.includes('<comments_warning>500 Server Error</comments_warning>'));
+
+    // JSON
+    const json = formatIssuesJson(repoInfo, issues);
+    const parsed = JSON.parse(json.text);
+    assert.ok(parsed.warnings.includes('failed to fetch comments'));
+    assert.equal(parsed.issues[0].comments_truncated, true);
+    assert.equal(parsed.issues[1].comments_warning, '500 Server Error');
+});
+
 test('issue-formatters: Generic XML and JSON formatting for issues', () => {
     const repoInfo = { owner: 'user', repo: 'my-repo' };
     const issues = [
@@ -1413,6 +1485,31 @@ test('issue-formatters: chunking issue outputs', () => {
 
     const chunks = chunkIssuesOutput('claude-xml', repoInfo, issues, 150, estimateTokens);
     assert.ok(chunks.length > 1, 'Expected multiple chunks for issue output');
+});
+
+test('nlp.worker: R3 zero-vector issue test', async () => {
+    // Import worker or verify logic on empty issues
+    const { Worker } = await import('node:worker_threads');
+    const workerUrl = new URL('../js/nlp.worker.js', import.meta.url);
+
+    // Create 20 empty issues
+    const emptyIssues = Array.from({ length: 20 }, (_, i) => ({
+        number: i + 1,
+        title: '',
+        body: ''
+    }));
+
+    const nlpWorker = new Worker(workerUrl);
+    const result = await new Promise((resolve, reject) => {
+        nlpWorker.on('message', resolve);
+        nlpWorker.on('error', reject);
+        nlpWorker.postMessage({ id: 1, issues: emptyIssues });
+    });
+    await nlpWorker.terminate();
+
+    assert.equal(result.id, 1);
+    assert.equal(result.clusters.length, 0, '20 empty issues should produce 0 clusters');
+    assert.deepEqual(result.similarMap, {}, '20 empty issues should produce empty similarMap');
 });
 
 test('tree: filter counts matching leaf files instead of top-level folder count', async () => {

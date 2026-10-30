@@ -41,6 +41,7 @@ let activeTreeControls = null;
 let cachedSkippedPaths = new Set();
 let cachedRepoInfo = null;
 let cachedBranch = "";
+let cachedFailedCount = 0;
 let currentActiveSelection = [];
 let isPrivateRepo = false;
 let currentGeneration = 0;
@@ -705,7 +706,7 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
         processedFiles,
         chunkLimitVal,
         estimateTokens,
-        { instructions }
+        { instructions, failedFilesCount: cachedFailedCount }
     );
 
     const firstChunk = newChunks[0];
@@ -857,6 +858,7 @@ dom.packBtn.addEventListener('click', async () => {
     cachedSkippedPaths.clear();
     cachedRepoInfo = null;
     cachedBranch = "";
+    cachedFailedCount = 0;
     currentActiveSelection = [];
     isPrivateRepo = false;
     clearOutputState();
@@ -1312,6 +1314,7 @@ dom.packBtn.addEventListener('click', async () => {
 
         log(`[SUCCESS] Download complete: ${collectedFiles.length} file(s) fetched.`);
 
+        cachedFailedCount = failedCount;
         if (failedCount > 0) {
             log(`[WARN] ${failedCount} file(s) failed to download.`);
             showToast(`${failedCount} file(s) failed to download. Check rate limits or permissions.`, "warn");

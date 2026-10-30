@@ -210,9 +210,15 @@ function clusterIssuesAndDuplicates(docsTokens) {
         centroids.push(new Float32Array(vectors[bestIdx]));
     }
 
-    const assignments = new Int32Array(N);
+    const nonZeroSet = new Set(nonZeroDocIndices);
+    const assignments = new Int32Array(N).fill(-1);
+
     for (let iter = 0; iter < 12; iter++) {
         for (let i = 0; i < N; i++) {
+            if (!nonZeroSet.has(i)) {
+                assignments[i] = -1;
+                continue;
+            }
             let bestCluster = 0;
             let bestSim = -1;
             for (let c = 0; c < K; c++) {
@@ -278,11 +284,10 @@ function clusterIssuesAndDuplicates(docsTokens) {
     return { clusters, similarMap };
 }
 
-self.onmessage = function (e) {
-    const { id, issues } = e.data;
+function handleNlpRequest(data) {
+    const { id, issues } = data || {};
     if (!Array.isArray(issues) || issues.length === 0) {
-        self.postMessage({ id, clusters: [], ngrams: [], similarMap: {} });
-        return;
+        return { id, clusters: [], ngrams: [], similarMap: {} };
     }
 
     const docsTokens = issues.map(iss => ({
@@ -293,5 +298,26 @@ self.onmessage = function (e) {
     const ngrams = extractTopNGrams(docsTokens, issues.length, 14);
     const { clusters, similarMap } = clusterIssuesAndDuplicates(docsTokens);
 
-    self.postMessage({ id, clusters, ngrams, similarMap });
-};
+    return { id, clusters, ngrams, similarMap };
+}
+
+if (typeof self !== 'undefined') {
+    self.onmessage = function (e) {
+        self.postMessage(handleNlpRequest(e.data));
+    };
+} else if (typeof globalThis !== 'undefined') {
+    globalThis.self = globalThis;
+    globalThis.onmessage = function (e) {
+        if (globalThis.postMessage) globalThis.postMessage(handleNlpRequest(e.data));
+    };
+}
+
+if (typeof process !== 'undefined' && process.versions && process.versions.node) {
+    import('node:worker_threads').then(({ parentPort }) => {
+        if (parentPort) {
+            parentPort.on('message', (data) => {
+                parentPort.postMessage(handleNlpRequest(data));
+            });
+        }
+    }).catch(() => {});
+}

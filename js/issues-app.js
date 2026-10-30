@@ -14,6 +14,7 @@ let abortController = null;
 let allIssues = [];
 let selectedIssueNumbers = new Set();
 let cachedCommentsByIssue = new Map();
+let fetchFailuresMap = new Map();
 let nlpResults = { clusters: [], ngrams: [], similarMap: {} };
 let activeTopicFilter = null;
 let currentRepoInfo = null;
@@ -539,6 +540,7 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
     allIssues = [];
     selectedIssueNumbers.clear();
     cachedCommentsByIssue.clear();
+    fetchFailuresMap.clear();
     activeTopicFilter = null;
     nlpResults = { clusters: [], ngrams: [], similarMap: {} };
     currentNlpRequestId++;
@@ -644,9 +646,13 @@ async function buildSelectedContext(summaryOnly = false) {
                 });
                 for (const [num, comms] of fetchedMap.entries()) {
                     cachedCommentsByIssue.set(num, comms);
+                    fetchFailuresMap.delete(num);
                 }
                 if (thisBuildGen !== buildGeneration) return;
                 if (failures && failures.length > 0) {
+                    for (const f of failures) {
+                        fetchFailuresMap.set(f.number, f.error);
+                    }
                     log(`[WARN] ${failures.length} thread(s) failed to load comments.`);
                     showToast(`${failures.length} thread(s) failed to load comments. Rebuild to retry.`, 'warn');
                 }
@@ -658,8 +664,10 @@ async function buildSelectedContext(summaryOnly = false) {
                 log(`[ERROR] Comment fetch error: ${err.message}`);
                 showToast(err.message, 'error');
             } finally {
-                dom.buildContextBtn.disabled = false;
-                dom.abortBtn.style.display = 'none';
+                if (thisBuildGen === buildGeneration) {
+                    dom.buildContextBtn.disabled = false;
+                    dom.abortBtn.style.display = 'none';
+                }
             }
         }
     }
@@ -695,7 +703,17 @@ async function buildSelectedContext(summaryOnly = false) {
 
     const processedIssues = summaryOnly
         ? []
-        : targetIssues.map(iss => processIssueThread(iss, cachedCommentsByIssue.get(iss.number) || [], cleanOptions));
+        : targetIssues.map(iss => {
+            const rawComms = cachedCommentsByIssue.get(iss.number) || [];
+            const commsFailed = fetchFailuresMap.has(iss.number) && !cachedCommentsByIssue.has(iss.number);
+            const commsError = fetchFailuresMap.get(iss.number) || null;
+            return processIssueThread(iss, rawComms, {
+                ...cleanOptions,
+                commentsFetchFailed: commsFailed,
+                commentsFetchError: commsError,
+                commentsTruncated: Boolean(rawComms.truncated)
+            });
+        });
 
     const totalCommentsIncluded = processedIssues.reduce((acc, i) => acc + i.cleanedComments.length, 0);
     const chunkLimitVal = parseInt(dom.chunkLimit.value, 10) || 0;

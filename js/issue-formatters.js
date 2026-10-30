@@ -36,11 +36,17 @@ export function formatIssuesClaudeXml(repoInfo, issues, options = {}) {
     const startIndex = options.startIndex || 1;
     const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues) : '';
 
+    const failedCount = issues.filter(i => i.commentsFetchFailed).length;
+    const truncatedCount = issues.filter(i => i.commentsTruncated).length;
+
     let doc = `<documents>\n`;
     doc += `  <!-- Global Repository Issues Context -->\n`;
     doc += `  <context>\n`;
     if (options.partNote) {
         doc += `    <note>${escapeXml(options.partNote)}</note>\n`;
+    }
+    if (failedCount > 0 || truncatedCount > 0) {
+        doc += `    <warnings>${failedCount > 0 ? `${failedCount} thread(s) failed to fetch comments. ` : ''}${truncatedCount > 0 ? `${truncatedCount} thread(s) truncated at API page limit.` : ''}</warnings>\n`;
     }
     doc += `    <repository>${escapeXml(`${repoInfo.owner}/${repoInfo.repo}`)}</repository>\n`;
     doc += `    <issue_count>${issues.length}</issue_count>\n`;
@@ -65,6 +71,12 @@ export function formatIssuesClaudeXml(repoInfo, issues, options = {}) {
         }
         if (iss.relatedIssues && iss.relatedIssues.length > 0) {
             doc += `      <related_issues>${iss.relatedIssues.map(n => `#${n}`).join(', ')}</related_issues>\n`;
+        }
+        if (iss.commentsFetchFailed) {
+            doc += `      <comments_warning>Comment thread fetch failed (${escapeXml(iss.commentsFetchError || 'API error')})</comments_warning>\n`;
+        }
+        if (iss.commentsTruncated) {
+            doc += `      <comments_note>Comment thread truncated at API page limit</comments_note>\n`;
         }
         doc += `    </metadata>\n`;
 
@@ -95,9 +107,15 @@ export function formatIssuesClaudeXml(repoInfo, issues, options = {}) {
 
 export function formatIssuesMarkdown(repoInfo, issues, options = {}) {
     const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues) : '';
+    const failedCount = issues.filter(i => i.commentsFetchFailed).length;
+    const truncatedCount = issues.filter(i => i.commentsTruncated).length;
+
     let md = '';
     if (options.partNote) {
         md += `> **Note:** ${options.partNote}\n\n`;
+    }
+    if (failedCount > 0 || truncatedCount > 0) {
+        md += `> **Warning:** ${failedCount > 0 ? `${failedCount} thread(s) failed to fetch comments. ` : ''}${truncatedCount > 0 ? `${truncatedCount} thread(s) truncated at API page limit.` : ''}\n\n`;
     }
     md += `# GitHub Issues: ${repoInfo.owner}/${repoInfo.repo}\n`;
     md += `Included Issues: ${issues.length}\n\n`;
@@ -117,6 +135,12 @@ export function formatIssuesMarkdown(repoInfo, issues, options = {}) {
         }
         if (iss.relatedIssues && iss.relatedIssues.length > 0) {
             md += `- **Referenced Issues:** ${iss.relatedIssues.map(n => `#${n}`).join(', ')}\n`;
+        }
+        if (iss.commentsFetchFailed) {
+            md += `> **Warning:** Comment thread fetch failed (${iss.commentsFetchError || 'API error'}).\n`;
+        }
+        if (iss.commentsTruncated) {
+            md += `> **Note:** Only first ${iss.cleanedComments ? iss.cleanedComments.length : 0} comments included (thread truncated at API limit).\n`;
         }
         md += `\n#### Description\n${iss.cleanedBody || '*(No description)*'}\n\n`;
 
@@ -138,9 +162,15 @@ export function formatIssuesMarkdown(repoInfo, issues, options = {}) {
 
 export function formatIssuesGenericXml(repoInfo, issues, options = {}) {
     const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues) : '';
+    const failedCount = issues.filter(i => i.commentsFetchFailed).length;
+    const truncatedCount = issues.filter(i => i.commentsTruncated).length;
+
     let xml = `<issues_repository name="${escapeXml(`${repoInfo.owner}/${repoInfo.repo}`)}" count="${issues.length}">\n`;
     if (options.partNote) {
         xml += `  <note>${escapeXml(options.partNote)}</note>\n`;
+    }
+    if (failedCount > 0 || truncatedCount > 0) {
+        xml += `  <warnings>${failedCount > 0 ? `${failedCount} thread(s) failed to fetch comments. ` : ''}${truncatedCount > 0 ? `${truncatedCount} thread(s) truncated at API page limit.` : ''}</warnings>\n`;
     }
     if (nlpOverview) {
         xml += `  <nlp_overview>${escapeXml(nlpOverview)}</nlp_overview>\n`;
@@ -149,6 +179,12 @@ export function formatIssuesGenericXml(repoInfo, issues, options = {}) {
     for (const iss of issues) {
         xml += `    <issue number="${iss.number}" state="${escapeXml(iss.state)}" author="${escapeXml(iss.author)}" role="${escapeXml(iss.authorAssociation)}" created="${escapeXml(iss.createdAt)}">\n`;
         xml += `      <title>${escapeXml(iss.title)}</title>\n`;
+        if (iss.commentsFetchFailed) {
+            xml += `      <comments_warning>${escapeXml(iss.commentsFetchError || 'Comment thread fetch failed')}</comments_warning>\n`;
+        }
+        if (iss.commentsTruncated) {
+            xml += `      <comments_warning>Comment thread truncated at API limit</comments_warning>\n`;
+        }
         xml += `      <body><![CDATA[\n${escapeCdata(stripXmlInvalidChars(iss.cleanedBody))}\n]]></body>\n`;
         if (iss.cleanedComments && iss.cleanedComments.length > 0) {
             xml += `      <comments>\n`;
@@ -169,9 +205,15 @@ export function formatIssuesGenericXml(repoInfo, issues, options = {}) {
 
 export function formatIssuesJson(repoInfo, issues, options = {}) {
     const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues) : '';
+    const failedCount = issues.filter(i => i.commentsFetchFailed).length;
+    const truncatedCount = issues.filter(i => i.commentsTruncated).length;
+
     const payload = {
         repository: `${repoInfo.owner}/${repoInfo.repo}`,
         ...(options.partNote ? { note: options.partNote } : {}),
+        ...((failedCount > 0 || truncatedCount > 0) ? {
+            warnings: `${failedCount > 0 ? `${failedCount} thread(s) failed to fetch comments. ` : ''}${truncatedCount > 0 ? `${truncatedCount} thread(s) truncated at API page limit.` : ''}`
+        } : {}),
         ...(nlpOverview ? { nlp_overview: nlpOverview } : {}),
         issues: issues.map(iss => ({
             number: iss.number,
@@ -186,7 +228,9 @@ export function formatIssuesJson(repoInfo, issues, options = {}) {
             reactions_total: iss.reactionsTotal,
             related_issues: iss.relatedIssues,
             body: iss.cleanedBody,
-            comments: iss.cleanedComments
+            comments: iss.cleanedComments,
+            ...(iss.commentsFetchFailed ? { comments_warning: iss.commentsFetchError || 'Comment thread fetch failed' } : {}),
+            ...(iss.commentsTruncated ? { comments_truncated: true } : {})
         })),
         ...(options.instructions ? { instructions: options.instructions } : {})
     };
