@@ -603,15 +603,37 @@ function updateSecretsWarningPanel(selectedFiles) {
 
     dom.secretsWarningPanel.style.display = 'block';
     const isRedactOn = dom.redactSecrets ? dom.redactSecrets.checked : true;
-    const statusLabel = isRedactOn ? 'Redacted in output' : 'Present in output';
-    dom.secretsWarningSummary.textContent = `${totalFindings} possible secret${totalFindings === 1 ? '' : 's'} in ${flaggedPaths.size} file${flaggedPaths.size === 1 ? '' : 's'} (${statusLabel}).`;
+    const isAggressiveOn = dom.aggressiveRedact ? dom.aggressiveRedact.checked : false;
 
-    dom.secretsTableBody.innerHTML = rows.map(r => `
+    let redactedCount = 0;
+    let presentCount = 0;
+
+    const rowData = rows.map(r => {
+        const isRedacted = isRedactOn && (r.type !== 'generic-secret' || isAggressiveOn);
+        if (isRedacted) redactedCount++;
+        else presentCount++;
+        return {
+            ...r,
+            isRedacted
+        };
+    });
+
+    if (presentCount > 0) {
+        const hint = (!isAggressiveOn && isRedactOn)
+            ? ' (enable Aggressive redaction or exclude the file)'
+            : ' (enable Redact secrets or exclude the file)';
+        dom.secretsWarningSummary.textContent = `${redactedCount} redacted, ${presentCount} still present${hint}.`;
+    } else {
+        dom.secretsWarningSummary.textContent = `${totalFindings} possible secret${totalFindings === 1 ? '' : 's'} in ${flaggedPaths.size} file${flaggedPaths.size === 1 ? '' : 's'} (all redacted).`;
+    }
+
+    dom.secretsTableBody.innerHTML = rowData.map(r => `
         <tr>
             <td>${escapeXml(r.path)}</td>
             <td>${escapeXml(r.type)}</td>
             <td>${r.line}</td>
             <td>${escapeXml(r.preview)}</td>
+            <td>${r.isRedacted ? '<span class="status-fits" style="font-weight:600;">Redacted</span>' : '<span class="status-over" style="font-weight:600;">Present in output</span>'}</td>
             <td><button type="button" class="secondary btn-xs exclude-secret-btn" data-path="${escapeXml(r.path)}">Exclude file</button></td>
         </tr>
     `).join('');

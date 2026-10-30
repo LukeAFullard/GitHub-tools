@@ -165,6 +165,14 @@ function findMatchesInternal(path, content) {
             check: (m) => !isPlaceholder(m[0])
         },
         {
+            type: 'aws-key',
+            regex: /(?:(?:["']?\b|\b["'])[A-Za-z0-9_]*(?:aws_secret_access_key|secret_access_key|aws_secret_key|aws_sec_key)[A-Za-z0-9_]*["']?)\s*[:=]\s*(["']?)([A-Za-z0-9/+=]{40})\1/gi,
+            check: (m) => !isPlaceholder(m[2]),
+            getValue: (m) => m[2],
+            getIndex: (m) => m.index + m[0].lastIndexOf(m[2]),
+            getLength: (m) => m[2].length
+        },
+        {
             type: 'github-token',
             regex: /(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,255}\b|github_pat_[A-Za-z0-9_]{22,255}\b/g,
             check: (m) => !isPlaceholder(m[0])
@@ -216,11 +224,26 @@ function findMatchesInternal(path, content) {
             check: (m) => {
                 const val = m[2];
                 if (isPlaceholder(val)) return false;
-                if (/[()\[\]{},$]/.test(val)) return false;
-                if (val.includes('/') || val.includes('\\') || val.includes('://')) return false;
+                if (val.includes('\\') || val.includes('://')) return false;
                 if (val.includes(' ')) return false;
-                if (/^[a-zA-Z0-9_\-.]+\.[a-zA-Z0-9_\-]+$/.test(val) && !/[0-9]/.test(val)) return false;
-                if (!/[0-9]/.test(val)) return false;
+
+                if (/[/+=]/.test(val)) {
+                    if (val.length < 32) return false;
+                    if (val.startsWith('/') || val.startsWith('./') || val.startsWith('../')) return false;
+                    if (/\.[a-zA-Z0-9]{1,4}$/i.test(val)) return false;
+                    if (calculateEntropy(val) < 4.0) return false;
+                }
+
+                const keyName = m[0].slice(0, m[0].indexOf(val)).toLowerCase();
+                const isExplicitKey = keyName.includes('password') || keyName.includes('passwd') || keyName.includes('secret');
+
+                if (!/[0-9]/.test(val)) {
+                    if (/^[a-zA-Z0-9_\-.]+\.[a-zA-Z0-9_\-]+$/.test(val)) return false;
+                    if (!(isExplicitKey && val.length >= 12 && calculateEntropy(val) >= 3.2)) {
+                        return false;
+                    }
+                }
+
                 if (getCharacterClassCount(val) < 2) return false;
                 if (calculateEntropy(val) < 3.0) return false;
                 return true;
