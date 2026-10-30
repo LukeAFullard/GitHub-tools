@@ -25,7 +25,7 @@ const STOPWORDS = new Set([
 ]);
 
 function cleanAndTokenize(title, body) {
-    const combined = `${title || ''} ${title || ''} \n ${body || ''}`
+    const cleanText = (str) => (str || '')
         .replace(/<!--[\s\S]*?-->/g, ' ')
         .replace(/```[\s\S]*?```/g, ' ')
         .replace(/`[^`\n]+`/g, ' ')
@@ -34,17 +34,23 @@ function cleanAndTokenize(title, body) {
         .replace(/https?:\/\/\S+/g, ' ')
         .toLowerCase();
 
-    const rawTokens = combined.match(/[a-z][a-z0-9_.-]{2,24}/g) || [];
-    const tokens = [];
+    const getTokens = (str) => {
+        const raw = cleanText(str).match(/(?:[\p{L}\p{N}][\p{L}\p{N}_.-]{1,24}|[a-z0-9_.-]{2,25})/gu) || [];
+        const res = [];
+        for (let tok of raw) {
+            tok = tok.replace(/^[._-]+|[._-]+$/g, '');
+            if (tok.length < 3) continue;
+            if (STOPWORDS.has(tok)) continue;
+            if (/^\d+$/.test(tok)) continue;
+            res.push(tok);
+        }
+        return res;
+    };
 
-    for (let tok of rawTokens) {
-        tok = tok.replace(/^[._-]+|[._-]+$/g, '');
-        if (tok.length < 3) continue;
-        if (STOPWORDS.has(tok)) continue;
-        if (/^\d+$/.test(tok)) continue;
-        tokens.push(tok);
-    }
-    return tokens;
+    const titleTokens = getTokens(title);
+    const bodyTokens = getTokens(body);
+
+    return [...titleTokens, ...titleTokens, ...bodyTokens];
 }
 
 function extractTopNGrams(docsTokens, totalDocs, topLimit = 14) {
@@ -93,21 +99,33 @@ function clusterIssuesAndDuplicates(docsTokens) {
         return { clusters: [], similarMap: {} };
     }
 
+    const tf = new Map();
     const df = new Map();
     for (const doc of docsTokens) {
-        const unique = new Set(doc.tokens);
-        for (const t of unique) {
+        const docTf = new Map();
+        for (const t of doc.tokens) {
+            docTf.set(t, (docTf.get(t) || 0) + 1);
+        }
+        for (const [t, count] of docTf.entries()) {
             df.set(t, (df.get(t) || 0) + 1);
+            tf.set(t, (tf.get(t) || 0) + count);
         }
     }
 
     const minDf = N >= 20 ? 2 : 1;
-    const maxDf = Math.max(2, Math.floor(N * 0.65));
-    const vocabList = Array.from(df.entries())
-        .filter(([, count]) => count >= minDf && count <= maxDf)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 400)
-        .map(([term]) => term);
+    const maxDf = Math.max(2, Math.floor(N * 0.75));
+
+    const termScores = [];
+    for (const [t, count] of df.entries()) {
+        if (count >= minDf && count <= maxDf) {
+            const idfVal = Math.log(1 + N / count);
+            const score = (tf.get(t) || 1) * idfVal;
+            termScores.push({ term: t, score });
+        }
+    }
+
+    termScores.sort((a, b) => b.score - a.score);
+    const vocabList = termScores.slice(0, 1000).map(s => s.term);
 
     if (vocabList.length < 3) {
         return { clusters: [], similarMap: {} };
@@ -121,6 +139,8 @@ function clusterIssuesAndDuplicates(docsTokens) {
     }
 
     const vectors = new Array(N);
+    const nonZeroDocIndices = [];
+
     for (let i = 0; i < N; i++) {
         const vec = new Float32Array(V);
         const toks = docsTokens[i].tokens;
@@ -138,15 +158,20 @@ function clusterIssuesAndDuplicates(docsTokens) {
         norm = Math.sqrt(norm);
         if (norm > 0) {
             for (let j = 0; j < V; j++) vec[j] /= norm;
+            nonZeroDocIndices.push(i);
         }
         vectors[i] = vec;
     }
 
+    if (nonZeroDocIndices.length < 3) {
+        return { clusters: [], similarMap: {} };
+    }
+
     const similarMap = {};
-    for (let i = 0; i < N; i++) {
+    for (const i of nonZeroDocIndices) {
         const sims = [];
         const vA = vectors[i];
-        for (let j = 0; j < N; j++) {
+        for (const j of nonZeroDocIndices) {
             if (i === j) continue;
             const vB = vectors[j];
             let dot = 0;
@@ -161,16 +186,16 @@ function clusterIssuesAndDuplicates(docsTokens) {
         }
     }
 
-    const K = Math.min(8, Math.max(3, Math.round(Math.sqrt(N / 3))));
+    const K = Math.min(8, Math.max(3, Math.round(Math.sqrt(nonZeroDocIndices.length / 3))));
     const centroids = [];
 
-    let firstIdx = 0;
+    let firstIdx = nonZeroDocIndices[0];
     centroids.push(new Float32Array(vectors[firstIdx]));
 
     for (let c = 1; c < K; c++) {
-        let bestIdx = 0;
+        let bestIdx = nonZeroDocIndices[0];
         let minMaxSim = Infinity;
-        for (let i = 0; i < N; i++) {
+        for (const i of nonZeroDocIndices) {
             let maxSimToExisting = -1;
             for (const cent of centroids) {
                 let dot = 0;
@@ -254,9 +279,9 @@ function clusterIssuesAndDuplicates(docsTokens) {
 }
 
 self.onmessage = function (e) {
-    const { issues } = e.data;
+    const { id, issues } = e.data;
     if (!Array.isArray(issues) || issues.length === 0) {
-        self.postMessage({ clusters: [], ngrams: [], similarMap: {} });
+        self.postMessage({ id, clusters: [], ngrams: [], similarMap: {} });
         return;
     }
 
@@ -268,5 +293,5 @@ self.onmessage = function (e) {
     const ngrams = extractTopNGrams(docsTokens, issues.length, 14);
     const { clusters, similarMap } = clusterIssuesAndDuplicates(docsTokens);
 
-    self.postMessage({ clusters, ngrams, similarMap });
+    self.postMessage({ id, clusters, ngrams, similarMap });
 };

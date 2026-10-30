@@ -32,13 +32,14 @@ export function parseRepoInput(input, overrideBranch = null) {
         }
     } catch (_) {}
 
-    let cleaned = urlStr.replace(/^https?:\/\/github\.com\//i, '');
+    let cleaned = urlStr.replace(/^(?:https?:\/\/)?(?:www\.)?github\.com\//i, '');
     cleaned = cleaned.replace(/^\/+|\/+$/g, '');
     const parts = cleaned.split('/');
     if (parts.length < 2) return null;
     const owner = parts[0].trim();
     let repo = parts[1].trim().replace(/\.git$/i, '');
     if (!owner || !repo) return null;
+    if (owner === '.' || owner === '..' || repo === '.' || repo === '..') return null;
     const validOwner = /^[a-zA-Z0-9_-]+$/.test(owner);
     const validRepo = /^[a-zA-Z0-9_.-]+$/.test(repo);
     if (!validOwner || !validRepo) return null;
@@ -171,10 +172,15 @@ export async function fetchRepoTree(owner, repo, branch, pat, signal, onHeaders)
         }
 
         const isRateLimit = isRateLimitResponse(res, headersMeta);
-        if (isRateLimit && retries < 2) {
+        if (isRateLimit) {
+            const nowSec = Math.floor(Date.now() / 1000);
+            const waitSec = headersMeta.retryAfter ?? (headersMeta.reset ? Math.max(1, headersMeta.reset - nowSec) : 60);
+            if (waitSec > 90 || retries >= 2) {
+                const when = headersMeta.reset ? new Date(headersMeta.reset * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'later';
+                throw new Error(`GitHub rate limit reached. Resets at ${when}. Add a token to raise the limit.`);
+            }
             retries++;
-            const backoff = headersMeta.retryAfter || 60;
-            await sleep(Math.min(backoff, 60) * 1000, signal);
+            await sleep(waitSec * 1000, signal);
             continue;
         }
 

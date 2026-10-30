@@ -28,10 +28,15 @@ async function fetchWithRetry(url, pat, signal, onHeaders) {
         if (res.ok) {
             return await res.json();
         }
-        if (isRateLimitResponse(res, meta) && retries < 2) {
+        if (isRateLimitResponse(res, meta)) {
+            const nowSec = Math.floor(Date.now() / 1000);
+            const waitSec = meta.retryAfter ?? (meta.reset ? Math.max(1, meta.reset - nowSec) : 60);
+            if (waitSec > 90 || retries >= 2) {
+                const when = meta.reset ? new Date(meta.reset * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'later';
+                throw new Error(`GitHub rate limit reached. Resets at ${when}. Add a token to raise the limit.`);
+            }
             retries++;
-            const backoff = Math.min(meta.retryAfter || 60, 60);
-            await sleep(backoff * 1000, signal);
+            await sleep(waitSec * 1000, signal);
             continue;
         }
         throw new Error(`GitHub API error (${res.status}): ${res.statusText}`);
@@ -54,13 +59,19 @@ export async function fetchIssuesManifest(owner, repo, options = {}) {
 
     const collected = [];
     let page = 1;
-    const maxPages = Math.ceil((maxItems * 1.4) / 100); // Extra headroom when filtering out PRs
+    const HARD_MAX_PAGES = 30;
+    let lastBatchWasFull = false;
 
-    while (collected.length < maxItems && page <= maxPages) {
+    while (collected.length < maxItems && page <= HARD_MAX_PAGES) {
         const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?state=all&per_page=100&sort=created&direction=desc&page=${page}`;
         const batch = await fetchWithRetry(url, pat, signal, onHeaders);
 
-        if (!Array.isArray(batch) || batch.length === 0) break;
+        if (!Array.isArray(batch) || batch.length === 0) {
+            lastBatchWasFull = false;
+            break;
+        }
+
+        lastBatchWasFull = batch.length === 100;
 
         for (const raw of batch) {
             const isPr = Boolean(raw.pull_request);
@@ -94,6 +105,7 @@ export async function fetchIssuesManifest(owner, repo, options = {}) {
         page++;
     }
 
+    collected.stoppedEarly = collected.length < maxItems && lastBatchWasFull;
     return collected;
 }
 
@@ -101,20 +113,33 @@ export async function fetchIssuesManifest(owner, repo, options = {}) {
  * Fetches comments for selected issues.
  * Uses direct per-issue endpoints for small selections, or bulk repo comment pages when efficient.
  */
+async function fetchAllPages(baseUrl, pat, signal, onHeaders, maxPages = 10) {
+    const items = [];
+    for (let page = 1; page <= maxPages; page++) {
+        const batch = await fetchWithRetry(`${baseUrl}&page=${page}`, pat, signal, onHeaders);
+        if (!Array.isArray(batch) || batch.length === 0) return { items, truncated: false };
+        items.push(...batch);
+        if (batch.length < 100) return { items, truncated: false };
+    }
+    return { items, truncated: true };
+}
+
 export async function fetchCommentsForIssues(owner, repo, selectedIssues, options = {}) {
     const {
         pat = '',
         signal,
         onHeaders,
         onProgress,
-        throttleMs = 60
+        throttleMs = 60,
+        maxCommentPages = 10
     } = options;
 
     const commentsByIssue = new Map();
+    const failures = [];
     const needsComments = selectedIssues.filter(iss => iss.commentsCount > 0);
 
     if (needsComments.length === 0) {
-        return commentsByIssue;
+        return { commentsByIssue, failures };
     }
 
     const concurrency = 4;
@@ -125,10 +150,10 @@ export async function fetchCommentsForIssues(owner, repo, selectedIssues, option
         while (idx < needsComments.length) {
             if (signal && signal.aborted) break;
             const current = needsComments[idx++];
-            const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${current.number}/comments?per_page=100`;
+            const baseUrl = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${current.number}/comments?per_page=100`;
 
             try {
-                const rawComments = await fetchWithRetry(url, pat, signal, onHeaders);
+                const { items: rawComments, truncated } = await fetchAllPages(baseUrl, pat, signal, onHeaders, maxCommentPages);
                 const formatted = (rawComments || []).map(c => ({
                     id: c.id,
                     author: c.user ? c.user.login : 'ghost',
@@ -138,10 +163,11 @@ export async function fetchCommentsForIssues(owner, repo, selectedIssues, option
                     reactionsPlusOne: (c.reactions && c.reactions['+1']) || 0,
                     body: c.body || ''
                 }));
+                if (truncated) formatted.truncated = true;
                 commentsByIssue.set(current.number, formatted);
             } catch (err) {
                 if (err.name === 'AbortError') throw err;
-                commentsByIssue.set(current.number, []);
+                failures.push({ number: current.number, error: err.message || String(err) });
             }
 
             completed++;
@@ -153,5 +179,9 @@ export async function fetchCommentsForIssues(owner, repo, selectedIssues, option
     const workers = Array.from({ length: Math.min(concurrency, needsComments.length) }, () => worker());
     await Promise.all(workers);
 
-    return commentsByIssue;
+    if (signal && signal.aborted) {
+        throw new DOMException('Aborted', 'AbortError');
+    }
+
+    return { commentsByIssue, failures };
 }

@@ -12,6 +12,7 @@ function isIgnoredDirPath(dirParts) {
     }
     return false;
 }
+import { switchTab } from './ui-tabs.js';
 import { estimateTokens, estimateTokensAsync } from './tokenizer.js';
 import { generateTree, renderInteractiveTree } from './tree.js';
 import { buildContextOutput, chunkContextOutput, escapeXml } from './formatters.js';
@@ -300,19 +301,6 @@ function setAppState(state, note = '') {
 }
 
 // --- Mobile Tab Switching & Accessible Tabs ---
-function switchTab(activeTabBtn, inactiveTabBtn, activeCard, inactiveCard) {
-    activeTabBtn.classList.add('active');
-    activeTabBtn.setAttribute('aria-selected', 'true');
-    activeTabBtn.setAttribute('tabindex', '0');
-
-    inactiveTabBtn.classList.remove('active');
-    inactiveTabBtn.setAttribute('aria-selected', 'false');
-    inactiveTabBtn.setAttribute('tabindex', '-1');
-
-    activeCard.classList.add('active-mobile');
-    inactiveCard.classList.remove('active-mobile');
-}
-
 if (dom.tabFilesBtn && dom.tabOutputBtn) {
     dom.tabFilesBtn.addEventListener('click', () => {
         switchTab(dom.tabFilesBtn, dom.tabOutputBtn, dom.treeCard, dom.outputCard);
@@ -919,11 +907,18 @@ dom.packBtn.addEventListener('click', async () => {
             if (!targetBranch) targetBranch = repoMeta.branch;
             isPrivateRepo = repoMeta.isPrivate;
         } catch (err) {
-            if (err.message && err.message.includes('404')) {
-                showToast("Can't find that repo or branch. For a private repo, add a token with read access to contents.", "error");
-            } else if (err.message && err.message.includes('rate limit')) {
-                showToast("GitHub rate limit reached. Add a token to raise the limit.", "error");
+            if (err.name === 'AbortError') throw err;
+            if (!targetBranch) {
+                if (err.message && err.message.includes('404')) {
+                    showToast("Can't find that repo or branch. For a private repo, add a token with read access to contents.", "error");
+                } else if (err.message && (err.message.includes('rate limit') || err.message.includes('403'))) {
+                    showToast("GitHub rate limit reached or access forbidden. Add a token to raise the limit.", "error");
+                } else {
+                    showToast(err.message, "error");
+                }
+                throw err;
             }
+            log(`[WARN] Repository default branch lookup warning: ${err.message}`);
         }
 
         log(`[FETCH] Target branch: ${targetBranch}${isPrivateRepo ? ' (Private Repository)' : ''}`);
@@ -1317,6 +1312,11 @@ dom.packBtn.addEventListener('click', async () => {
 
         log(`[SUCCESS] Download complete: ${collectedFiles.length} file(s) fetched.`);
 
+        if (failedCount > 0) {
+            log(`[WARN] ${failedCount} file(s) failed to download.`);
+            showToast(`${failedCount} file(s) failed to download. Check rate limits or permissions.`, "warn");
+        }
+
         if (collectedFiles.length === 0) {
             showToast("No content could be fetched from selected files.", "warn");
             return;
@@ -1346,9 +1346,11 @@ dom.packBtn.addEventListener('click', async () => {
             showToast(`Error: ${err.message}`, "error");
         }
     } finally {
-        isDownloading = false;
-        dom.packBtn.disabled = false;
-        dom.abortBtn.style.display = 'none';
+        if (thisGen === currentGeneration) {
+            isDownloading = false;
+            dom.packBtn.disabled = false;
+            dom.abortBtn.style.display = 'none';
+        }
     }
 });
 
