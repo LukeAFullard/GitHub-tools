@@ -64,6 +64,7 @@ const dom = {
     minifyMode: document.getElementById('minifyMode'),
     chunkLimit: document.getElementById('chunkLimit'),
     redactSecrets: document.getElementById('redactSecrets'),
+    aggressiveRedact: document.getElementById('aggressiveRedact'),
     aiInstructions: document.getElementById('aiInstructions'),
     clearInstructionsBtn: document.getElementById('clearInstructionsBtn'),
     instructionsCharCount: document.getElementById('instructionsCharCount'),
@@ -197,6 +198,9 @@ function loadSavedSettings() {
         if (dom.redactSecrets && localStorage.getItem('cfg_redactSecrets') !== null) {
             dom.redactSecrets.checked = localStorage.getItem('cfg_redactSecrets') !== 'false';
         }
+        if (dom.aggressiveRedact && localStorage.getItem('cfg_aggressiveRedact') !== null) {
+            dom.aggressiveRedact.checked = localStorage.getItem('cfg_aggressiveRedact') === 'true';
+        }
         if (dom.aiInstructions && localStorage.getItem('cfg_aiInstructions') !== null) {
             dom.aiInstructions.value = localStorage.getItem('cfg_aiInstructions');
             updateCharCount();
@@ -216,6 +220,7 @@ function saveSettings() {
         if (dom.throttleMs) localStorage.setItem('cfg_throttleMs', dom.throttleMs.value);
         if (dom.ignoreExt) localStorage.setItem('cfg_ignoreExt', dom.ignoreExt.value);
         if (dom.redactSecrets) localStorage.setItem('cfg_redactSecrets', dom.redactSecrets.checked ? 'true' : 'false');
+        if (dom.aggressiveRedact) localStorage.setItem('cfg_aggressiveRedact', dom.aggressiveRedact.checked ? 'true' : 'false');
         if (dom.aiInstructions) localStorage.setItem('cfg_aiInstructions', dom.aiInstructions.value);
         localStorage.setItem('cfg_budgetWindow', currentBudgetWindow.toString());
     } catch (_) {}
@@ -597,7 +602,9 @@ function updateSecretsWarningPanel(selectedFiles) {
     }
 
     dom.secretsWarningPanel.style.display = 'block';
-    dom.secretsWarningSummary.textContent = `${totalFindings} possible secret${totalFindings === 1 ? '' : 's'} in ${flaggedPaths.size} file${flaggedPaths.size === 1 ? '' : 's'}.`;
+    const isRedactOn = dom.redactSecrets ? dom.redactSecrets.checked : true;
+    const statusLabel = isRedactOn ? 'Redacted in output' : 'Present in output';
+    dom.secretsWarningSummary.textContent = `${totalFindings} possible secret${totalFindings === 1 ? '' : 's'} in ${flaggedPaths.size} file${flaggedPaths.size === 1 ? '' : 's'} (${statusLabel}).`;
 
     dom.secretsTableBody.innerHTML = rows.map(r => `
         <tr>
@@ -651,6 +658,7 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
 
     const minifyMode = dom.minifyMode ? dom.minifyMode.value : 'none';
     const isRedact = dom.redactSecrets ? dom.redactSecrets.checked : true;
+    const isAggressive = dom.aggressiveRedact ? dom.aggressiveRedact.checked : false;
     const instructions = dom.aiInstructions ? dom.aiInstructions.value : '';
 
     log(`[PACK] Building context from ${targetFiles.length} files (${dom.format.value}, shrink: ${minifyMode}, redact: ${isRedact})...`);
@@ -658,7 +666,7 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     const processedFiles = targetFiles.map(f => {
         let content = f.rawContent;
         if (isRedact) {
-            content = redactSecrets(content, f.path);
+            content = redactSecrets(content, f.path, { aggressiveRedact: isAggressive });
         }
         if (minifyMode !== 'none') {
             content = minifyCode(content, f.path, minifyMode);
@@ -774,11 +782,21 @@ if (dom.redactSecrets) {
         repackBundleInMemory();
     });
 }
+if (dom.aggressiveRedact) {
+    dom.aggressiveRedact.addEventListener('change', () => {
+        saveSettings();
+        repackBundleInMemory();
+    });
+}
+let instructionsDebounceTimeout = null;
 if (dom.aiInstructions) {
     dom.aiInstructions.addEventListener('input', () => {
         updateCharCount();
         saveSettings();
-        repackBundleInMemory();
+        if (instructionsDebounceTimeout) clearTimeout(instructionsDebounceTimeout);
+        instructionsDebounceTimeout = setTimeout(() => {
+            repackBundleInMemory();
+        }, 300);
     });
 }
 

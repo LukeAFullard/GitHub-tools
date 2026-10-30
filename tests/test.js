@@ -640,7 +640,7 @@ test('secrets: true positive and near-miss for each pattern detector', () => {
     assert.equal(kebab3.filter(f => f.type === 'openai-key').length, 0);
 
     // Generic (Quoted & Unquoted)
-    const genPos = scanForSecrets('config.js', 'password = "aB3$k9P1zX7!"');
+    const genPos = scanForSecrets('config.js', 'password = "Zx9!kLm2Qr8w"');
     assert.equal(genPos.length, 1);
     assert.equal(genPos[0].type, 'generic-secret');
 
@@ -652,6 +652,22 @@ test('secrets: true positive and near-miss for each pattern detector', () => {
 
     const genUnquotedPos = scanForSecrets('.env', 'DB_PASSWORD=Zx9kLm2Qr8wTv7');
     assert.equal(genUnquotedPos.filter(f => f.type === 'generic-secret').length, 1);
+
+    // Ordinary code statements must NOT be flagged as generic secrets
+    const code1 = scanForSecrets('app.js', 'const auth = getAuthHeader(req);');
+    assert.equal(code1.filter(f => f.type === 'generic-secret').length, 0);
+
+    const code2 = scanForSecrets('app.js', 'const auth = require("./authentication");');
+    assert.equal(code2.filter(f => f.type === 'generic-secret').length, 0);
+
+    const code3 = scanForSecrets('app.js', 'tokenCount = estimateTokens(text) + 1;');
+    assert.equal(code3.filter(f => f.type === 'generic-secret').length, 0);
+
+    const code4 = scanForSecrets('app.js', 'const author = "Jane Q. Public";');
+    assert.equal(code4.filter(f => f.type === 'generic-secret').length, 0);
+
+    const code5 = scanForSecrets('package.json', '"tokenizer": "bert-base-uncased"');
+    assert.equal(code5.filter(f => f.type === 'generic-secret').length, 0);
 
     const genNear = scanForSecrets('config.js', 'password = "your_password"');
     assert.equal(genNear.length, 0);
@@ -778,6 +794,22 @@ test('instructions: tokens are included in chunk-size estimates', () => {
     const tokWithInst = estimateTokens(outWithInst.text);
 
     assert.ok(tokWithInst > tokNoInst, 'Output with instructions should produce higher token estimate');
+});
+
+test('instructions: chunking budgets instructions in final chunk without exceeding chunk limit', () => {
+    const repoInfo = { owner: 'owner', repo: 'repo' };
+    const files = Array.from({ length: 5 }, (_, i) => ({
+        path: `file_${i}.js`,
+        content: `console.log("file ${i} content repeat ".repeat(15));`
+    }));
+    const instructions = 'Detailed instruction block '.repeat(10);
+
+    const chunks = chunkContextOutput('claude-xml', repoInfo, 'main', '', files, 500, estimateTokens, { instructions });
+    assert.ok(chunks.length > 1);
+    for (const chunk of chunks) {
+        assert.equal(chunk.exceedsLimit, false, 'No chunk should exceed chunk token limit');
+    }
+    assert.ok(chunks[chunks.length - 1].text.includes('Detailed instruction block'));
 });
 
 test('secrets: long single-line input scans in under 1 second', () => {

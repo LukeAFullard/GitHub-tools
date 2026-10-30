@@ -16,6 +16,15 @@ const SENSITIVE_FILENAME_EXCEPTIONS = new Set([
     '.env.dist'
 ]);
 
+function isConfigLikeFile(path) {
+    if (!path) return false;
+    const filename = path.split('/').pop().toLowerCase();
+    if (filename.startsWith('.env') || filename.endsWith('.ini') || filename.endsWith('.cfg') || filename.endsWith('.conf') || filename.endsWith('.properties') || filename.endsWith('.yml') || filename.endsWith('.yaml') || filename.endsWith('.toml') || filename.endsWith('.sh') || filename === 'dockerfile' || filename.startsWith('docker-compose')) {
+        return true;
+    }
+    return false;
+}
+
 function isSensitiveFilename(path) {
     if (!path) return false;
     const filename = path.split('/').pop().toLowerCase();
@@ -203,12 +212,17 @@ function findMatchesInternal(path, content) {
         },
         {
             type: 'generic-secret',
-            regex: /(?:(?:["']?\b|\b["'])[A-Za-z0-9_]*(?:password|passwd|secret|token|api_key|apikey|auth)[A-Za-z0-9_]*["']?)\s*[:=]\s*(["'])([^"'\r\n]{8,})\1/gi,
+            regex: /(?:(?:["']?\b|\b["'])[A-Za-z0-9_]*(?:password|passwd|secret|token|api_key|apikey|auth_key|auth_token|authorization)[A-Za-z0-9_]*["']?)\s*[:=]\s*(["'])([^"'\r\n]{8,})\1/gi,
             check: (m) => {
                 const val = m[2];
                 if (isPlaceholder(val)) return false;
+                if (/[()\[\]{},$]/.test(val)) return false;
+                if (val.includes('/') || val.includes('\\') || val.includes('://')) return false;
+                if (val.includes(' ')) return false;
+                if (/^[a-zA-Z0-9_\-.]+\.[a-zA-Z0-9_\-]+$/.test(val) && !/[0-9]/.test(val)) return false;
+                if (!/[0-9]/.test(val)) return false;
                 if (getCharacterClassCount(val) < 2) return false;
-                if (calculateEntropy(val) < 2.5) return false;
+                if (calculateEntropy(val) < 3.0) return false;
                 return true;
             },
             getValue: (m) => m[2],
@@ -217,12 +231,16 @@ function findMatchesInternal(path, content) {
         },
         {
             type: 'generic-secret',
-            regex: /(?:(?:["']?\b|\b["'])[A-Za-z0-9_]*(?:password|passwd|secret|token|api_key|apikey|auth)[A-Za-z0-9_]*["']?)\s*[:=]\s*([^\s"'#;\r\n]{8,})/gi,
-            check: (m) => {
+            regex: /(?:(?:["']?\b|\b["'])[A-Za-z0-9_]*(?:password|passwd|secret|token|api_key|apikey|auth_key|auth_token|authorization)[A-Za-z0-9_]*["']?)\s*[:=]\s*([^\s"'#;\r\n]{8,})/gi,
+            check: (m, p) => {
+                if (!isConfigLikeFile(p)) return false;
                 const val = m[1];
                 if (isPlaceholder(val)) return false;
+                if (/[()\[\]{},$]/.test(val)) return false;
+                if (val.includes('`') || val.includes(';') || val.includes('.')) return false;
+                if (!/[0-9]/.test(val)) return false;
                 if (getCharacterClassCount(val) < 2) return false;
-                if (calculateEntropy(val) < 2.5) return false;
+                if (calculateEntropy(val) < 3.0) return false;
                 return true;
             },
             getValue: (m) => m[1],
@@ -235,7 +253,7 @@ function findMatchesInternal(path, content) {
         p.regex.lastIndex = 0;
         let match;
         while ((match = p.regex.exec(scanContent)) !== null) {
-            if (p.check(match)) {
+            if (p.check(match, path)) {
                 const val = p.getValue ? p.getValue(match) : match[0];
                 const matchIdx = p.getIndex ? p.getIndex(match) : match.index;
                 const matchLen = p.getLength ? p.getLength(match) : match[0].length;
@@ -288,14 +306,18 @@ export function scanForSecrets(path, content) {
  * @param {string} path - Relative file path.
  * @returns {string} Content with secrets redacted.
  */
-export function redactSecrets(content, path) {
+export function redactSecrets(content, path, options = {}) {
     if (path && isSensitiveFilename(path)) {
         return '[REDACTED:sensitive-file]';
     }
 
     if (!content) return content || '';
 
-    const matches = findMatchesInternal(path, content).filter(m => m.type !== 'sensitive-file');
+    let matches = findMatchesInternal(path, content).filter(m => m.type !== 'sensitive-file');
+    if (!options.aggressiveRedact) {
+        matches = matches.filter(m => m.type !== 'generic-secret');
+    }
+
     if (matches.length === 0) return content;
 
     const sorted = [...matches].sort((a, b) => b.index - a.index);
