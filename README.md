@@ -62,6 +62,7 @@ Navigate to `http://localhost:8000` in your web browser.
     ├── formatters.js   # LLM context output formatters (XML, MD, JSON)
     ├── github-api.js   # GitHub API fetch logic & rate-limit handling
     ├── minifier.js     # Code minification & comment stripping engine
+    ├── secrets.js      # Client-side secret scanning and redaction engine
     ├── tokenizer.js    # BPE regex token estimator
     ├── tokenizer.worker.js # Web Worker background tokenization
     └── tree.js         # File tree rendering & selection state management

@@ -173,31 +173,33 @@ export function chunkContextOutput(format, repoInfo, branch, treeText, files, ch
         return [output];
     }
 
+    // Pre-calculate per-file token overhead once to avoid O(N²) main-thread re-tokenizations
+    const fileTokenEstimates = files.map(file => {
+        const dummyOutput = buildContextOutput(format, repoInfo, branch, '', [file], options);
+        return estimateTokensFn(dummyOutput.text);
+    });
+
+    const baseWrapperOutput = buildContextOutput(format, repoInfo, branch, treeText, [], { ...options, instructions });
+    const baseWrapperTokens = estimateTokensFn(baseWrapperOutput.text);
+
     const chunks = [];
     let currentFiles = [];
     let currentStartIndex = 1;
+    let runningTokens = baseWrapperTokens;
 
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const testFiles = [...currentFiles, file];
-        const isLastFile = (i === files.length - 1);
+        const fileTokens = fileTokenEstimates[i];
 
-        const candidateOpts = {
-            ...options,
-            startIndex: currentStartIndex,
-            instructions: isLastFile ? instructions : '',
-            partNote: isLastFile ? '' : `Part ${chunks.length + 1} of ${chunks.length + 2}. Instructions are in part ${chunks.length + 2}.`
-        };
-
-        const candidateOutput = buildContextOutput(format, repoInfo, branch, chunks.length === 0 ? treeText : '', testFiles, candidateOpts);
-        const candidateTokens = estimateTokensFn(candidateOutput.text);
-
-        if (currentFiles.length > 0 && candidateTokens > chunkTokenLimit) {
+        if (currentFiles.length > 0 && (runningTokens + fileTokens > chunkTokenLimit)) {
             chunks.push({ files: currentFiles, startIndex: currentStartIndex });
             currentStartIndex += currentFiles.length;
             currentFiles = [file];
+            const emptyChunkBase = buildContextOutput(format, repoInfo, branch, chunks.length === 0 ? treeText : '', [], options);
+            runningTokens = estimateTokensFn(emptyChunkBase.text) + fileTokens;
         } else {
             currentFiles.push(file);
+            runningTokens += fileTokens;
         }
     }
 
