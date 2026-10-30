@@ -1243,6 +1243,39 @@ test('issue-formatters: Markdown formatting for issues', () => {
     assert.ok(res.text.includes('Please add dark mode'));
 });
 
+test('issue-cleaner & formatters: N1 end-to-end test passing options through processIssueThread into output', () => {
+    const rawIssue = {
+        number: 42,
+        title: 'End-to-End Test Issue',
+        state: 'open',
+        author: 'alice',
+        authorAssociation: 'NONE',
+        createdAt: '2023-01-01',
+        body: 'Body text'
+    };
+    const rawComments = [];
+    rawComments.truncated = true;
+
+    const processed = processIssueThread(rawIssue, rawComments, {
+        commentsFetchFailed: true,
+        commentsFetchError: '500 Server Error',
+        commentsTruncated: true
+    });
+
+    assert.equal(processed.commentsFetchFailed, true);
+    assert.equal(processed.commentsFetchError, '500 Server Error');
+    assert.equal(processed.commentsTruncated, true);
+
+    const repoInfo = { owner: 'owner', repo: 'repo' };
+    const formats = ['claude-xml', 'markdown', 'generic-xml', 'json'];
+
+    for (const fmt of formats) {
+        const output = buildIssuesOutput(fmt, repoInfo, [processed]);
+        assert.ok(output.text.includes('500 Server Error'), `Expected 500 Server Error warning in ${fmt} output`);
+        assert.ok(output.text.includes('truncated'), `Expected truncation note in ${fmt} output`);
+    }
+});
+
 test('issue-formatters: R2 failure and truncation notes in all output formats', () => {
     const repoInfo = { owner: 'user', repo: 'my-repo' };
     const issues = [

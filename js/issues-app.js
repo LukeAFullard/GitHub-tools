@@ -631,6 +631,7 @@ async function buildSelectedContext(summaryOnly = false) {
 
             if (abortController) abortController.abort();
             abortController = new AbortController();
+            const myController = abortController;
             dom.abortBtn.style.display = 'inline-flex';
             dom.buildContextBtn.disabled = true;
             dom.progressTrack.style.display = 'block';
@@ -664,7 +665,7 @@ async function buildSelectedContext(summaryOnly = false) {
                 log(`[ERROR] Comment fetch error: ${err.message}`);
                 showToast(err.message, 'error');
             } finally {
-                if (thisBuildGen === buildGeneration) {
+                if (abortController === myController) {
                     dom.buildContextBtn.disabled = false;
                     dom.abortBtn.style.display = 'none';
                 }
