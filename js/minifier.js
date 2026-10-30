@@ -6,29 +6,19 @@ const minifyCache = new Map();
 const MAX_CACHE_SIZE = 500;
 
 function simpleHash(str) {
-    let hash = 0;
-    const sampleLen = Math.min(str.length, 1024);
-    for (let i = 0; i < sampleLen; i++) {
-        hash = ((hash << 5) - hash) + str.charCodeAt(i);
-        hash |= 0;
+    // FNV-1a over the whole string: a prefix-only hash returned stale output
+    // for same-length edits that appear after the sampled prefix.
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+        hash ^= str.charCodeAt(i);
+        hash = Math.imul(hash, 0x01000193);
     }
-    return hash;
-}
-
-function handleNormalNewline(output) {
-    let end = output.length;
-    while (end > 0 && (output[end - 1] === ' ' || output[end - 1] === '\t' || output[end - 1] === '\r')) {
-        end--;
-    }
-    const lastNL = output.lastIndexOf('\n', end - 1);
-    if (end === lastNL + 1) {
-        return output.slice(0, lastNL + 1);
-    }
-    return output.slice(0, end) + '\n';
+    return hash >>> 0;
 }
 
 function stripJsComments(code, ext = '') {
-    let output = '';
+    const lines = [];
+    let currentLine = '';
     let i = 0;
     const len = code.length;
     let state = 'normal';
@@ -36,15 +26,46 @@ function stripJsComments(code, ext = '') {
     const isRust = ext === 'rs';
     const templateStack = [];
 
+    function pushNewline() {
+        const trimmed = currentLine.trimEnd();
+        if (trimmed.length > 0) {
+            lines.push(trimmed);
+        }
+        currentLine = '';
+    }
+
+    function getPrevTrimmed() {
+        const trimmed = currentLine.trimEnd();
+        if (trimmed.length > 0) {
+            return trimmed;
+        }
+        for (let idx = lines.length - 1; idx >= 0; idx--) {
+            if (lines[idx].length > 0) return lines[idx];
+        }
+        return '';
+    }
+
+    function getPrevTrimmedInfo() {
+        const prev = getPrevTrimmed();
+        if (!prev) return { lastChar: '', endsWithArrow: false, isUrl: false, isKeyword: false };
+        const lastChar = prev[prev.length - 1];
+        const endsWithArrow = prev.endsWith('=>');
+        const sampleStart = Math.max(0, prev.length - 15);
+        const tail = prev.slice(sampleStart);
+        const isUrl = /(?:https?|ftp|file):$/i.test(tail);
+        const isKeyword = /\b(?:return|case|typeof|throw|delete|void|in|of|instanceof|new|yield|await)$/.test(tail);
+        return { lastChar, endsWithArrow, isUrl, isKeyword };
+    }
+
     while (i < len) {
         const char = code[i];
         const next = code[i + 1];
 
         if (state === 'normal') {
             if (!isCss && char === '/' && next === '/') {
-                const prevTrimmed = output.trimEnd();
-                if (/(?:https?|ftp|file):$/i.test(prevTrimmed)) {
-                    output += char;
+                const info = getPrevTrimmedInfo();
+                if (info.isUrl) {
+                    currentLine += char;
                     i++;
                     continue;
                 }
@@ -56,18 +77,15 @@ function stripJsComments(code, ext = '') {
                 i += 2;
                 continue;
             } else if (char === '/') {
-                const prevTrimmed = output.trimEnd();
-                const lastChar = prevTrimmed[prevTrimmed.length - 1];
-                const keywordRegex = /\b(?:return|case|typeof|throw|delete|void|in|of|instanceof|new|yield|await)$/;
-                const isUrl = /(?:https?|ftp|file):$/i.test(prevTrimmed);
-                const isRegexp = !isCss && !isUrl && lastChar !== '<' && (!lastChar || prevTrimmed.endsWith('=>') || '=(:[{},;!&|?+*^%~'.includes(lastChar) || keywordRegex.test(prevTrimmed));
+                const info = getPrevTrimmedInfo();
+                const isRegexp = !isCss && !info.isUrl && info.lastChar !== '<' && (!info.lastChar || info.endsWithArrow || '=(:[{},;!&|?+*^%~'.includes(info.lastChar) || info.isKeyword);
 
                 if (isRegexp) {
                     state = 'regex';
-                    output += char;
+                    currentLine += char;
                     i++;
                 } else {
-                    output += char;
+                    currentLine += char;
                     i++;
                 }
             } else if (char === "'") {
@@ -78,26 +96,26 @@ function stripJsComments(code, ext = '') {
                         const name = lifetimeMatch[1];
                         const after = code[i + 1 + name.length];
                         if (after !== "'") {
-                            output += char;
+                            currentLine += char;
                             i++;
                             continue;
                         }
                     }
                 }
                 state = 'single_string';
-                output += char;
+                currentLine += char;
                 i++;
             } else if (char === '"') {
                 state = 'double_string';
-                output += char;
+                currentLine += char;
                 i++;
             } else if (char === '`') {
                 state = 'template_string';
-                output += char;
+                currentLine += char;
                 i++;
             } else if (char === '{' && templateStack.length > 0) {
                 templateStack[templateStack.length - 1].braceDepth++;
-                output += char;
+                currentLine += char;
                 i++;
             } else if (char === '}' && templateStack.length > 0) {
                 const top = templateStack[templateStack.length - 1];
@@ -106,26 +124,26 @@ function stripJsComments(code, ext = '') {
                     templateStack.pop();
                     state = top.returnState;
                 }
-                output += char;
+                currentLine += char;
                 i++;
             } else if (char === '\n') {
-                output = handleNormalNewline(output);
+                pushNewline();
                 i++;
             } else {
-                output += char;
+                currentLine += char;
                 i++;
             }
         } else if (state === 'regex') {
             if (char === '\n') {
                 state = 'normal';
-                output += char;
+                pushNewline();
                 i++;
                 continue;
             }
-            output += char;
+            currentLine += char;
             if (char === '\\') {
                 if (i + 1 < len) {
-                    output += code[i + 1];
+                    currentLine += code[i + 1];
                     i += 2;
                     continue;
                 }
@@ -138,14 +156,14 @@ function stripJsComments(code, ext = '') {
         } else if (state === 'regex_class') {
             if (char === '\n') {
                 state = 'normal';
-                output += char;
+                pushNewline();
                 i++;
                 continue;
             }
-            output += char;
+            currentLine += char;
             if (char === '\\') {
                 if (i + 1 < len) {
-                    output += code[i + 1];
+                    currentLine += code[i + 1];
                     i += 2;
                     continue;
                 }
@@ -154,10 +172,10 @@ function stripJsComments(code, ext = '') {
             }
             i++;
         } else if (state === 'single_string') {
-            output += char;
+            currentLine += char;
             if (char === '\\') {
                 if (i + 1 < len) {
-                    output += code[i + 1];
+                    currentLine += code[i + 1];
                     i += 2;
                     continue;
                 }
@@ -165,14 +183,14 @@ function stripJsComments(code, ext = '') {
                 state = 'normal';
             } else if (char === '\n') {
                 state = 'normal';
-                output = handleNormalNewline(output);
+                pushNewline();
             }
             i++;
         } else if (state === 'double_string') {
-            output += char;
+            currentLine += char;
             if (char === '\\') {
                 if (i + 1 < len) {
-                    output += code[i + 1];
+                    currentLine += code[i + 1];
                     i += 2;
                     continue;
                 }
@@ -180,71 +198,87 @@ function stripJsComments(code, ext = '') {
                 state = 'normal';
             } else if (char === '\n') {
                 state = 'normal';
-                output = handleNormalNewline(output);
+                pushNewline();
             }
             i++;
         } else if (state === 'template_string') {
             if (char === '\\') {
-                output += char;
+                currentLine += char;
                 if (i + 1 < len) {
-                    output += code[i + 1];
+                    currentLine += code[i + 1];
                     i += 2;
                     continue;
                 }
             } else if (char === '`') {
-                output += char;
+                currentLine += char;
                 state = 'normal';
             } else if (char === '$' && next === '{') {
-                output += '${';
+                currentLine += '${';
                 i += 2;
                 templateStack.push({ returnState: 'template_string', braceDepth: 1 });
                 state = 'normal';
                 continue;
+            } else if (char === '\n') {
+                lines.push(currentLine);
+                currentLine = '';
+                i++;
+                continue;
             } else {
-                output += char;
+                currentLine += char;
             }
             i++;
         } else if (state === 'line_comment') {
             if (char === '\n') {
                 state = 'normal';
-                output = handleNormalNewline(output);
+                pushNewline();
             }
             i++;
         } else if (state === 'block_comment') {
             if (char === '*' && next === '/') {
                 state = 'normal';
                 i += 2;
-                const prevChar = output[output.length - 1];
+                const prev = getPrevTrimmed();
+                const prevChar = prev ? prev[prev.length - 1] : '';
                 const nextChar = code[i];
                 if (prevChar && nextChar && /[a-zA-Z0-9_$]/.test(prevChar) && /[a-zA-Z0-9_$]/.test(nextChar)) {
-                    output += ' ';
+                    currentLine += ' ';
                 }
                 continue;
             }
             if (char === '\n') {
-                output = handleNormalNewline(output);
+                pushNewline();
             }
             i++;
         }
     }
-    const lastNL = output.lastIndexOf('\n');
-    if (output.slice(lastNL + 1).trim().length === 0) {
-        output = output.slice(0, lastNL + 1);
+    const finalTrim = currentLine.trimEnd();
+    if (finalTrim.length > 0) {
+        lines.push(finalTrim);
     }
-    return output.trim();
+    return lines.join('\n').trim();
 }
 
 function stripHashComments(code, ext = '') {
-    let output = '';
+    const lines = [];
+    let currentLine = '';
     let i = 0;
     const len = code.length;
     let state = 'normal';
     const isShell = ['sh', 'bash'].includes(ext);
+    const isRuby = ext === 'rb';
+
+    function pushNewline() {
+        const trimmed = currentLine.trimEnd();
+        if (trimmed.length > 0) {
+            lines.push(trimmed);
+        }
+        currentLine = '';
+    }
 
     if (code.startsWith('#!')) {
         const firstLineEnd = code.indexOf('\n');
         if (firstLineEnd === -1) return code;
-        output += code.slice(0, firstLineEnd + 1);
+        lines.push(code.slice(0, firstLineEnd));
         i = firstLineEnd + 1;
     }
 
@@ -254,13 +288,11 @@ function stripHashComments(code, ext = '') {
         const next2 = code[i + 2];
 
         if (state === 'normal') {
-            const isRuby = ext === 'rb';
             let isCommentStart = false;
             if (isShell) {
                 isCommentStart = (i === 0 || /[\s;&|()]/.test(code[i - 1]));
             } else if (isRuby) {
-                const lineSoFar = output.slice(output.lastIndexOf('\n') + 1);
-                isCommentStart = (lineSoFar.trim().length === 0);
+                isCommentStart = (currentLine.trim().length === 0);
             } else {
                 isCommentStart = (i === 0 || code[i - 1] !== '\\');
             }
@@ -271,32 +303,32 @@ function stripHashComments(code, ext = '') {
                 continue;
             } else if (char === "'" && next === "'" && next2 === "'") {
                 state = 'triple_single';
-                output += "'''";
+                currentLine += "'''";
                 i += 3;
             } else if (char === '"' && next === '"' && next2 === '"') {
                 state = 'triple_double';
-                output += '"""';
+                currentLine += '"""';
                 i += 3;
             } else if (char === "'") {
                 state = 'single_string';
-                output += char;
+                currentLine += char;
                 i++;
             } else if (char === '"') {
                 state = 'double_string';
-                output += char;
+                currentLine += char;
                 i++;
             } else if (char === '\n') {
-                output = handleNormalNewline(output);
+                pushNewline();
                 i++;
             } else {
-                output += char;
+                currentLine += char;
                 i++;
             }
         } else if (state === 'single_string') {
-            output += char;
+            currentLine += char;
             if (char === '\\') {
                 if (i + 1 < len) {
-                    output += code[i + 1];
+                    currentLine += code[i + 1];
                     i += 2;
                     continue;
                 }
@@ -304,14 +336,14 @@ function stripHashComments(code, ext = '') {
                 state = 'normal';
             } else if (char === '\n') {
                 state = 'normal';
-                output = handleNormalNewline(output);
+                pushNewline();
             }
             i++;
         } else if (state === 'double_string') {
-            output += char;
+            currentLine += char;
             if (char === '\\') {
                 if (i + 1 < len) {
-                    output += code[i + 1];
+                    currentLine += code[i + 1];
                     i += 2;
                     continue;
                 }
@@ -319,50 +351,66 @@ function stripHashComments(code, ext = '') {
                 state = 'normal';
             } else if (char === '\n') {
                 state = 'normal';
-                output = handleNormalNewline(output);
+                pushNewline();
             }
             i++;
         } else if (state === 'triple_single') {
-            output += char;
             if (char === '\\') {
+                currentLine += char;
                 if (i + 1 < len) {
-                    output += code[i + 1];
+                    currentLine += code[i + 1];
                     i += 2;
                     continue;
                 }
             } else if (char === "'" && next === "'" && next2 === "'") {
-                output += "''";
-                i += 2;
+                currentLine += "'''";
+                i += 3;
                 state = 'normal';
+                continue;
+            } else if (char === '\n') {
+                lines.push(currentLine);
+                currentLine = '';
+                i++;
+                continue;
+            } else {
+                currentLine += char;
             }
             i++;
         } else if (state === 'triple_double') {
-            output += char;
             if (char === '\\') {
+                currentLine += char;
                 if (i + 1 < len) {
-                    output += code[i + 1];
+                    currentLine += code[i + 1];
                     i += 2;
                     continue;
                 }
             } else if (char === '"' && next === '"' && next2 === '"') {
-                output += '""';
-                i += 2;
+                currentLine += '"""';
+                i += 3;
                 state = 'normal';
+                continue;
+            } else if (char === '\n') {
+                lines.push(currentLine);
+                currentLine = '';
+                i++;
+                continue;
+            } else {
+                currentLine += char;
             }
             i++;
         } else if (state === 'line_comment') {
             if (char === '\n') {
                 state = 'normal';
-                output = handleNormalNewline(output);
+                pushNewline();
             }
             i++;
         }
     }
-    const lastNL = output.lastIndexOf('\n');
-    if (output.slice(lastNL + 1).trim().length === 0) {
-        output = output.slice(0, lastNL + 1);
+    const finalTrim = currentLine.trimEnd();
+    if (finalTrim.length > 0) {
+        lines.push(finalTrim);
     }
-    return output.trim();
+    return lines.join('\n').trim();
 }
 
 function minifyHtml(code) {
