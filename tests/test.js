@@ -757,6 +757,103 @@ test('budget status logic for pre-build split and oversized split chunk', () => 
     assert.equal(splitOversizedRes.statusClass, 'status-over');
 });
 
+function makeFakeCommentRepo(issueCount, perIssue) {
+    const issues = [];
+    const comments = [];
+    let cid = 1;
+    for (let n = 1; n <= issueCount; n++) {
+        const created = new Date(Date.UTC(2025, 0, 1) + n * 86400000);
+        issues.push({ number: n, createdAt: created.toISOString().slice(0, 10), commentsCount: perIssue });
+        for (let j = 0; j < perIssue; j++) {
+            const t = new Date(created.getTime() + (j + 1) * 3600000).toISOString();
+            comments.push({ id: cid++, issue_url: `https://api.github.com/repos/o/r/issues/${n}`, body: `c${n}-${j}`, user: { login: 'u' }, created_at: t, updated_at: t });
+        }
+    }
+    return { issues, comments };
+}
+
+function installFakeCommentApi(db, { dropFromBulkIssue = null } = {}) {
+    const log = { calls: 0 };
+    globalThis.fetch = async (url) => {
+        log.calls++;
+        const u = new URL(url);
+        const page = Number(u.searchParams.get('page') || 1);
+        const perPage = Number(u.searchParams.get('per_page') || 30);
+        let list;
+        const m = /\/issues\/(\d+)\/comments$/.exec(u.pathname);
+        if (m) {
+            list = db.comments.filter(c => c.issue_url.endsWith('/' + m[1]));
+        } else if (u.pathname.endsWith('/issues/comments')) {
+            const since = u.searchParams.get('since');
+            list = db.comments.filter(c => !since || c.updated_at >= since);
+            if (dropFromBulkIssue) {
+                const suffix = '/issues/' + dropFromBulkIssue;
+                const idx = list.map(c => c.issue_url.endsWith(suffix)).lastIndexOf(true);
+                if (idx >= 0) list = list.filter((_, i) => i !== idx);
+            }
+        } else {
+            return { ok: false, status: 404, statusText: 'Not Found', headers: new Map() };
+        }
+        return { ok: true, status: 200, headers: new Map(), json: async () => list.slice((page - 1) * perPage, page * perPage) };
+    };
+    return log;
+}
+
+test('github-issues-api: bulk comment strategy uses far fewer requests and matches per-issue output', async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+        const db = makeFakeCommentRepo(200, 3);
+        const selected = db.issues.slice(-60);
+        const { fetchCommentsForIssues } = await import('../js/github-issues-api.js');
+
+        const perLog = installFakeCommentApi(db);
+        const ref = await fetchCommentsForIssues('o', 'r', selected, { throttleMs: 0, strategy: 'per-issue' });
+        assert.equal(perLog.calls, 60);
+
+        const bulkLog = installFakeCommentApi(db);
+        const res = await fetchCommentsForIssues('o', 'r', selected, { throttleMs: 0, universe: db.issues });
+        assert.equal(res.stats.strategy, 'bulk');
+        assert.ok(bulkLog.calls <= 4, `expected <= 4 requests, got ${bulkLog.calls}`);
+        assert.equal(res.failures.length, 0);
+        for (const iss of selected) {
+            assert.deepEqual(res.commentsByIssue.get(iss.number).map(c => c.id), ref.commentsByIssue.get(iss.number).map(c => c.id));
+        }
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('github-issues-api: bulk result with a count mismatch falls back to per-issue for that issue only', async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+        const db = makeFakeCommentRepo(200, 3);
+        const selected = db.issues.slice(-60);
+        const { fetchCommentsForIssues } = await import('../js/github-issues-api.js');
+        const log = installFakeCommentApi(db, { dropFromBulkIssue: 190 });
+        const res = await fetchCommentsForIssues('o', 'r', selected, { throttleMs: 0, universe: db.issues });
+        assert.equal(res.stats.strategy, 'bulk+per-issue');
+        assert.equal(res.commentsByIssue.get(190).length, 3, 'mismatched issue must be re-fetched in full');
+        assert.ok(log.calls <= 6, `expected <= 6 requests, got ${log.calls}`);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('github-issues-api: auto strategy keeps per-issue for small or sparse old selections', async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+        const db = makeFakeCommentRepo(200, 3);
+        const { fetchCommentsForIssues } = await import('../js/github-issues-api.js');
+        installFakeCommentApi(db);
+        const small = await fetchCommentsForIssues('o', 'r', db.issues.slice(-2), { throttleMs: 0, universe: db.issues });
+        assert.equal(small.stats.strategy, 'per-issue');
+        const old = await fetchCommentsForIssues('o', 'r', db.issues.slice(0, 5), { throttleMs: 0, universe: db.issues });
+        assert.equal(old.stats.strategy, 'per-issue');
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 // --- Secrets Detection & Redaction Tests ---
 
 test('secrets: Phase 1 regression tests for long keys, provider tokens, URL credentials, and Auth headers', () => {

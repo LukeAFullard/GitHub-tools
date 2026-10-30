@@ -646,9 +646,10 @@ async function buildSelectedContext(summaryOnly = false) {
 
             try {
                 log(`[FETCH] Fetching comment threads for ${missingComments.length} issue(s)...`);
-                const { commentsByIssue: fetchedMap, failures } = await fetchCommentsForIssues(currentRepoInfo.owner, currentRepoInfo.repo, missingComments, {
+                const { commentsByIssue: fetchedMap, failures, stats: fetchStats } = await fetchCommentsForIssues(currentRepoInfo.owner, currentRepoInfo.repo, missingComments, {
                     pat,
                     signal: buildController.signal,
+                    universe: allIssues,
                     onHeaders: updateRateLimitUI,
                     onProgress: (done, total) => updateProgressBar((done / total) * 100),
                     onThread: (num, comms) => {
@@ -658,6 +659,7 @@ async function buildSelectedContext(summaryOnly = false) {
                     }
                 });
                 if (thisBuildGen !== buildGeneration) return;
+                if (fetchStats) log(`[FETCH] ${fetchStats.strategy}: ~${fetchStats.requests} request(s) (per-issue estimate was ${fetchStats.perIssueRequestsEstimate}).`);
                 for (const [num, comms] of fetchedMap.entries()) {
                     cachedCommentsByIssue.set(num, comms);
                     fetchFailuresMap.delete(num);
