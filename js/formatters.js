@@ -173,14 +173,18 @@ export function chunkContextOutput(format, repoInfo, branch, treeText, files, ch
         return [output];
     }
 
-    // Pre-calculate per-file token overhead once to avoid O(N²) main-thread re-tokenizations
+    const cleanOpts = { ...options, instructions: '' };
+    const emptyChunkBase = buildContextOutput(format, repoInfo, branch, '', [], cleanOpts);
+    const emptyChunkTokens = estimateTokensFn(emptyChunkBase.text);
+
+    // Measure only the marginal token cost of each file
     const fileTokenEstimates = files.map(file => {
-        const dummyOutput = buildContextOutput(format, repoInfo, branch, '', [file], options);
-        return estimateTokensFn(dummyOutput.text);
+        const singleFileOutput = buildContextOutput(format, repoInfo, branch, '', [file], cleanOpts);
+        return Math.max(1, estimateTokensFn(singleFileOutput.text) - emptyChunkTokens);
     });
 
-    const baseWrapperOutput = buildContextOutput(format, repoInfo, branch, treeText, [], { ...options, instructions });
-    const baseWrapperTokens = estimateTokensFn(baseWrapperOutput.text);
+    const firstChunkBase = buildContextOutput(format, repoInfo, branch, treeText, [], { ...options, instructions });
+    const baseWrapperTokens = estimateTokensFn(firstChunkBase.text);
 
     const chunks = [];
     let currentFiles = [];
@@ -195,8 +199,7 @@ export function chunkContextOutput(format, repoInfo, branch, treeText, files, ch
             chunks.push({ files: currentFiles, startIndex: currentStartIndex });
             currentStartIndex += currentFiles.length;
             currentFiles = [file];
-            const emptyChunkBase = buildContextOutput(format, repoInfo, branch, chunks.length === 0 ? treeText : '', [], options);
-            runningTokens = estimateTokensFn(emptyChunkBase.text) + fileTokens;
+            runningTokens = emptyChunkTokens + fileTokens;
         } else {
             currentFiles.push(file);
             runningTokens += fileTokens;
