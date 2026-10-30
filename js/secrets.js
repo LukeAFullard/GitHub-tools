@@ -139,7 +139,7 @@ function getLineNumber(content, index) {
  * Helper returning matches with raw values, ranges, types, and line numbers.
  * Internal only - raw values are NOT exposed in scanForSecrets findings.
  */
-function findMatchesInternal(path, content) {
+function findMatchesInternal(path, content, opts = {}) {
     const specificResults = [];
     const genericResults = [];
 
@@ -277,7 +277,7 @@ function findMatchesInternal(path, content) {
             type: 'generic-secret',
             regex: /(?:(?:["']?\b|\b["'])[A-Za-z0-9_]*(?:password|passwd|secret|token|api_key|apikey|auth_key|auth_token|authorization)[A-Za-z0-9_]*["']?)\s*[:=]\s*([^\s"'#;\r\n]{8,})/gi,
             check: (m, p) => {
-                if (!isConfigLikeFile(p)) return false;
+                if (!opts.assumeConfig && !isConfigLikeFile(p)) return false;
                 const val = m[1];
                 if (isPlaceholder(val)) return false;
                 if (/[()\[\]{},$]/.test(val)) return false;
@@ -335,8 +335,8 @@ function findMatchesInternal(path, content) {
  * @param {string} content - Raw content of the file.
  * @returns {Array<{ type: string, line: number, preview: string }>} Array of secret findings.
  */
-export function scanForSecrets(path, content) {
-    const rawMatches = findMatchesInternal(path, content);
+export function scanForSecrets(path, content, opts = {}) {
+    const rawMatches = findMatchesInternal(path, content, opts);
     return rawMatches.map(m => ({
         type: m.type,
         line: m.line,
@@ -357,7 +357,7 @@ export function redactSecrets(content, path, options = {}) {
 
     if (!content) return content || '';
 
-    let matches = findMatchesInternal(path, content).filter(m => m.type !== 'sensitive-file');
+    let matches = findMatchesInternal(path, content, options).filter(m => m.type !== 'sensitive-file');
     if (!options.aggressiveRedact) {
         matches = matches.filter(m => m.type !== 'generic-secret');
     }

@@ -2,13 +2,29 @@
  * Lightweight Client-Side Code Minifier & Whitespace Compressor for LLM Context
  */
 
+const minifyCache = new Map();
+const MAX_CACHE_SIZE = 500;
+
+function simpleHash(str) {
+    let hash = 0;
+    const sampleLen = Math.min(str.length, 1024);
+    for (let i = 0; i < sampleLen; i++) {
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash |= 0;
+    }
+    return hash;
+}
+
 function handleNormalNewline(output) {
-    const lastNL = output.lastIndexOf('\n');
-    const currentLine = output.slice(lastNL + 1);
-    if (currentLine.trim().length === 0) {
+    let end = output.length;
+    while (end > 0 && (output[end - 1] === ' ' || output[end - 1] === '\t' || output[end - 1] === '\r')) {
+        end--;
+    }
+    const lastNL = output.lastIndexOf('\n', end - 1);
+    if (end === lastNL + 1) {
         return output.slice(0, lastNL + 1);
     }
-    return output.trimEnd() + '\n';
+    return output.slice(0, end) + '\n';
 }
 
 function stripJsComments(code, ext = '') {
@@ -44,7 +60,7 @@ function stripJsComments(code, ext = '') {
                 const lastChar = prevTrimmed[prevTrimmed.length - 1];
                 const keywordRegex = /\b(?:return|case|typeof|throw|delete|void|in|of|instanceof|new|yield|await)$/;
                 const isUrl = /(?:https?|ftp|file):$/i.test(prevTrimmed);
-                const isRegexp = !isCss && !isUrl && lastChar !== '<' && (!lastChar || '=(:[{},;!&|?+*^%~'.includes(lastChar) || keywordRegex.test(prevTrimmed));
+                const isRegexp = !isCss && !isUrl && lastChar !== '<' && (!lastChar || prevTrimmed.endsWith('=>') || '=(:[{},;!&|?+*^%~'.includes(lastChar) || keywordRegex.test(prevTrimmed));
 
                 if (isRegexp) {
                     state = 'regex';
@@ -238,9 +254,17 @@ function stripHashComments(code, ext = '') {
         const next2 = code[i + 2];
 
         if (state === 'normal') {
-            const isCommentStart = isShell
-                ? (i === 0 || /[\s;&|()]/.test(code[i - 1]))
-                : (i === 0 || code[i - 1] !== '\\');
+            const isRuby = ext === 'rb';
+            let isCommentStart = false;
+            if (isShell) {
+                isCommentStart = (i === 0 || /[\s;&|()]/.test(code[i - 1]));
+            } else if (isRuby) {
+                const lineSoFar = output.slice(output.lastIndexOf('\n') + 1);
+                isCommentStart = (lineSoFar.trim().length === 0);
+            } else {
+                isCommentStart = (i === 0 || code[i - 1] !== '\\');
+            }
+
             if (char === '#' && isCommentStart) {
                 state = 'line_comment';
                 i++;
@@ -362,16 +386,22 @@ export function minifyCode(content, filename = '', mode = 'none') {
     if (!content || mode === 'none') return content;
 
     const ext = filename.includes('.') ? filename.split('.').pop().toLowerCase() : '';
-    const textExts = ['md', 'markdown', 'txt', 'json', 'yaml', 'yml', 'toml', 'ini', 'csv', 'log', 'env'];
+    if (['diff', 'patch'].includes(ext)) return content;
 
-    if (mode === 'basic' || textExts.includes(ext)) {
-        return content.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trimEnd().replace(/^\n+/, '');
+    const cacheKey = `${filename}:${mode}:${content.length}:${simpleHash(content)}`;
+    if (minifyCache.has(cacheKey)) {
+        return minifyCache.get(cacheKey);
     }
 
-    if (mode === 'aggressive') {
-        let result = content.replace(/\r\n/g, '\n');
+    const textExts = ['md', 'markdown', 'txt', 'json', 'yaml', 'yml', 'toml', 'ini', 'csv', 'log', 'env'];
 
-        if (['js', 'ts', 'jsx', 'tsx', 'css', 'scss', 'c', 'cpp', 'h', 'java', 'go', 'rs', 'swift', 'php'].includes(ext)) {
+    let result = content;
+    if (mode === 'basic' || textExts.includes(ext)) {
+        result = content.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trimEnd().replace(/^\n+/, '');
+    } else if (mode === 'aggressive') {
+        result = content.replace(/\r\n/g, '\n');
+
+        if (['js', 'mjs', 'cjs', 'ts', 'mts', 'cts', 'jsx', 'tsx', 'css', 'scss', 'c', 'cpp', 'h', 'java', 'go', 'rs', 'swift', 'php', 'cs', 'kt', 'dart', 'scala'].includes(ext)) {
             result = stripJsComments(result, ext);
         } else if (['py', 'sh', 'bash', 'rb'].includes(ext)) {
             result = stripHashComments(result, ext);
@@ -380,8 +410,13 @@ export function minifyCode(content, filename = '', mode = 'none') {
         } else {
             result = result.split('\n').map(l => l.trimEnd()).filter(l => l.trim().length > 0).join('\n');
         }
-        return result.trim();
+        result = result.trim();
     }
 
-    return content;
+    if (minifyCache.size >= MAX_CACHE_SIZE) {
+        const firstKey = minifyCache.keys().next().value;
+        minifyCache.delete(firstKey);
+    }
+    minifyCache.set(cacheKey, result);
+    return result;
 }

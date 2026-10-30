@@ -3,16 +3,17 @@
  */
 import { escapeXml, escapeCdata, stripXmlInvalidChars, getMarkdownFence } from './formatters.js';
 
-function formatNlpOverviewText(nlpData, selectedIssues) {
+function formatNlpOverviewText(nlpData, selectedIssues, scopeNumbers = null) {
     if (!nlpData || (!nlpData.clusters?.length && !nlpData.ngrams?.length)) return '';
-    const selectedSet = new Set(selectedIssues.map(i => i.number));
+    const selectedSet = new Set(scopeNumbers || selectedIssues.map(i => i.number));
     let lines = [];
 
     if (nlpData.clusters && nlpData.clusters.length > 0) {
-        lines.push('Topic Clusters (in selection / total scanned):');
+        let headerAdded = false;
         for (const c of nlpData.clusters) {
             const inSel = c.issueNumbers.filter(n => selectedSet.has(n));
             if (inSel.length > 0) {
+                if (!headerAdded) { lines.push('Topic Clusters (in selection / total scanned):'); headerAdded = true; }
                 const sampleRefs = inSel.slice(0, 8).map(n => `#${n}`).join(', ');
                 lines.push(`  - [${c.label}] (${inSel.length}/${c.count} issues): ${sampleRefs}${inSel.length > 8 ? '...' : ''}`);
             }
@@ -34,7 +35,7 @@ function formatNlpOverviewText(nlpData, selectedIssues) {
 
 export function formatIssuesClaudeXml(repoInfo, issues, options = {}) {
     const startIndex = options.startIndex || 1;
-    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues) : '';
+    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues, options.nlpScope) : '';
 
     const failedCount = issues.filter(i => i.commentsFetchFailed).length;
     const truncatedCount = issues.filter(i => i.commentsTruncated).length;
@@ -106,7 +107,7 @@ export function formatIssuesClaudeXml(repoInfo, issues, options = {}) {
 }
 
 export function formatIssuesMarkdown(repoInfo, issues, options = {}) {
-    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues) : '';
+    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues, options.nlpScope) : '';
     const failedCount = issues.filter(i => i.commentsFetchFailed).length;
     const truncatedCount = issues.filter(i => i.commentsTruncated).length;
 
@@ -161,7 +162,7 @@ export function formatIssuesMarkdown(repoInfo, issues, options = {}) {
 }
 
 export function formatIssuesGenericXml(repoInfo, issues, options = {}) {
-    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues) : '';
+    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues, options.nlpScope) : '';
     const failedCount = issues.filter(i => i.commentsFetchFailed).length;
     const truncatedCount = issues.filter(i => i.commentsTruncated).length;
 
@@ -204,7 +205,7 @@ export function formatIssuesGenericXml(repoInfo, issues, options = {}) {
 }
 
 export function formatIssuesJson(repoInfo, issues, options = {}) {
-    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues) : '';
+    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues, options.nlpScope) : '';
     const failedCount = issues.filter(i => i.commentsFetchFailed).length;
     const truncatedCount = issues.filter(i => i.commentsTruncated).length;
 
@@ -295,6 +296,48 @@ export function chunkIssuesOutput(format, repoInfo, issues, chunkTokenLimit, est
     }
     if (currentList.length > 0) {
         chunks.push({ issues: currentList, startIndex: currentStart });
+    }
+
+    // Re-check final chunk with instructions overhead
+    if (instructions && chunks.length > 0) {
+        let lastChunk = chunks[chunks.length - 1];
+        let lastOpts = {
+            ...options,
+            includeNlpSummary: chunks.length === 1 ? options.includeNlpSummary : false,
+            startIndex: lastChunk.startIndex,
+            instructions,
+            partNote: chunks.length > 1 ? `Part ${chunks.length} of ${chunks.length}.` : ''
+        };
+        let lastOutput = buildIssuesOutput(format, repoInfo, lastChunk.issues, lastOpts);
+
+        while (estimateTokensFn(lastOutput.text) > chunkTokenLimit) {
+            if (lastChunk.issues.length > 1) {
+                const spilled = lastChunk.issues.pop();
+                chunks.push({ issues: [spilled], startIndex: lastChunk.startIndex + lastChunk.issues.length });
+                lastChunk = chunks[chunks.length - 1];
+                lastOpts = {
+                    ...options,
+                    includeNlpSummary: false,
+                    startIndex: lastChunk.startIndex,
+                    instructions,
+                    partNote: `Part ${chunks.length} of ${chunks.length}.`
+                };
+                lastOutput = buildIssuesOutput(format, repoInfo, lastChunk.issues, lastOpts);
+            } else if (lastChunk.issues.length === 1) {
+                chunks.push({ issues: [], startIndex: lastChunk.startIndex + 1 });
+                lastChunk = chunks[chunks.length - 1];
+                lastOpts = {
+                    ...options,
+                    includeNlpSummary: false,
+                    startIndex: lastChunk.startIndex,
+                    instructions,
+                    partNote: `Part ${chunks.length} of ${chunks.length}.`
+                };
+                lastOutput = buildIssuesOutput(format, repoInfo, lastChunk.issues, lastOpts);
+            } else {
+                break;
+            }
+        }
     }
 
     const N = chunks.length;

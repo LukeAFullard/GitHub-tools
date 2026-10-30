@@ -35,7 +35,7 @@ export function extractIssueReferences(text, selfNumber = null) {
     const withoutComments = text.replace(/<!--[\s\S]*?-->/g, '');
     const withoutCode = withoutComments.replace(/```[\s\S]*?```|`[^`\n]+`/g, '');
     const refs = new Set();
-    const regex = /(?:^|[\s(])(?:#|GH-)(\d{1,6})\b/gi;
+    const regex = /(?<![\w/&])(?:#|GH-)(\d{1,6})\b/gi;
     let match;
     while ((match = regex.exec(withoutCode)) !== null) {
         const num = parseInt(match[1], 10);
@@ -60,6 +60,13 @@ export function sanitizeIssueText(rawText, options = {}, contextPath = 'issue') 
         isRedact = true
     } = options;
 
+    // Mask fenced code so template/image stripping never edits code samples
+    const fenceBlocks = [];
+    text = text.replace(/^([ \t]*)(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\1\2[ \t]*$/gm, (m) => {
+        fenceBlocks.push(m);
+        return `\uE000${fenceBlocks.length - 1}\uE001`;
+    });
+
     // 1. Strip HTML comments (issue template instructions) and normalize <details>
     if (stripTemplates) {
         text = text.replace(/<!--[\s\S]*?-->/g, '');
@@ -70,7 +77,7 @@ export function sanitizeIssueText(rawText, options = {}, contextPath = 'issue') 
     // 2. Strip images, GitHub asset links, video tags, and inline Base64 data URIs
     if (stripImages) {
         text = text.replace(/data:image\/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=]+/g, '[IMAGE_BASE64_STRIPPED]');
-        text = text.replace(/!\[([^\]]*)\]\((?:[^()\s]+|\([^()\s]*\))*\)/g, (_, alt) => {
+        text = text.replace(/!\[([^\]]*)\]\((?:[^()\n]|\([^()\n]*\))*\)/g, (_, alt) => {
             const cleanAlt = (alt || '').trim();
             return cleanAlt && cleanAlt.toLowerCase() !== 'image' ? `[Image: ${cleanAlt}]` : '[Image]';
         });
@@ -80,12 +87,14 @@ export function sanitizeIssueText(rawText, options = {}, contextPath = 'issue') 
         text = text.replace(/https:\/\/github\.com\/user-attachments\/assets\/[a-zA-Z0-9-]+/g, '[GitHub_Media_Attachment]');
     }
 
+    text = text.replace(/\uE000(\d+)\uE001/g, (_, i) => fenceBlocks[Number(i)]);
+
     // 3. Truncate massive fenced code blocks / stack traces / logs
     if (maxLogLines > 0) {
-        const keepHalf = Math.max(5, Math.floor(maxLogLines / 2));
+        const keepHalf = Math.max(1, Math.floor(maxLogLines / 2));
         text = text.replace(/^([ \t]*)(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)^\1\2[ \t]*$/gm, (full, indent, fence, info, body) => {
             const lines = body.replace(/\n$/, '').split('\n');
-            if (lines.length <= maxLogLines) return full;
+            if (lines.length <= Math.max(maxLogLines, keepHalf * 2)) return full;
             const head = lines.slice(0, keepHalf).join('\n');
             const tail = lines.slice(-keepHalf).join('\n');
             const omitted = lines.length - (keepHalf * 2);
@@ -95,7 +104,7 @@ export function sanitizeIssueText(rawText, options = {}, contextPath = 'issue') 
 
     // 4. Redact secrets using existing secrets.js engine
     if (isRedact) {
-        text = redactSecrets(text, contextPath, options);
+        text = redactSecrets(text, contextPath, { ...options, assumeConfig: true });
     }
 
     // 5. Collapse excessive blank lines

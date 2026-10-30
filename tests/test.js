@@ -542,6 +542,154 @@ test('tree: filtering updates tab stops so hidden tab-stop row transfers tabInde
     }
 });
 
+// --- Regression & Verification Tests for Review Findings ---
+
+test('issue-cleaner: titled image long URL and unclosed image performance', () => {
+    const longUrl = 'https://x.io/' + 'a'.repeat(60) + '.png "t"';
+    const inputTitled = `![s](${longUrl})`;
+    const start1 = Date.now();
+    const res1 = sanitizeIssueText(inputTitled, { stripImages: true });
+    const dur1 = Date.now() - start1;
+
+    assert.ok(dur1 < 50, `Titled image took ${dur1} ms (expected < 50 ms)`);
+    assert.equal(res1, '[Image: s]');
+
+    const unclosedInput = '![a](' + 'x'.repeat(100000);
+    const start2 = Date.now();
+    const res2 = sanitizeIssueText(unclosedInput, { stripImages: true });
+    const dur2 = Date.now() - start2;
+
+    assert.ok(dur2 < 50, `Unclosed image took ${dur2} ms (expected < 50 ms)`);
+});
+
+test('issue-cleaner: code fence is preserved and not altered by image/template stripping', () => {
+    const raw = "```html\n<!-- keep me -->\n<img src=\"a.png\" alt=\"logo\">\n<details><summary>x</summary>text</details>\n```";
+    const cleaned = sanitizeIssueText(raw, { stripTemplates: true, stripImages: true, maxLogLines: 0 });
+    assert.equal(cleaned, raw);
+});
+
+test('issue-cleaner: small maxLogLines truncates without negative count', () => {
+    const raw = "```log\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\n```";
+    const cleaned = sanitizeIssueText(raw, { maxLogLines: 6 });
+    assert.ok(cleaned.includes('lines of log/code truncated'));
+    assert.ok(!cleaned.includes('-'));
+});
+
+test('issue-formatters: export NLP only overview filtering with nlpScope', () => {
+    const repoInfo = { owner: 'owner', repo: 'repo' };
+    const nlpData = {
+        clusters: [
+            { label: 'Authentication', count: 5, issueNumbers: [1, 2, 3, 4, 5] },
+            { label: 'Database', count: 3, issueNumbers: [10, 11, 12] }
+        ]
+    };
+    const issues = []; // NLP export passes empty issues list
+    const chunks = chunkIssuesOutput('claude-xml', repoInfo, issues, 0, estimateTokens, {
+        includeNlpSummary: true,
+        nlpData,
+        nlpScope: [1, 2]
+    });
+
+    assert.equal(chunks.length, 1);
+    assert.ok(chunks[0].text.includes('Authentication'));
+    assert.ok(!chunks[0].text.includes('Database'));
+});
+
+test('secrets: unquoted env secrets in issues are redacted and benign lines untouched', () => {
+    const rawIssue = {
+        number: 12,
+        title: 'Crash report',
+        body: "```sh\nAPI_TOKEN=abcd1234efgh5678\nNODE_ENV=production\nPASSWORD_MIN_LENGTH=12\n```",
+        author: 'user',
+        authorAssociation: 'NONE',
+        createdAt: '2023-01-01'
+    };
+    const processed = processIssueThread(rawIssue, [], { isRedact: true, aggressiveRedact: true });
+    assert.ok(processed.cleanedBody.includes('[REDACTED:generic-secret]'));
+    assert.ok(!processed.cleanedBody.includes('abcd1234efgh5678'));
+    assert.ok(processed.cleanedBody.includes('NODE_ENV=production'));
+    assert.ok(processed.cleanedBody.includes('PASSWORD_MIN_LENGTH=12'));
+});
+
+test('issue-cleaner: cross-references extraction with lookbehind regex', () => {
+    const text = 'Refs #12,#13 and fixes:#15 and (#14). Also known as GH-99.';
+    const refs = extractIssueReferences(text);
+    assert.deepEqual(refs, [12, 13, 14, 15, 99]);
+});
+
+test('issue-formatters: chunking issues with large instructions budgets within chunk token limit', () => {
+    const repoInfo = { owner: 'owner', repo: 'repo' };
+    const issues = Array.from({ length: 6 }, (_, i) => ({
+        number: i + 1,
+        title: `Issue ${i + 1}`,
+        state: 'open',
+        author: 'user',
+        authorAssociation: 'MEMBER',
+        createdAt: '2023-01-01',
+        cleanedBody: `Detailed description for issue ${i + 1} `.repeat(40),
+        cleanedComments: []
+    }));
+    const instructions = 'Instructions '.repeat(100);
+    const limit = 1000;
+
+    const chunks = chunkIssuesOutput('claude-xml', repoInfo, issues, limit, estimateTokens, { instructions });
+    assert.ok(chunks.length > 1);
+
+    for (const c of chunks) {
+        assert.equal(c.exceedsLimit, false, 'No issue chunk part should exceed token limit');
+    }
+    assert.ok(chunks[chunks.length - 1].text.includes('Instructions '));
+});
+
+test('minifier: arrow function regex start, Ruby comments, and diff pass-through', () => {
+    const arrowJs = 'const fn = f => /^node_modules\\//.test(f.path);';
+    const minifiedJs = minifyCode(arrowJs, 'test.js', 'aggressive');
+    assert.ok(minifiedJs.includes('f => /^node_modules\\//.test(f.path)'));
+
+    const diffContent = '--- a/f.js\n+++ b/f.js\n@@ -1,2 +1,2 @@\n context line\n-old\n+new';
+    const minifiedDiff = minifyCode(diffContent, 'patch.diff', 'aggressive');
+    assert.equal(minifiedDiff, diffContent);
+
+    const rubyCode = 'str = "/foo#bar"\n# Line comment\nx = 1';
+    const minifiedRuby = minifyCode(rubyCode, 'app.rb', 'aggressive');
+    assert.ok(minifiedRuby.includes('str = "/foo#bar"'));
+    assert.ok(!minifiedRuby.includes('Line comment'));
+});
+
+test('github-issues-api: PR merged state mapped to stateReason completed', async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+        globalThis.fetch = async (url) => {
+            if (url.includes('/issues?')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => [
+                        {
+                            number: 10,
+                            title: 'Merged PR',
+                            state: 'closed',
+                            pull_request: { merged_at: '2023-01-02T00:00:00Z' },
+                            user: { login: 'author1' }
+                        }
+                    ]
+                };
+            }
+            return { ok: false, status: 404 };
+        };
+
+        const { fetchIssuesManifest } = await import('../js/github-issues-api.js');
+        const manifest = await fetchIssuesManifest('owner', 'repo', { itemType: 'prs' });
+
+        assert.equal(manifest.length, 1);
+        assert.equal(manifest[0].state, 'closed');
+        assert.equal(manifest[0].stateReason, 'completed');
+        assert.equal(manifest[0].mergedAt, '2023-01-02T00:00:00Z');
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 test('budget status logic for pre-build split and oversized split chunk', () => {
     function calcBudgetStatus(totalTokens, numChunks = 1, isPreBuild = false, maxChunkTokens = 0, hasOversizedChunk = false, currentBudgetWindow = 200000, chunkLimitVal = 0) {
         if (isPreBuild && chunkLimitVal > 0 && totalTokens > chunkLimitVal) {
