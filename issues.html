@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>GitHub Issues Context Packer &amp; Explorer</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/issues.css">
+</head>
+<body>
+
+<div class="app-container">
+    <!-- Top Header Bar -->
+    <header class="header-bar">
+        <div class="brand-With-Switcher">
+            <div class="brand-group">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+                <span class="brand-title">GitHub Context Tools</span>
+            </div>
+
+            <nav class="mode-switcher" aria-label="Tool mode">
+                <a href="index.html" id="switchToCodeLink" class="mode-tab">Code Packer</a>
+                <a href="issues.html" class="mode-tab active" aria-current="page">Issues Explorer</a>
+            </nav>
+        </div>
+
+        <nav class="step-indicator" aria-label="Progress steps">
+            <span id="step1" class="step-item active">1. Load Issues</span>
+            <span class="step-chevron" aria-hidden="true">&rsaquo;</span>
+            <span id="step2" class="step-item">2. Filter &amp; Triage</span>
+            <span class="step-chevron" aria-hidden="true">&rsaquo;</span>
+            <span id="step3" class="step-item">3. Pack Context</span>
+        </nav>
+
+        <div class="header-controls">
+            <div class="rate-badge" title="GitHub API Rate Limit Quota">
+                <span>API Quota:</span>
+                <b id="quotaVal" class="rate-normal">-- / --</b>
+                <span id="resetValContainer" style="color: var(--ink-soft); font-size: 0.75rem;">(Reset: <span id="resetVal">--:--</span>)</span>
+            </div>
+
+            <button id="themeToggleBtn" class="secondary btn-sm" aria-label="Toggle dark/light theme" title="Toggle theme">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="5"></circle>
+                    <line x1="12" y1="1" x2="12" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="23"></line>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                    <line x1="1" y1="12" x2="3" y2="12"></line>
+                    <line x1="21" y1="12" x2="23" y2="12"></line>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+            </button>
+
+            <button id="shareUrlBtn" class="secondary btn-sm" title="Copy Deep-Link URL">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                </svg>
+                <span>Share link</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Source Input Bar -->
+    <section class="source-bar">
+        <form id="sourceForm" class="source-form" onsubmit="return false;">
+            <div class="repo-input-wrapper">
+                <label for="repoUrl" style="font-size: 0.8125rem; font-weight: 600; color: var(--ink);">GitHub repository</label>
+                <div class="input-row">
+                    <input type="text" id="repoUrl" placeholder="owner/repo or https://github.com/owner/repo" value="">
+                    <button id="loadIssuesBtn" type="button" class="primary">Load issues</button>
+                    <button id="abortBtn" type="button" class="danger" style="display: none;">Cancel</button>
+                    <button id="optionsToggleBtn" type="button" class="options-toggle-btn" aria-expanded="false" aria-controls="optionsDrawer">
+                        <span>Sanitization &amp; Options</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    </button>
+                </div>
+                <div id="repoInputError" class="inline-error">Enter a repo as owner/name or a GitHub URL.</div>
+            </div>
+
+            <div class="branch-token-group">
+                <div class="option-field">
+                    <label for="maxIssuesLimit">Max issues to scan</label>
+                    <select id="maxIssuesLimit" style="max-width: 130px;">
+                        <option value="100">Latest 100</option>
+                        <option value="300" selected>Latest 300</option>
+                        <option value="500">Latest 500</option>
+                        <option value="1000">Latest 1,000</option>
+                    </select>
+                </div>
+                <div class="option-field">
+                    <label for="includePrs">Item type</label>
+                    <select id="includePrs" style="max-width: 140px;">
+                        <option value="issues" selected>Issues only</option>
+                        <option value="prs">Pull Requests only</option>
+                        <option value="both">Issues &amp; PRs</option>
+                    </select>
+                </div>
+                <div class="option-field">
+                    <label for="pat">GitHub token</label>
+                    <input type="password" id="pat" placeholder="ghp_... (Optional)" autocomplete="off" style="max-width: 170px;">
+                </div>
+            </div>
+        </form>
+    </section>
+
+    <!-- Collapsible Sanitization & Output Options Drawer -->
+    <div id="optionsDrawer" class="options-drawer">
+        <div class="option-field">
+            <label for="format">Output format</label>
+            <select id="format">
+                <option value="claude-xml">Anthropic Claude XML</option>
+                <option value="markdown">Markdown Threads</option>
+                <option value="generic-xml">Generic XML (CDATA)</option>
+                <option value="json">Structured JSON</option>
+            </select>
+        </div>
+
+        <div class="option-field">
+            <label for="commentScope">Comment inclusion</label>
+            <select id="commentScope">
+                <option value="all" selected>All human comments</option>
+                <option value="maintainers">Maintainers &amp; Author only</option>
+                <option value="none">Issue bodies only (Fastest, 0 extra API calls)</option>
+            </select>
+        </div>
+
+        <div class="option-field">
+            <label for="maxLogLines">Truncate code/logs over (lines)</label>
+            <input type="number" id="maxLogLines" value="40" min="0" max="500" title="0 = Do not truncate">
+        </div>
+
+        <div class="option-field">
+            <label for="chunkLimit">Split into parts of N tokens</label>
+            <input type="number" id="chunkLimit" value="0" min="0" step="10000" placeholder="0 = Single file">
+        </div>
+
+        <div class="option-field">
+            <label class="checkbox-label"><input type="checkbox" id="stripImages" checked> <span>Strip images, videos &amp; Base64 media</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="filterBots" checked> <span>Exclude bot comments (dependabot, actions, etc.)</span></label>
+        </div>
+
+        <div class="option-field">
+            <label class="checkbox-label"><input type="checkbox" id="filterNoise" checked> <span>Filter "+1", "me too", &amp; low-signal replies</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="includeNlpSummary" checked> <span>Include NLP Topic &amp; N-Gram overview in output</span></label>
+        </div>
+
+        <div class="option-field">
+            <label class="checkbox-label"><input type="checkbox" id="redactSecrets" checked> <span>Redact secrets in issue bodies &amp; comments</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="stripTemplates" checked> <span>Strip HTML boilerplate &amp; template comments</span></label>
+        </div>
+
+        <div class="option-field full-width">
+            <div class="field-label-row">
+                <label for="aiInstructions">Instructions for the AI (optional)</label>
+                <span id="instructionsCharCount" class="char-count">0 chars</span>
+            </div>
+            <textarea id="aiInstructions" rows="2" placeholder="e.g. Identify the root cause of these bug reports and propose a fix..."></textarea>
+            <div class="instructions-toolbar">
+                <div class="preset-buttons">
+                    <span class="preset-label">Presets:</span>
+                    <button type="button" class="preset-btn btn-xs" data-instruction="Synthesize the top user pain points, recurring bugs, and feature requests from these issues.">Triage &amp; Pain Points</button>
+                    <button type="button" class="preset-btn btn-xs" data-instruction="Analyze these bug reports, identify likely shared root causes, and suggest debugging steps.">Root Cause Analysis</button>
+                    <button type="button" class="preset-btn btn-xs" data-instruction="Identify duplicate issues, overlapping discussions, and draft a release roadmap.">Find Duplicates &amp; Roadmap</button>
+                </div>
+                <button type="button" id="clearInstructionsBtn" class="secondary btn-xs">Clear</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Collapsible NLP Insights & Topic Modeling Bar -->
+    <section id="nlpBanner" class="nlp-banner" style="display: none;" aria-label="NLP Topic Modeling and N-Grams">
+        <div class="nlp-header">
+            <div class="nlp-title-group">
+                <span class="nlp-title">NLP Topic Clusters &amp; N-Grams</span>
+                <span id="nlpMetaBadge" class="char-count">Analyzed 0 issues</span>
+            </div>
+            <div class="nlp-actions">
+                <button type="button" id="clearNlpFilterBtn" class="secondary btn-xs" style="display: none;">Clear topic filter</button>
+                <button type="button" id="selectActiveTopicBtn" class="primary btn-xs" style="display: none;">Select all in topic</button>
+                <button type="button" id="toggleNlpCollapseBtn" class="secondary btn-xs">Hide insights</button>
+            </div>
+        </div>
+
+        <div id="nlpBody" class="nlp-body">
+            <div class="nlp-column">
+                <div class="nlp-section-label">Discovered Topic Clusters (TF-IDF + Cosine K-Means)</div>
+                <div id="topicClustersContainer" class="pill-container"></div>
+            </div>
+            <div class="nlp-column">
+                <div class="nlp-section-label">Top Recurring Phrases (Bigrams &amp; Trigrams)</div>
+                <div id="ngramsContainer" class="pill-container"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Budget Meter Banner -->
+    <section class="budget-banner" aria-label="Context Budget Meter">
+        <div class="budget-header">
+            <div class="budget-numbers">
+                <span id="statTokens" class="budget-hero-number">0</span>
+                <span id="targetBudgetDisplay" class="budget-target-label">of 200,000 estimated tokens</span>
+            </div>
+
+            <div class="budget-presets">
+                <span style="font-size: 0.8125rem; color: var(--ink-soft); margin-right: 0.25rem;">Target budget:</span>
+                <button type="button" class="preset-btn" data-preset="100000">100k</button>
+                <button type="button" class="preset-btn" data-preset="200000">200k</button>
+                <button type="button" class="preset-btn" data-preset="1000000">1M</button>
+            </div>
+        </div>
+
+        <div class="budget-track">
+            <div id="budgetFill" class="budget-fill fits"></div>
+        </div>
+
+        <div class="budget-status-row">
+            <span id="budgetStatusText" class="budget-status-text status-fits">Fits context window</span>
+            <div style="font-family: var(--font-mono); font-size: 0.78125rem;">
+                <span>Parts: <b id="statChunks">0</b></span>
+                <span style="margin-left: 0.75rem;">Issues: <b id="statIssues">0</b></span>
+                <span style="margin-left: 0.75rem;">Comments: <b id="statComments">0</b></span>
+                <span style="margin-left: 0.75rem;">Chars: <b id="statChars">0</b></span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Mobile Segmented Control -->
+    <div class="segmented-control" role="tablist">
+        <button id="tabIssuesBtn" class="segmented-btn active" role="tab" aria-selected="true" aria-controls="issuesCard">Issues</button>
+        <button id="tabOutputBtn" class="segmented-btn" role="tab" aria-selected="false" aria-controls="outputCard">Output</button>
+    </div>
+
+    <!-- Main Workspace Panes (Issues List | Output) -->
+    <main class="workspace-panes">
+        <!-- Left Pane: Issues Explorer & Filters -->
+        <section class="pane active-mobile" id="issuesCard" role="tabpanel" aria-labelledby="tabIssuesBtn">
+            <div class="pane-header">
+                <span class="pane-title">Issues</span>
+                <span id="selectedTokensBadge" class="badge" style="font-family: var(--font-mono); font-size: 0.78125rem; color: var(--ink-soft);">0 selected (~0 body tokens)</span>
+            </div>
+
+            <!-- Multi-dimensional Filter Controls -->
+            <div class="issues-filter-panel">
+                <div class="tree-search-bar" style="padding: 0; border: none;">
+                    <div class="search-input-wrapper">
+                        <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <input type="text" id="issueSearchInput" placeholder="Search title, body, #number, author...">
+                    </div>
+                    <span id="searchMatchCount" class="search-count"></span>
+                </div>
+
+                <div class="filter-controls-grid">
+                    <select id="stateFilter" aria-label="Filter by issue state">
+                        <option value="all">State: All</option>
+                        <option value="open">State: Open only</option>
+                        <option value="closed">State: Closed (All)</option>
+                        <option value="completed">Closed: Completed</option>
+                        <option value="not_planned">Closed: Not Planned</option>
+                    </select>
+
+                    <select id="labelFilter" aria-label="Filter by label">
+                        <option value="">Label: All labels</option>
+                    </select>
+
+                    <select id="sortFilter" aria-label="Sort issues">
+                        <option value="newest">Sort: Newest first</option>
+                        <option value="oldest">Sort: Oldest first</option>
+                        <option value="comments">Sort: Most comments</option>
+                        <option value="reactions">Sort: Most reactions (👍)</option>
+                    </select>
+                </div>
+
+                <div class="filter-dates-row">
+                    <label>Created from <input type="date" id="dateFromFilter"></label>
+                    <label>to <input type="date" id="dateToFilter"></label>
+                    <label title="Minimum comments"><span style="color:var(--ink-soft);">Min 💬</span> <input type="number" id="minCommentsFilter" value="0" min="0" max="500" style="width:52px;"></label>
+                </div>
+            </div>
+
+            <!-- Selection Toolbar -->
+            <div class="tree-toolbar">
+                <button id="selectAllVisibleBtn" class="secondary btn-xs">Select visible</button>
+                <button id="deselectAllBtn" class="secondary btn-xs">Deselect all</button>
+                <button id="selectLinkedBtn" class="secondary btn-xs" title="Select issues referenced via #number in currently selected issues">Select linked (#refs)</button>
+                <button id="exportNlpOnlyBtn" class="secondary btn-xs" style="margin-left: auto;" title="Build an LLM summary of topics and issue counts without fetching full threads">Summary only</button>
+            </div>
+
+            <!-- Issue Rows Viewport -->
+            <div class="tree-viewport" id="issuesViewport">
+                <div id="issuesEmptyState" class="empty-state">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                    <p>Load a repository to explore, cluster, and pack its GitHub issues.</p>
+                </div>
+                <ul class="issues-list" id="issuesListContainer" style="display: none;"></ul>
+            </div>
+
+            <div class="pane-footer">
+                <button id="buildContextBtn" class="primary btn-full"><span>Fetch threads &amp; build context</span></button>
+            </div>
+        </section>
+
+        <!-- Right Pane: Output & Secrets Warning -->
+        <section class="pane" id="outputCard" role="tabpanel" aria-labelledby="tabOutputBtn">
+            <div class="pane-header">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span class="pane-title">Output</span>
+                    <label for="chunkSelect" id="chunkSelectLabel" style="display:none; font-size: 0.8125rem;">Part:</label>
+                    <select id="chunkSelect" style="display:none; padding: 0.2rem 0.4rem; font-size: 0.8125rem; font-family: var(--font-mono);"></select>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 0.4rem;">
+                    <button id="wrapToggleBtn" class="secondary btn-sm" title="Toggle line wrapping">Wrap</button>
+                    <button id="copyBtn" class="primary btn-sm" disabled>Copy</button>
+                    <button id="downloadBtn" class="secondary btn-sm" disabled>Download</button>
+                    <button id="downloadAllBtn" class="secondary btn-sm" style="display:none;">Download all parts</button>
+                </div>
+            </div>
+
+            <div class="output-viewport">
+                <!-- Secrets Warning Panel -->
+                <div id="secretsWarningPanel" class="secrets-warning-panel" role="status" aria-live="polite" style="display: none;">
+                    <div class="secrets-warning-header">
+                        <div class="secrets-warning-title">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                                <line x1="12" y1="9" x2="12" y2="13"></line>
+                                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                            </svg>
+                            <span id="secretsWarningSummary">0 possible secrets in 0 issues.</span>
+                        </div>
+                        <button type="button" id="excludeAllSecretsBtn" class="danger btn-xs">Deselect flagged issues</button>
+                    </div>
+                    <div class="secrets-list-wrapper">
+                        <table class="secrets-table">
+                            <thead>
+                                <tr>
+                                    <th>Issue</th>
+                                    <th>Type</th>
+                                    <th>Line</th>
+                                    <th>Preview</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="secretsTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="previewNotice" class="preview-notice">
+                    Preview shows the first 45,000 characters. Copy and Download include everything.
+                </div>
+
+                <div id="outputEmptyState" class="empty-state">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    <p>Select issues on the left and click "Fetch threads &amp; build context".</p>
+                </div>
+                <textarea id="previewArea" class="preview wrap" readonly style="display: none;"></textarea>
+            </div>
+        </section>
+    </main>
+
+    <!-- Terminal Activity Log -->
+    <section class="log-card">
+        <div id="logHeader" class="log-header">
+            <span id="logSummary" class="log-summary-text">Ready</span>
+            <button id="logToggleBtn" class="secondary btn-xs" type="button">Details</button>
+        </div>
+        <div class="progress-track" id="progressTrack" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div id="log"></div>
+    </section>
+
+    <!-- Mobile Sticky Action Bar -->
+    <div id="stickyActionBar" class="sticky-action-bar">
+        <button id="mobilePrimaryBtn" class="primary btn-full">Load issues</button>
+    </div>
+
+    <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+</div>
+
+<script type="module" src="js/issues-app.js"></script>
+</body>
+</html>

@@ -1,11 +1,16 @@
-# GitHub Repo Context Packer
+# GitHub Repo Context Packer & Issues Explorer
 
-A zero-install, 100% client-side web application that fetches, filters, and formats source code from any public or private GitHub repository into an LLM-ready context file (Claude XML, Markdown, Generic XML, or JSON).
+A zero-install, 100% client-side web application that fetches, filters, cleans, and formats source code and issue threads from any public or private GitHub repository into an LLM-ready context file (Claude XML, Markdown, Generic XML, or JSON).
 
 ## Features
 
 - **100% Client-Side Privacy:** Direct browser-to-GitHub API connection. Personal Access Tokens (PATs) and fine-grained PATs (`github_pat_`) remain strictly in memory.
-- **Interactive File Selection:** Renders an interactive pre-download directory tree to select or deselect files and folders before fetching contents.
+- **Dual Tool Modes:** Switch seamlessly between **Code Packer** (source tree packaging) and **Issues Explorer** (issue thread triage & context packaging).
+- **Interactive File Selection & Issue Filtering:**
+  - **Code Packer:** Interactive directory tree to select or deselect files and folders before fetching contents.
+  - **Issues Explorer:** Multi-dimensional filters (state, labels, dates, comment counts, search, and cross-referenced `#refs`).
+- **NLP Topic Clustering & N-Grams:** Client-side Web Worker powered TF-IDF cosine K-Means topic clustering and bigram/trigram phrase extraction for issues triage.
+- **Noise Cleanup & Sanitization:** Automatically strips bot comments, low-signal replies ("+1", "me too"), images/base64 attachments, template boilerplate, and truncates massive log traces.
 - **Context Chunking & Token Splitting:** Automatically splits large output context bundles into sequential multi-part chunks when exceeding a specified token limit (e.g. 100k tokens).
 - **Background Web Worker Tokenization:** Offloads BPE token estimation to a Web Worker thread for seamless background processing.
 - **Code Minification & Whitespace Stripping:** Optional code minification (Basic: whitespace & blank line cleanup; Aggressive: language-aware comment removal and full blank-line stripping) to maximize token efficiency.
@@ -53,15 +58,22 @@ Navigate to `http://localhost:8000` in your web browser.
 
 ```
 .
-├── index.html          # Web interface
+├── index.html          # Code Packer Web interface
+├── issues.html         # GitHub Issues Explorer Web interface
 ├── css/
+│   ├── issues.css      # Issues explorer & mode switcher UI styling
 │   └── style.css       # Clean, modern UI styling
 └── js/
-    ├── app.js          # Core application controller and UI event wiring
+    ├── app.js          # Core Code Packer controller and UI event wiring
     ├── config.js       # Global constants, default ignore lists, API endpoints
-    ├── formatters.js   # LLM context output formatters (XML, MD, JSON)
+    ├── formatters.js   # Code LLM context output formatters (XML, MD, JSON)
     ├── github-api.js   # GitHub API fetch logic & rate-limit handling
+    ├── github-issues-api.js # GitHub Issues & comments API client
+    ├── issue-cleaner.js # Issue sanitization, bot filtering, log truncation engine
+    ├── issue-formatters.js # Issue LLM context output formatters & chunking
+    ├── issues-app.js   # Controller for issues.html UI
     ├── minifier.js     # Code minification & comment stripping engine
+    ├── nlp.worker.js   # Web Worker for N-grams & TF-IDF Cosine K-Means clustering
     ├── secrets.js      # Client-side secret scanning and redaction engine
     ├── tokenizer.js    # BPE regex token estimator
     ├── tokenizer.worker.js # Web Worker background tokenization
