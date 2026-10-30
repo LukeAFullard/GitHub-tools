@@ -718,15 +718,19 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
         return;
     }
 
+    const totalChars = newChunks.reduce((acc, c) => acc + c.text.length, 0);
+    const chunkTokensPromises = newChunks.map(c => estimateTokensAsync(c.text));
+    const chunkTokensList = await Promise.all(chunkTokensPromises);
+
+    if (thisRepackGen !== repackGeneration) {
+        return;
+    }
+
     generatedChunks = newChunks;
     activeChunkIndex = 0;
     packedOutputText = newPackedOutputText;
     outputExt = firstChunk.ext;
     outputMime = firstChunk.mime;
-
-    const totalChars = newChunks.reduce((acc, c) => acc + c.text.length, 0);
-    const chunkTokensPromises = newChunks.map(c => estimateTokensAsync(c.text));
-    const chunkTokensList = await Promise.all(chunkTokensPromises);
     totalTokensAllChunks = chunkTokensList.reduce((a, b) => a + b, 0);
 
     let maxChunkTokens = 0;
@@ -1190,7 +1194,6 @@ dom.packBtn.addEventListener('click', async () => {
                 } else {
                     log(`[ERROR] Delta fetch error: ${err.message || err}`);
                 }
-                decrementActiveFetches();
             });
             return deltaFetchQueue;
         }
@@ -1421,7 +1424,9 @@ dom.downloadAllBtn.addEventListener('click', async () => {
 dom.copyBtn.addEventListener('click', async () => {
     try {
         await navigator.clipboard.writeText(packedOutputText);
-        showToast("Copied context to clipboard!", "info");
+        const numParts = generatedChunks.length;
+        const partInfo = numParts > 1 ? ` (part ${activeChunkIndex + 1} of ${numParts})` : '';
+        showToast(`Copied context to clipboard${partInfo}!`, "info");
         const originalText = dom.copyBtn.textContent;
         dom.copyBtn.textContent = 'Copied!';
         setTimeout(() => { dom.copyBtn.textContent = originalText; }, 2000);

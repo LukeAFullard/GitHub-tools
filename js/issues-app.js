@@ -10,7 +10,9 @@ import { estimateTokens, estimateTokensAsync } from './tokenizer.js';
 import { scanForSecrets } from './secrets.js';
 import { switchTab } from './ui-tabs.js';
 
-let abortController = null;
+let loadController = null;
+let buildController = null;
+let lastBuildSummaryOnly = false;
 let allIssues = [];
 let selectedIssueNumbers = new Set();
 let cachedCommentsByIssue = new Map();
@@ -533,8 +535,12 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
         return;
     }
 
-    if (abortController) abortController.abort();
-    abortController = new AbortController();
+    if (loadController) loadController.abort();
+    if (buildController) buildController.abort();
+    loadController = new AbortController();
+    buildGeneration++;
+
+    dom.buildContextBtn.disabled = false;
 
     currentRepoInfo = repoInfo;
     allIssues = [];
@@ -561,7 +567,7 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
             maxItems,
             itemType,
             pat,
-            signal: abortController.signal,
+            signal: loadController.signal,
             onHeaders: updateRateLimitUI,
             onProgress: (loaded, total) => updateProgressBar((loaded / total) * 100)
         });
@@ -606,6 +612,7 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
 async function buildSelectedContext(summaryOnly = false) {
     if (!currentRepoInfo || allIssues.length === 0) return;
 
+    lastBuildSummaryOnly = summaryOnly;
     buildGeneration++;
     const thisBuildGen = buildGeneration;
 
@@ -629,9 +636,9 @@ async function buildSelectedContext(summaryOnly = false) {
                 showToast(`Fetching comments needs ~${missingComments.length} requests; only ${lastRateLimitRemaining} quota left. Add a GitHub token to raise limit.`, 'warn');
             }
 
-            if (abortController) abortController.abort();
-            abortController = new AbortController();
-            const myController = abortController;
+            if (buildController) buildController.abort();
+            buildController = new AbortController();
+            const myController = buildController;
             dom.abortBtn.style.display = 'inline-flex';
             dom.buildContextBtn.disabled = true;
             dom.progressTrack.style.display = 'block';
@@ -641,9 +648,13 @@ async function buildSelectedContext(summaryOnly = false) {
                 log(`[FETCH] Fetching comment threads for ${missingComments.length} issue(s)...`);
                 const { commentsByIssue: fetchedMap, failures } = await fetchCommentsForIssues(currentRepoInfo.owner, currentRepoInfo.repo, missingComments, {
                     pat,
-                    signal: abortController.signal,
+                    signal: buildController.signal,
                     onHeaders: updateRateLimitUI,
-                    onProgress: (done, total) => updateProgressBar((done / total) * 100)
+                    onProgress: (done, total) => updateProgressBar((done / total) * 100),
+                    onThread: (num, comms) => {
+                        cachedCommentsByIssue.set(num, comms);
+                        fetchFailuresMap.delete(num);
+                    }
                 });
                 for (const [num, comms] of fetchedMap.entries()) {
                     cachedCommentsByIssue.set(num, comms);
@@ -665,7 +676,7 @@ async function buildSelectedContext(summaryOnly = false) {
                 log(`[ERROR] Comment fetch error: ${err.message}`);
                 showToast(err.message, 'error');
             } finally {
-                if (abortController === myController) {
+                if (buildController === myController) {
                     dom.buildContextBtn.disabled = false;
                     dom.abortBtn.style.display = 'none';
                 }
@@ -692,7 +703,7 @@ async function buildSelectedContext(summaryOnly = false) {
     for (const iss of targetIssues) {
         const rawComms = cachedCommentsByIssue.get(iss.number) || [];
         const combinedRaw = `${iss.body}\n` + rawComms.map(c => c.body).join('\n');
-        const findings = scanForSecrets(`Issue #${iss.number}`, combinedRaw);
+        const findings = scanForSecrets(`issue-${iss.number}`, combinedRaw, { assumeConfig: true });
         if (findings.length > 0) {
             flaggedNumbers.add(iss.number);
             for (const f of findings) {
@@ -722,7 +733,8 @@ async function buildSelectedContext(summaryOnly = false) {
     const formatOptions = {
         instructions: dom.aiInstructions.value,
         includeNlpSummary: summaryOnly ? true : dom.includeNlpSummary.checked,
-        nlpData: nlpResults
+        nlpData: nlpResults,
+        nlpScope: targetIssues.map(i => i.number)
     };
 
     generatedChunks = chunkIssuesOutput(
@@ -854,11 +866,14 @@ function updateSecretsPanel(rows, flaggedNumbers) {
 
 dom.buildContextBtn.addEventListener('click', () => buildSelectedContext(false));
 dom.exportNlpOnlyBtn.addEventListener('click', () => buildSelectedContext(true));
-dom.abortBtn.addEventListener('click', () => { if (abortController) abortController.abort(); });
+dom.abortBtn.addEventListener('click', () => {
+    if (loadController) loadController.abort();
+    if (buildController) buildController.abort();
+});
 
 [dom.format, dom.commentScope, dom.maxLogLines, dom.chunkLimit, dom.stripImages, dom.filterBots, dom.filterNoise, dom.includeNlpSummary, dom.redactSecrets, dom.aggressiveRedact, dom.stripTemplates].forEach(el => {
     if (el) el.addEventListener('change', () => {
-        if (currentAppState === 'built') buildSelectedContext(false);
+        if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
     });
 });
 

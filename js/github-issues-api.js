@@ -78,11 +78,18 @@ export async function fetchIssuesManifest(owner, repo, options = {}) {
             if (itemType === 'issues' && isPr) continue;
             if (itemType === 'prs' && !isPr) continue;
 
+            const mergedAt = raw.pull_request ? raw.pull_request.merged_at : null;
+            let stateReason = raw.state_reason || null;
+            if (isPr && mergedAt) {
+                stateReason = 'completed';
+            }
+
             collected.push({
                 number: raw.number,
                 title: raw.title || '',
                 state: raw.state || 'open',
-                stateReason: raw.state_reason || null,
+                stateReason,
+                mergedAt,
                 isPullRequest: isPr,
                 author: raw.user ? raw.user.login : 'ghost',
                 authorType: raw.user ? raw.user.type : 'User',
@@ -130,6 +137,7 @@ export async function fetchCommentsForIssues(owner, repo, selectedIssues, option
         signal,
         onHeaders,
         onProgress,
+        onThread,
         throttleMs = 60,
         maxCommentPages = 10
     } = options;
@@ -165,6 +173,9 @@ export async function fetchCommentsForIssues(owner, repo, selectedIssues, option
                 }));
                 if (truncated) formatted.truncated = true;
                 commentsByIssue.set(current.number, formatted);
+                if (onThread) {
+                    try { onThread(current.number, formatted); } catch (_) {}
+                }
             } catch (err) {
                 if (err.name === 'AbortError') throw err;
                 failures.push({ number: current.number, error: err.message || String(err) });
