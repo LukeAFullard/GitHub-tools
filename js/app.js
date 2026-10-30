@@ -1112,6 +1112,7 @@ dom.packBtn.addEventListener('click', async () => {
                 dom.progressTrack.style.display = 'block';
                 updateProgressBar(0);
                 let completedDelta = 0;
+                let deltaFailedCount = 0;
 
                 try {
                     async function worker() {
@@ -1155,6 +1156,7 @@ dom.packBtn.addEventListener('click', async () => {
                                 if (result && result.status === 404) {
                                     cachedSkippedPaths.add(node.path);
                                 }
+                                deltaFailedCount++;
                                 log(`[ERROR] Failed to fetch delta ${node.path}${result && result.error ? `: ${result.error}` : ''}`);
                             }
 
@@ -1173,6 +1175,11 @@ dom.packBtn.addEventListener('click', async () => {
                     if (thisGen === currentGeneration) {
                         const newlyFetched = results.filter(Boolean);
                         updateCachedRawFiles(newlyFetched);
+                        if (deltaFailedCount > 0) {
+                            cachedFailedCount += deltaFailedCount;
+                            log(`[WARN] ${deltaFailedCount} newly checked file(s) failed to download.`);
+                            showToast(`${deltaFailedCount} newly checked file(s) failed to download.`, "warn");
+                        }
                     }
                 } finally {
                     decrementActiveFetches();

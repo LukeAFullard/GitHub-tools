@@ -164,6 +164,9 @@ export function processIssueThread(issue, rawComments = [], options = {}) {
         labels,
         cleanedBody,
         relatedIssues: relatedList,
-        cleanedComments: keptComments
+        cleanedComments: keptComments,
+        commentsFetchFailed: Boolean(options.commentsFetchFailed || issue.commentsFetchFailed),
+        commentsFetchError: options.commentsFetchError || issue.commentsFetchError || null,
+        commentsTruncated: Boolean(options.commentsTruncated || issue.commentsTruncated || rawComments.truncated)
     };
 }
