@@ -3,8 +3,6 @@
  * Zero DOM dependencies for Node unit testing compatibility.
  */
 
-const SCAN_MAX_BYTES = 204800; // Cap per-file scan to 200 KB
-
 const SENSITIVE_FILENAME_EXACT = new Set([
     '.env',
     'id_rsa',
@@ -149,7 +147,7 @@ function findMatchesInternal(path, content) {
 
     if (!content) return specificResults;
 
-    const scanContent = content.length > SCAN_MAX_BYTES ? content.slice(0, SCAN_MAX_BYTES) : content;
+    const scanContent = content;
 
     const PATTERNS = [
         {
@@ -179,7 +177,7 @@ function findMatchesInternal(path, content) {
         },
         {
             type: 'pem-key',
-            regex: /-----BEGIN [A-Z0-9_ ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9_ ]*PRIVATE KEY-----/g,
+            regex: /-----BEGIN [A-Z0-9_ ]*PRIVATE KEY-----(?:(?!-----BEGIN)[\s\S])*?-----END [A-Z0-9_ ]*PRIVATE KEY-----/g,
             check: (m) => !isPlaceholder(m[0])
         },
         {
@@ -189,17 +187,23 @@ function findMatchesInternal(path, content) {
         },
         {
             type: 'anthropic-key',
-            regex: /sk-ant-[a-zA-Z0-9_\-]{20,100}\b/g,
+            regex: /(?<![A-Za-z0-9_-])sk-ant-[a-zA-Z0-9_\-]{20,100}\b/g,
             check: (m) => !isPlaceholder(m[0])
         },
         {
             type: 'openai-key',
-            regex: /sk-(?!ant-)[a-zA-Z0-9_\-]{20,100}\b/g,
-            check: (m) => !isPlaceholder(m[0])
+            regex: /(?<![A-Za-z0-9_-])sk-(?!ant-)(?:proj-)?[a-zA-Z0-9_\-]{20,100}\b/g,
+            check: (m) => {
+                if (isPlaceholder(m[0])) return false;
+                if (m[0].length < 32) return false;
+                if (/^sk-(?:proj-)?[a-z0-9-]+$/.test(m[0]) && !/[0-9_]/.test(m[0]) && getCharacterClassCount(m[0]) < 2) return false;
+                if (calculateEntropy(m[0]) < 3.0) return false;
+                return true;
+            }
         },
         {
             type: 'generic-secret',
-            regex: /(?:password|passwd|secret|token|api_key|apikey|auth)\s*[:=]\s*(["'])([^"'\r\n]{8,})\1/gi,
+            regex: /(?:(?:["']?\b|\b["'])[A-Za-z0-9_]*(?:password|passwd|secret|token|api_key|apikey|auth)[A-Za-z0-9_]*["']?)\s*[:=]\s*(["'])([^"'\r\n]{8,})\1/gi,
             check: (m) => {
                 const val = m[2];
                 if (isPlaceholder(val)) return false;
@@ -210,6 +214,20 @@ function findMatchesInternal(path, content) {
             getValue: (m) => m[2],
             getIndex: (m) => m.index + m[0].lastIndexOf(m[2]),
             getLength: (m) => m[2].length
+        },
+        {
+            type: 'generic-secret',
+            regex: /(?:(?:["']?\b|\b["'])[A-Za-z0-9_]*(?:password|passwd|secret|token|api_key|apikey|auth)[A-Za-z0-9_]*["']?)\s*[:=]\s*([^\s"'#;\r\n]{8,})/gi,
+            check: (m) => {
+                const val = m[1];
+                if (isPlaceholder(val)) return false;
+                if (getCharacterClassCount(val) < 2) return false;
+                if (calculateEntropy(val) < 2.5) return false;
+                return true;
+            },
+            getValue: (m) => m[1],
+            getIndex: (m) => m.index + m[0].lastIndexOf(m[1]),
+            getLength: (m) => m[1].length
         }
     ];
 
@@ -271,6 +289,10 @@ export function scanForSecrets(path, content) {
  * @returns {string} Content with secrets redacted.
  */
 export function redactSecrets(content, path) {
+    if (path && isSensitiveFilename(path)) {
+        return '[REDACTED:sensitive-file]';
+    }
+
     if (!content) return content || '';
 
     const matches = findMatchesInternal(path, content).filter(m => m.type !== 'sensitive-file');

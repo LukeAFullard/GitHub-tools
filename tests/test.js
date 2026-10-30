@@ -629,10 +629,29 @@ test('secrets: true positive and near-miss for each pattern detector', () => {
     const oaiNear = scanForSecrets('app.js', 'const key = "sk-your_openai_key_xxxx";');
     assert.equal(oaiNear.length, 0);
 
-    // Generic
+    // OpenAI non-matches for normal kebab-case text
+    const kebab1 = scanForSecrets('app.js', '<div class="disk-usage-monitoring-panel">');
+    assert.equal(kebab1.filter(f => f.type === 'openai-key').length, 0);
+
+    const kebab2 = scanForSecrets('app.js', 'const doc = "risk-assessment-framework-document";');
+    assert.equal(kebab2.filter(f => f.type === 'openai-key').length, 0);
+
+    const kebab3 = scanForSecrets('app.js', 'const t = "task-mask-desk-flask-cask-bask-desk-task";');
+    assert.equal(kebab3.filter(f => f.type === 'openai-key').length, 0);
+
+    // Generic (Quoted & Unquoted)
     const genPos = scanForSecrets('config.js', 'password = "aB3$k9P1zX7!"');
     assert.equal(genPos.length, 1);
     assert.equal(genPos[0].type, 'generic-secret');
+
+    const genJsonPos = scanForSecrets('config.json', '{"password": "Zx9!kLm2Qr8w"}');
+    assert.equal(genJsonPos.filter(f => f.type === 'generic-secret').length, 1);
+
+    const genSuffixPos = scanForSecrets('config.py', 'SECRET_KEY = "Zx9kLm2Qr8wTv7"');
+    assert.equal(genSuffixPos.filter(f => f.type === 'generic-secret').length, 1);
+
+    const genUnquotedPos = scanForSecrets('.env', 'DB_PASSWORD=Zx9kLm2Qr8wTv7');
+    assert.equal(genUnquotedPos.filter(f => f.type === 'generic-secret').length, 1);
 
     const genNear = scanForSecrets('config.js', 'password = "your_password"');
     assert.equal(genNear.length, 0);
@@ -771,6 +790,27 @@ test('secrets: long single-line input scans in under 1 second', () => {
     assert.ok(duration < 1000, `Scan took ${duration} ms (expected < 1000 ms)`);
 });
 
+test('secrets: sensitive file content is fully redacted', () => {
+    const redactedEnv = redactSecrets('API_KEY=abc123XYZ789def456', '.env');
+    assert.equal(redactedEnv, '[REDACTED:sensitive-file]');
+
+    const redactedPem = redactSecrets('some private key content', 'server.key');
+    assert.equal(redactedPem, '[REDACTED:sensitive-file]');
+});
+
+test('secrets: scans beyond 200 KB in file', () => {
+    const padding = 'x'.repeat(210000);
+    const secret = 'AKIA' + '1234567890ABCDEF';
+    const content = padding + ' const k = "' + secret + '";';
+
+    const findings = scanForSecrets('large.txt', content);
+    assert.equal(findings.filter(f => f.type === 'aws-key').length, 1);
+
+    const redacted = redactSecrets(content, 'large.txt');
+    assert.ok(redacted.includes('[REDACTED:aws-key]'));
+    assert.ok(!redacted.includes(secret));
+});
+
 test('secrets: overlapping secret redaction does not corrupt output', () => {
     // Overlapping specific pattern or multiple secrets
     const skKey = 'sk-proj-' + '1234567890abcdefghijklmnopqrstuvwxyz';
@@ -781,6 +821,13 @@ test('secrets: overlapping secret redaction does not corrupt output', () => {
     assert.ok(!redacted.includes('NaN'));
     assert.ok(redacted.includes('[REDACTED:openai-key]'));
     assert.ok(!redacted.includes(skKey));
+
+    // JWT inside token = "..."
+    const jwt = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.' + 'eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.' + 'SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
+    const jwtContent = `token = "${jwt}"`;
+    const jwtRedacted = redactSecrets(jwtContent, 'config.js');
+    assert.ok(!jwtRedacted.includes(jwt));
+    assert.ok(jwtRedacted.includes('[REDACTED:jwt]'));
 });
 
 test('tree: filter counts matching leaf files instead of top-level folder count', async () => {
