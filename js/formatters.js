@@ -63,8 +63,8 @@ export function formatClaudeXml(repoInfo, branch, treeText, files, options = {})
         doc += `  </document>\n`;
     });
 
-    if (options && options.instructions) {
-        let instStr = stripXmlInvalidChars(options.instructions);
+    if (options && options.instructions && options.instructions.trim()) {
+        let instStr = stripXmlInvalidChars(options.instructions.trim());
         if (instStr.includes('</instructions>') || instStr.includes('<') || instStr.includes('&') || instStr.includes(']]>')) {
             instStr = `<![CDATA[\n${escapeCdata(instStr)}\n]]>`;
         } else {
@@ -103,8 +103,9 @@ export function formatMarkdown(repoInfo, branch, treeText, files, options = {}) 
         md += `### File: ${pathFence}\n${fence}${ext}\n${file.content}\n${fence}\n\n`;
     }
 
-    if (options && options.instructions) {
-        md += `## Instructions\n\n${options.instructions}\n`;
+    if (options && options.instructions && options.instructions.trim()) {
+        const fence = getMarkdownFence(options.instructions.trim());
+        md += `## Instructions\n\n${fence}text\n${options.instructions.trim()}\n${fence}\n`;
     }
 
     return {
@@ -128,8 +129,8 @@ export function formatGenericXml(repoInfo, branch, treeText, files, options = {}
     }
     xml += `</files>\n`;
 
-    if (options && options.instructions) {
-        let instStr = stripXmlInvalidChars(options.instructions);
+    if (options && options.instructions && options.instructions.trim()) {
+        let instStr = stripXmlInvalidChars(options.instructions.trim());
         if (instStr.includes('</instructions>') || instStr.includes('<') || instStr.includes('&') || instStr.includes(']]>')) {
             instStr = `<![CDATA[\n${escapeCdata(instStr)}\n]]>`;
         } else {
@@ -154,7 +155,7 @@ export function formatJson(repoInfo, branch, treeText, files, options = {}) {
         ...(repoInfo.url ? { url: repoInfo.url } : {}),
         ...(treeText ? { structure: treeText } : {}),
         files,
-        ...(options && options.instructions ? { instructions: options.instructions } : {})
+        ...(options && options.instructions && options.instructions.trim() ? { instructions: options.instructions.trim() } : {})
     };
     const json = JSON.stringify(jsonObj, null, 2);
     return {
@@ -165,7 +166,8 @@ export function formatJson(repoInfo, branch, treeText, files, options = {}) {
 }
 
 export function chunkContextOutput(format, repoInfo, branch, treeText, files, chunkTokenLimit, estimateTokensFn, options = {}) {
-    const instructions = (options && options.instructions) || '';
+    const rawInstructions = (options && options.instructions) || '';
+    const instructions = rawInstructions.trim();
 
     if (!chunkTokenLimit || chunkTokenLimit <= 0) {
         const output = buildContextOutput(format, repoInfo, branch, treeText, files, { ...options, instructions });
@@ -177,13 +179,20 @@ export function chunkContextOutput(format, repoInfo, branch, treeText, files, ch
     const emptyChunkBase = buildContextOutput(format, repoInfo, branch, '', [], cleanOpts);
     const emptyChunkTokens = estimateTokensFn(emptyChunkBase.text);
 
+    // Measure instructions token overhead
+    let instructionsOverhead = 0;
+    if (instructions) {
+        const withInst = buildContextOutput(format, repoInfo, branch, '', [], { ...options, instructions });
+        instructionsOverhead = estimateTokensFn(withInst.text) - emptyChunkTokens;
+    }
+
     // Measure only the marginal token cost of each file
     const fileTokenEstimates = files.map(file => {
         const singleFileOutput = buildContextOutput(format, repoInfo, branch, '', [file], cleanOpts);
         return Math.max(1, estimateTokensFn(singleFileOutput.text) - emptyChunkTokens);
     });
 
-    const firstChunkBase = buildContextOutput(format, repoInfo, branch, treeText, [], { ...options, instructions });
+    const firstChunkBase = buildContextOutput(format, repoInfo, branch, treeText, [], cleanOpts);
     const baseWrapperTokens = estimateTokensFn(firstChunkBase.text);
 
     const chunks = [];
@@ -208,6 +217,27 @@ export function chunkContextOutput(format, repoInfo, branch, treeText, files, ch
 
     if (currentFiles.length > 0) {
         chunks.push({ files: currentFiles, startIndex: currentStartIndex });
+    }
+
+    // Re-check final chunk with instructions overhead
+    if (instructions && chunks.length > 0) {
+        let lastChunk = chunks[chunks.length - 1];
+        let lastTree = chunks.length === 1 ? treeText : '';
+        let lastOpts = { ...options, startIndex: lastChunk.startIndex, instructions, partNote: chunks.length > 1 ? `Part ${chunks.length} of ${chunks.length}.` : '' };
+        let lastOutput = buildContextOutput(format, repoInfo, branch, lastTree, lastChunk.files, lastOpts);
+
+        while (estimateTokensFn(lastOutput.text) > chunkTokenLimit) {
+            if (lastChunk.files.length > 1) {
+                const spilled = lastChunk.files.pop();
+                chunks.push({ files: [spilled], startIndex: lastChunk.startIndex + lastChunk.files.length });
+                lastChunk = chunks[chunks.length - 1];
+                lastTree = '';
+                lastOpts = { ...options, startIndex: lastChunk.startIndex, instructions, partNote: `Part ${chunks.length} of ${chunks.length}.` };
+                lastOutput = buildContextOutput(format, repoInfo, branch, lastTree, lastChunk.files, lastOpts);
+            } else {
+                break;
+            }
+        }
     }
 
     const N = chunks.length;
