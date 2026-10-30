@@ -8,6 +8,7 @@ import { buildIssuesOutput, chunkIssuesOutput } from './issue-formatters.js';
 import { escapeXml } from './formatters.js';
 import { estimateTokens, estimateTokensAsync } from './tokenizer.js';
 import { scanForSecrets } from './secrets.js';
+import { switchTab } from './ui-tabs.js';
 
 let abortController = null;
 let allIssues = [];
@@ -24,6 +25,8 @@ let outputMime = 'application/xml';
 let currentBudgetWindow = 200000;
 let currentAppState = 'empty';
 let nlpWorker = null;
+let buildGeneration = 0;
+let inputDebounceTimer = null;
 
 const dom = {
     repoUrl: document.getElementById('repoUrl'),
@@ -50,6 +53,7 @@ const dom = {
     filterNoise: document.getElementById('filterNoise'),
     includeNlpSummary: document.getElementById('includeNlpSummary'),
     redactSecrets: document.getElementById('redactSecrets'),
+    aggressiveRedact: document.getElementById('aggressiveRedact'),
     stripTemplates: document.getElementById('stripTemplates'),
     aiInstructions: document.getElementById('aiInstructions'),
     instructionsCharCount: document.getElementById('instructionsCharCount'),
@@ -194,9 +198,12 @@ if (dom.switchToCodeLink) {
     });
 }
 
+let lastRateLimitRemaining = Infinity;
+
 function updateRateLimitUI(meta) {
     if (!meta) return;
     if (meta.remaining !== null && meta.remaining !== undefined && meta.limit !== null) {
+        lastRateLimitRemaining = meta.remaining;
         dom.quotaVal.textContent = `${meta.remaining} / ${meta.limit}`;
         dom.quotaVal.className = meta.remaining < 5 ? 'rate-critical' : meta.remaining < 20 ? 'rate-warning' : 'rate-normal';
     }
@@ -212,6 +219,15 @@ async function refreshRateLimitBadge() {
         updateRateLimitUI(info);
     } catch (_) {}
 }
+if (dom.repoUrl) {
+    dom.repoUrl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            dom.loadIssuesBtn.click();
+        }
+    });
+}
+
 dom.pat.addEventListener('change', refreshRateLimitBadge);
 refreshRateLimitBadge();
 
@@ -396,16 +412,24 @@ function renderIssuesList() {
     if (el) el.addEventListener('input', renderIssuesList);
 });
 
+let currentNlpRequestId = 0;
+
 function runNlpAnalysis(issues) {
     if (!nlpWorker) {
         nlpWorker = new Worker(new URL('./nlp.worker.js', import.meta.url), { type: 'module' });
         nlpWorker.onmessage = (e) => {
+            if (!e.data || e.data.id !== currentNlpRequestId) return;
             nlpResults = e.data || { clusters: [], ngrams: [], similarMap: {} };
             renderNlpBanner();
             renderIssuesList();
         };
+        nlpWorker.onerror = (err) => {
+            log(`[WARN] NLP worker error: ${err.message || String(err)}`);
+        };
     }
+    currentNlpRequestId++;
     nlpWorker.postMessage({
+        id: currentNlpRequestId,
         issues: issues.map(i => ({ number: i.number, title: i.title, body: i.body }))
     });
 }
@@ -516,6 +540,9 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
     selectedIssueNumbers.clear();
     cachedCommentsByIssue.clear();
     activeTopicFilter = null;
+    nlpResults = { clusters: [], ngrams: [], similarMap: {} };
+    currentNlpRequestId++;
+    renderNlpBanner();
 
     dom.loadIssuesBtn.disabled = true;
     dom.abortBtn.style.display = 'inline-flex';
@@ -553,8 +580,14 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
         renderIssuesList();
         runNlpAnalysis(allIssues);
         setAppState('loaded');
-        log(`[SUCCESS] Loaded ${allIssues.length} items. Running background NLP topic clustering...`);
-        showToast(`Loaded ${allIssues.length} items.`, 'info');
+
+        if (manifest.stoppedEarly) {
+            log(`[WARN] Reached scan limit (30 pages). Found ${allIssues.length} items.`);
+            showToast(`Scanned 30 pages, found ${allIssues.length} items. Raise limit or select 'Issues & PRs'.`, 'warn');
+        } else {
+            log(`[SUCCESS] Loaded ${allIssues.length} items. Running background NLP topic clustering...`);
+            showToast(`Loaded ${allIssues.length} items.`, 'info');
+        }
     } catch (err) {
         if (err.name === 'AbortError') {
             log('[CANCEL] Manifest load cancelled.');
@@ -571,6 +604,9 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
 async function buildSelectedContext(summaryOnly = false) {
     if (!currentRepoInfo || allIssues.length === 0) return;
 
+    buildGeneration++;
+    const thisBuildGen = buildGeneration;
+
     const targetIssues = summaryOnly
         ? getFilteredIssues()
         : allIssues.filter(i => selectedIssueNumbers.has(i.number));
@@ -586,6 +622,11 @@ async function buildSelectedContext(summaryOnly = false) {
     if (commentScope !== 'none') {
         const missingComments = targetIssues.filter(i => i.commentsCount > 0 && !cachedCommentsByIssue.has(i.number));
         if (missingComments.length > 0) {
+            if (lastRateLimitRemaining !== Infinity && missingComments.length > (lastRateLimitRemaining - 5)) {
+                log(`[WARN] Quota warning: Comment fetch needs ~${missingComments.length} API requests, but only ${lastRateLimitRemaining} remaining.`);
+                showToast(`Fetching comments needs ~${missingComments.length} requests; only ${lastRateLimitRemaining} quota left. Add a GitHub token to raise limit.`, 'warn');
+            }
+
             if (abortController) abortController.abort();
             abortController = new AbortController();
             dom.abortBtn.style.display = 'inline-flex';
@@ -595,7 +636,7 @@ async function buildSelectedContext(summaryOnly = false) {
 
             try {
                 log(`[FETCH] Fetching comment threads for ${missingComments.length} issue(s)...`);
-                const fetchedMap = await fetchCommentsForIssues(currentRepoInfo.owner, currentRepoInfo.repo, missingComments, {
+                const { commentsByIssue: fetchedMap, failures } = await fetchCommentsForIssues(currentRepoInfo.owner, currentRepoInfo.repo, missingComments, {
                     pat,
                     signal: abortController.signal,
                     onHeaders: updateRateLimitUI,
@@ -604,12 +645,18 @@ async function buildSelectedContext(summaryOnly = false) {
                 for (const [num, comms] of fetchedMap.entries()) {
                     cachedCommentsByIssue.set(num, comms);
                 }
+                if (thisBuildGen !== buildGeneration) return;
+                if (failures && failures.length > 0) {
+                    log(`[WARN] ${failures.length} thread(s) failed to load comments.`);
+                    showToast(`${failures.length} thread(s) failed to load comments. Rebuild to retry.`, 'warn');
+                }
             } catch (err) {
                 if (err.name === 'AbortError') {
                     log('[CANCEL] Comment fetch cancelled.');
                     return;
                 }
                 log(`[ERROR] Comment fetch error: ${err.message}`);
+                showToast(err.message, 'error');
             } finally {
                 dom.buildContextBtn.disabled = false;
                 dom.abortBtn.style.display = 'none';
@@ -617,14 +664,18 @@ async function buildSelectedContext(summaryOnly = false) {
         }
     }
 
+    if (thisBuildGen !== buildGeneration) return;
+
     const cleanOptions = {
         commentScope,
         stripImages: dom.stripImages.checked,
         filterBots: dom.filterBots.checked,
         filterNoise: dom.filterNoise.checked,
         stripTemplates: dom.stripTemplates.checked,
-        isRedact: dom.redactSecrets.checked,
-        maxLogLines: parseInt(dom.maxLogLines.value, 10) || 0
+        isRedact: dom.redactSecrets ? dom.redactSecrets.checked : true,
+        aggressiveRedact: dom.aggressiveRedact ? dom.aggressiveRedact.checked : true,
+        maxLogLines: parseInt(dom.maxLogLines.value, 10) || 0,
+        knownNumbers: new Set(allIssues.map(i => i.number))
     };
 
     const secretRows = [];
@@ -671,8 +722,21 @@ async function buildSelectedContext(summaryOnly = false) {
     outputMime = firstChunk.mime;
 
     const chunkTokenList = await Promise.all(generatedChunks.map(c => estimateTokensAsync(c.text)));
+    if (thisBuildGen !== buildGeneration) return;
+
     const totalTokens = chunkTokenList.reduce((a, b) => a + b, 0);
     const totalChars = generatedChunks.reduce((acc, c) => acc + c.text.length, 0);
+
+    let hasOversizedChunk = false;
+    generatedChunks.forEach((c, idx) => {
+        if (c.exceedsLimit) {
+            hasOversizedChunk = true;
+            log(`[WARN] Chunk part ${idx + 1}/${generatedChunks.length} exceeds limit of ${chunkLimitVal.toLocaleString()} tokens.`);
+        }
+    });
+    if (hasOversizedChunk) {
+        showToast('Warning: 1 or more parts exceed the split token limit.', 'warn');
+    }
 
     dom.statTokens.textContent = totalTokens.toLocaleString();
     dom.statChunks.textContent = generatedChunks.length;
@@ -716,13 +780,39 @@ function updateSecretsPanel(rows, flaggedNumbers) {
         return;
     }
     dom.secretsWarningPanel.style.display = 'flex';
-    dom.secretsWarningSummary.textContent = `${rows.length} possible secret(s) detected across ${flaggedNumbers.size} issue(s).`;
-    dom.secretsTableBody.innerHTML = rows.map(r => `
+
+    const isRedactOn = dom.redactSecrets ? dom.redactSecrets.checked : true;
+    const isAggressiveOn = dom.aggressiveRedact ? dom.aggressiveRedact.checked : true;
+
+    let redactedCount = 0;
+    let presentCount = 0;
+
+    const rowData = rows.map(r => {
+        const isRedacted = isRedactOn && (r.type !== 'generic-secret' || isAggressiveOn);
+        if (isRedacted) redactedCount++;
+        else presentCount++;
+        return {
+            ...r,
+            isRedacted
+        };
+    });
+
+    if (presentCount > 0) {
+        const hint = (!isAggressiveOn && isRedactOn)
+            ? ' (enable Aggressive redaction or deselect issue)'
+            : ' (enable Redact secrets or deselect issue)';
+        dom.secretsWarningSummary.textContent = `${rows.length} secret(s) in ${flaggedNumbers.size} issue(s): ${redactedCount} redacted, ${presentCount} still present${hint}.`;
+    } else {
+        dom.secretsWarningSummary.textContent = `${rows.length} secret(s) in ${flaggedNumbers.size} issue(s) (all redacted).`;
+    }
+
+    dom.secretsTableBody.innerHTML = rowData.map(r => `
         <tr>
             <td>#${r.number}</td>
             <td>${escapeXml(r.type)}</td>
             <td>${r.line}</td>
             <td>${escapeXml(r.preview)}</td>
+            <td>${r.isRedacted ? '<span class="status-fits" style="font-weight:600;">Redacted</span>' : '<span class="status-over" style="font-weight:600;">Present in output</span>'}</td>
             <td><button type="button" class="secondary btn-xs deselect-secret-issue" data-num="${r.number}">Deselect #${r.number}</button></td>
         </tr>
     `).join('');
@@ -747,7 +837,7 @@ dom.buildContextBtn.addEventListener('click', () => buildSelectedContext(false))
 dom.exportNlpOnlyBtn.addEventListener('click', () => buildSelectedContext(true));
 dom.abortBtn.addEventListener('click', () => { if (abortController) abortController.abort(); });
 
-[dom.format, dom.commentScope, dom.maxLogLines, dom.chunkLimit, dom.stripImages, dom.filterBots, dom.filterNoise, dom.includeNlpSummary, dom.redactSecrets, dom.stripTemplates].forEach(el => {
+[dom.format, dom.commentScope, dom.maxLogLines, dom.chunkLimit, dom.stripImages, dom.filterBots, dom.filterNoise, dom.includeNlpSummary, dom.redactSecrets, dom.aggressiveRedact, dom.stripTemplates].forEach(el => {
     if (el) el.addEventListener('change', () => {
         if (currentAppState === 'built') buildSelectedContext(false);
     });
@@ -755,8 +845,48 @@ dom.abortBtn.addEventListener('click', () => { if (abortController) abortControl
 
 dom.aiInstructions.addEventListener('input', () => {
     dom.instructionsCharCount.textContent = `${dom.aiInstructions.value.length} chars`;
-    if (currentAppState === 'built') buildSelectedContext(false);
+    if (currentAppState === 'built') {
+        if (inputDebounceTimer) clearTimeout(inputDebounceTimer);
+        inputDebounceTimer = setTimeout(() => {
+            buildSelectedContext(false);
+        }, 300);
+    }
 });
+
+if (dom.tabIssuesBtn && dom.tabOutputBtn) {
+    dom.tabIssuesBtn.addEventListener('click', () => {
+        switchTab(dom.tabIssuesBtn, dom.tabOutputBtn, dom.issuesCard, dom.outputCard);
+    });
+
+    dom.tabOutputBtn.addEventListener('click', () => {
+        switchTab(dom.tabOutputBtn, dom.tabIssuesBtn, dom.outputCard, dom.issuesCard);
+    });
+
+    const tabs = [dom.tabIssuesBtn, dom.tabOutputBtn];
+    tabs.forEach((tab, index) => {
+        tab.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                e.preventDefault();
+                const nextIndex = (index + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+                tabs[nextIndex].focus();
+                tabs[nextIndex].click();
+            }
+        });
+    });
+}
+
+if (dom.mobilePrimaryBtn) {
+    dom.mobilePrimaryBtn.addEventListener('click', async () => {
+        if (currentAppState === 'empty') {
+            dom.loadIssuesBtn.click();
+        } else if (currentAppState === 'loaded') {
+            await buildSelectedContext(false);
+            if (dom.tabOutputBtn) dom.tabOutputBtn.click();
+        } else if (currentAppState === 'built') {
+            dom.copyBtn.click();
+        }
+    });
+}
 
 dom.clearInstructionsBtn.addEventListener('click', () => {
     dom.aiInstructions.value = '';

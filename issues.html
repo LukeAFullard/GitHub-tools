@@ -153,6 +153,9 @@
 
         <div class="option-field">
             <label class="checkbox-label"><input type="checkbox" id="redactSecrets" checked> <span>Redact secrets in issue bodies &amp; comments</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="aggressiveRedact" checked> <span>Aggressive redaction (generic passwords &amp; tokens)</span></label>
+        </div>
+        <div class="option-field">
             <label class="checkbox-label"><input type="checkbox" id="stripTemplates" checked> <span>Strip HTML boilerplate &amp; template comments</span></label>
         </div>
 
@@ -352,6 +355,7 @@
                                     <th>Type</th>
                                     <th>Line</th>
                                     <th>Preview</th>
+                                    <th>Status</th>
                                     <th>Action</th>
                                 </tr>
                             </thead>

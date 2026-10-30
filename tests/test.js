@@ -101,9 +101,14 @@ msg = 'hello # world'
 test('github-api: parseRepoInput validation', () => {
     assert.deepEqual(parseRepoInput('LukeAFullard/senti'), { owner: 'LukeAFullard', repo: 'senti', branch: null, subpath: null, treeTail: null });
     assert.deepEqual(parseRepoInput('https://github.com/LukeAFullard/senti.git'), { owner: 'LukeAFullard', repo: 'senti', branch: null, subpath: null, treeTail: null });
+    assert.deepEqual(parseRepoInput('github.com/LukeAFullard/senti'), { owner: 'LukeAFullard', repo: 'senti', branch: null, subpath: null, treeTail: null });
+    assert.deepEqual(parseRepoInput('www.github.com/LukeAFullard/senti'), { owner: 'LukeAFullard', repo: 'senti', branch: null, subpath: null, treeTail: null });
     assert.deepEqual(parseRepoInput('https://github.com/LukeAFullard/senti/tree/dev/src/components'), { owner: 'LukeAFullard', repo: 'senti', branch: 'dev', subpath: 'src/components', treeTail: 'dev/src/components' });
     assert.equal(parseRepoInput('invalid-input'), null);
     assert.equal(parseRepoInput('bad owner/repo name!'), null);
+    assert.equal(parseRepoInput('./..'), null);
+    assert.equal(parseRepoInput('../repo'), null);
+    assert.equal(parseRepoInput('owner/.'), null);
     assert.equal(parseRepoInput(''), null);
 });
 
@@ -558,6 +563,92 @@ test('budget status logic for pre-build split and oversized split chunk', () => 
 
 // --- Secrets Detection & Redaction Tests ---
 
+test('secrets: Phase 1 regression tests for long keys, provider tokens, URL credentials, and Auth headers', () => {
+    function makeTestKey(prefix, targetTotalLength) {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+        let res = prefix;
+        let seed = 12345;
+        while (res.length < targetTotalLength) {
+            seed = (seed * 9301 + 49297) % 233280;
+            res += chars[seed % chars.length];
+        }
+        return res;
+    }
+
+    // Anthropic 101-char key after sk-ant- (total length 108)
+    const longAntKey = makeTestKey('sk-ant-api03-', 108);
+    const antText = `anthropic_key = "${longAntKey}"`;
+    const antScan = scanForSecrets('config.js', antText);
+    assert.equal(antScan.length, 1);
+    assert.equal(antScan[0].type, 'anthropic-key');
+    const antRedacted = redactSecrets(antText, 'config.js');
+    assert.equal(antRedacted, 'anthropic_key = "[REDACTED:anthropic-key]"');
+    assert.ok(!antRedacted.includes('sk-ant-'));
+    assert.ok(!antRedacted.includes(longAntKey.slice(10, 20)));
+
+    // OpenAI project ~189-char key
+    const longOaiKey = makeTestKey('sk-proj-', 189);
+    const oaiText = `openai_key = "${longOaiKey}"`;
+    const oaiScan = scanForSecrets('config.js', oaiText);
+    assert.equal(oaiScan.length, 1);
+    assert.equal(oaiScan[0].type, 'openai-key');
+    const oaiRedacted = redactSecrets(oaiText, 'config.js');
+    assert.equal(oaiRedacted, 'openai_key = "[REDACTED:openai-key]"');
+    assert.ok(!oaiRedacted.includes('sk-proj-'));
+    assert.ok(!oaiRedacted.includes(longOaiKey.slice(10, 20)));
+
+    // Google key ending in '-' or '_'
+    const googleDashKey = makeTestKey('AIza', 38).slice(0, 38) + '-';
+    const googleText = `google_key = "${googleDashKey}"`;
+    const googleScan = scanForSecrets('config.js', googleText);
+    assert.equal(googleScan.length, 1);
+    assert.equal(googleScan[0].type, 'google-key');
+    const googleRedacted = redactSecrets(googleText, 'config.js');
+    assert.equal(googleRedacted, 'google_key = "[REDACTED:google-key]"');
+    assert.ok(!googleRedacted.includes('AIza'));
+
+    // Provider tokens
+    const glpat = 'glpat-a1b2c3d4e5f6g7h8i9j0';
+    const npmTok = 'npm_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8';
+    const providerText = `gitlab: ${glpat}\nnpm: ${npmTok}`;
+    const providerRedacted = redactSecrets(providerText, 'config.txt');
+    assert.ok(!providerRedacted.includes(glpat));
+    assert.ok(!providerRedacted.includes(npmTok));
+    assert.ok(providerRedacted.includes('[REDACTED:provider-token]'));
+
+    // URL credentials
+    const dbUrl = 'postgres://admin:secretPassword123@localhost:5432/mydb';
+    const dbScan = scanForSecrets('app.log', dbUrl);
+    assert.equal(dbScan.length, 1);
+    assert.equal(dbScan[0].type, 'url-credentials');
+    const dbRedacted = redactSecrets(dbUrl, 'app.log');
+    assert.equal(dbRedacted, 'postgres://admin:[REDACTED:url-credentials]@localhost:5432/mydb');
+
+    // Authorization headers
+    const authHeader = 'Authorization: Bearer secretBearerToken12345';
+    const authScan = scanForSecrets('app.log', authHeader);
+    assert.equal(authScan.length, 1);
+    assert.equal(authScan[0].type, 'authorization-header');
+    const authRedacted = redactSecrets(authHeader, 'app.log');
+    assert.equal(authRedacted, 'Authorization: Bearer [REDACTED:authorization-header]');
+
+    // Redaction of title and labels in processIssueThread
+    const secretInTitleIssue = {
+        number: 1,
+        title: `Bug with ${longAntKey} in production`,
+        body: 'Issue description',
+        author: 'alice',
+        authorAssociation: 'MEMBER',
+        createdAt: '2023-01-01',
+        labels: [`secret-${longOaiKey}`]
+    };
+    const processed = processIssueThread(secretInTitleIssue, [], { isRedact: true });
+    assert.ok(!processed.title.includes(longAntKey));
+    assert.ok(processed.title.includes('[REDACTED:anthropic-key]'));
+    assert.ok(!processed.labels[0].includes(longOaiKey));
+    assert.ok(processed.labels[0].includes('[REDACTED:openai-key]'));
+});
+
 test('secrets: true positive and near-miss for each pattern detector', () => {
     // AWS
     const awsPos = scanForSecrets('app.js', 'const k = "' + 'AKIA' + '1234567890ABCDEF";');
@@ -965,6 +1056,78 @@ test('issue-cleaner: noise comment detection', () => {
     assert.equal(isLowSignalComment('Here is a detailed trace of the error when running npm test'), false);
 });
 
+test('issue-cleaner: Phase 3 fence truncation, empty blocks, tildes, images', () => {
+    const rawBody = `
+Prose line before empty block
+
+\`\`\`
+\`\`\`
+
+Prose line between blocks
+
+~~~~log
+line 1
+line 2
+line 3
+line 4
+line 5
+~~~~
+
+![alt text](http://example.com/u_(1).png) Prose after image
+`;
+    const cleaned = sanitizeIssueText(rawBody, {
+        stripTemplates: true,
+        stripImages: true,
+        maxLogLines: 2
+    });
+
+    assert.ok(cleaned.includes('Prose line before empty block'), 'Prose before empty block must be preserved');
+    assert.ok(cleaned.includes('Prose line between blocks'), 'Prose between blocks must NOT be truncated');
+    assert.ok(cleaned.includes('Prose after image'), 'Prose after image must NOT be stripped by image regex');
+    assert.ok(cleaned.includes('lines of log/code truncated'), 'Tilde fence logs should be truncated');
+});
+
+test('issue-cleaner: Phase 3 cross-reference HTML comment stripping and knownNumbers filtering', () => {
+    const body = `
+<!-- e.g. #123 -->
+Here is a bug. See #456 and #999.
+`;
+    const refs = extractIssueReferences(body);
+    assert.ok(!refs.includes(123), 'Template comment #123 should be stripped');
+    assert.ok(refs.includes(456));
+    assert.ok(refs.includes(999));
+
+    const issue = {
+        number: 1,
+        title: 'Title',
+        body,
+        author: 'alice',
+        authorAssociation: 'NONE',
+        createdAt: '2023-01-01'
+    };
+    const knownNumbers = new Set([1, 456]); // 999 is not in loaded issues
+    const processed = processIssueThread(issue, [], { knownNumbers });
+    assert.deepEqual(processed.relatedIssues, [456], 'Should filter out #999 because it is not in knownNumbers');
+});
+
+test('issue-cleaner: Phase 3 CONTRIBUTOR is not in maintainer scope', () => {
+    const issue = {
+        number: 1,
+        title: 'Title',
+        body: 'Body',
+        author: 'alice',
+        authorAssociation: 'NONE',
+        createdAt: '2023-01-01'
+    };
+    const comments = [
+        { id: 1, author: 'bob', authorAssociation: 'CONTRIBUTOR', createdAt: '2023-01-01', body: 'Drive-by comment' },
+        { id: 2, author: 'charlie', authorAssociation: 'MEMBER', createdAt: '2023-01-01', body: 'Maintainer comment' }
+    ];
+    const processed = processIssueThread(issue, comments, { commentScope: 'maintainers' });
+    assert.equal(processed.cleanedComments.length, 1);
+    assert.equal(processed.cleanedComments[0].author, 'charlie');
+});
+
 test('issue-cleaner: issue body sanitization (media, log truncation, templates)', () => {
     const rawBody = `
 <!-- Please describe your bug below -->
@@ -1085,6 +1248,152 @@ test('issue-formatters: Generic XML and JSON formatting for issues', () => {
     const parsed = JSON.parse(resJson.text);
     assert.equal(parsed.issues[0].number, 10);
     assert.equal(parsed.issues[0].title, 'Sample Issue');
+});
+
+test('github-issues-api: Phase 2 C2 multi-page comment fetching', async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+        globalThis.fetch = async (url) => {
+            if (url.includes('/issues/1/comments')) {
+                if (/[?&]page=1\b/.test(url)) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        json: async () => Array.from({ length: 100 }, (_, i) => ({ id: i + 1, body: `Comment ${i + 1}`, user: { login: 'user1' } }))
+                    };
+                }
+                if (/[?&]page=2\b/.test(url)) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        json: async () => Array.from({ length: 50 }, (_, i) => ({ id: 100 + i + 1, body: `Comment ${100 + i + 1}`, user: { login: 'user1' } }))
+                    };
+                }
+            }
+            return { ok: false, status: 404 };
+        };
+
+        const { fetchCommentsForIssues } = await import('../js/github-issues-api.js');
+        const selected = [{ number: 1, commentsCount: 150 }];
+        const { commentsByIssue, failures } = await fetchCommentsForIssues('owner', 'repo', selected, { throttleMs: 0 });
+
+        assert.equal(failures.length, 0);
+        assert.ok(commentsByIssue.has(1));
+        const comms = commentsByIssue.get(1);
+        assert.equal(comms.length, 150);
+        assert.equal(comms[0].body, 'Comment 1');
+        assert.equal(comms[149].body, 'Comment 150');
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('github-issues-api: Phase 2 C3 fetch failures recorded and not cached as empty', async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+        globalThis.fetch = async (url) => {
+            if (url.includes('/issues/1/comments')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => [{ id: 1, body: 'ok comment', user: { login: 'user1' } }]
+                };
+            }
+            if (url.includes('/issues/2/comments')) {
+                return {
+                    ok: false,
+                    status: 500,
+                    statusText: 'Internal Server Error'
+                };
+            }
+            return { ok: false, status: 404 };
+        };
+
+        const { fetchCommentsForIssues } = await import('../js/github-issues-api.js');
+        const selected = [
+            { number: 1, commentsCount: 1 },
+            { number: 2, commentsCount: 5 }
+        ];
+        const { commentsByIssue, failures } = await fetchCommentsForIssues('owner', 'repo', selected, { throttleMs: 0 });
+
+        assert.ok(commentsByIssue.has(1));
+        assert.equal(commentsByIssue.get(1).length, 1);
+        assert.equal(commentsByIssue.has(2), false, 'Failed issue 2 must NOT be mapped to empty array');
+        assert.equal(failures.length, 1);
+        assert.equal(failures[0].number, 2);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('github-issues-api: Phase 2 C4 manifest pagination on PR-heavy repo and stoppedEarly flag', async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+        let callCount = 0;
+        globalThis.fetch = async (url) => {
+            if (url.includes('/issues?')) {
+                callCount++;
+                // Return 100 items per page, where 95 are PRs and 5 are issues
+                const batch = Array.from({ length: 100 }, (_, i) => {
+                    const itemNum = (callCount - 1) * 100 + i + 1;
+                    const isPr = (i % 20) !== 0; // 19 out of 20 are PRs
+                    return {
+                        number: itemNum,
+                        title: `Item ${itemNum}`,
+                        state: 'open',
+                        pull_request: isPr ? {} : undefined,
+                        user: { login: 'user1' }
+                    };
+                });
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => batch
+                };
+            }
+            return { ok: false, status: 404 };
+        };
+
+        const { fetchIssuesManifest } = await import('../js/github-issues-api.js');
+        const manifest = await fetchIssuesManifest('owner', 'repo', { maxItems: 300, itemType: 'issues' });
+
+        assert.ok(manifest.length > 0);
+        assert.equal(manifest.length, 150); // 30 pages * 5 issues = 150 issues
+        assert.equal(callCount, 30, 'Should hit hard page cap of 30 pages');
+        assert.equal(manifest.stoppedEarly, true, 'stoppedEarly should be true when maxItems not reached and last batch was full');
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('github-issues-api: Phase 2 C5 rate limit reset wait > 90s fails fast with descriptive message', async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+        const futureResetSec = Math.floor(Date.now() / 1000) + 3000; // 50 mins away
+        globalThis.fetch = async () => {
+            return {
+                ok: false,
+                status: 403,
+                statusText: 'Forbidden',
+                headers: new Map([
+                    ['x-ratelimit-remaining', '0'],
+                    ['x-ratelimit-reset', String(futureResetSec)]
+                ])
+            };
+        };
+
+        const { fetchIssuesManifest } = await import('../js/github-issues-api.js');
+        await assert.rejects(
+            async () => {
+                await fetchIssuesManifest('owner', 'repo', { maxItems: 10 });
+            },
+            (err) => {
+                return err.message.includes('GitHub rate limit reached. Resets at');
+            }
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
 });
 
 test('issue-formatters: chunking issue outputs', () => {

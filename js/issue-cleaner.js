@@ -7,7 +7,7 @@ const BOT_LOGIN_REGEX = /\[bot\]$|^(?:dependabot|renovate|github-actions|codecov
 
 const LOW_SIGNAL_COMMENT_REGEX = /^[\s*_~`>]*(\+1|👍|👎|👀|❤️|bump|same|same here|me too|i have this issue too|following|any update\??|any updates\??|any news\??|is this fixed\??|still happening|up|subscribing|cc @[a-z0-9_-]+)[\s!?.👍👎]*$/i;
 
-const AUTHORITATIVE_ROLES = new Set(['OWNER', 'MEMBER', 'COLLABORATOR', 'CONTRIBUTOR']);
+const AUTHORITATIVE_ROLES = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
 export function isBotUser(author, authorType) {
     if (authorType && authorType.toLowerCase() === 'bot') return true;
@@ -32,7 +32,8 @@ export function isLowSignalComment(body) {
  */
 export function extractIssueReferences(text, selfNumber = null) {
     if (!text) return [];
-    const withoutCode = text.replace(/```[\s\S]*?```|`[^`\n]+`/g, '');
+    const withoutComments = text.replace(/<!--[\s\S]*?-->/g, '');
+    const withoutCode = withoutComments.replace(/```[\s\S]*?```|`[^`\n]+`/g, '');
     const refs = new Set();
     const regex = /(?:^|[\s(])(?:#|GH-)(\d{1,6})\b/gi;
     let match;
@@ -69,7 +70,7 @@ export function sanitizeIssueText(rawText, options = {}, contextPath = 'issue') 
     // 2. Strip images, GitHub asset links, video tags, and inline Base64 data URIs
     if (stripImages) {
         text = text.replace(/data:image\/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=]+/g, '[IMAGE_BASE64_STRIPPED]');
-        text = text.replace(/!\[([^\]]*)\]\([^)]+\)/g, (_, alt) => {
+        text = text.replace(/!\[([^\]]*)\]\((?:[^()\s]+|\([^()\s]*\))*\)/g, (_, alt) => {
             const cleanAlt = (alt || '').trim();
             return cleanAlt && cleanAlt.toLowerCase() !== 'image' ? `[Image: ${cleanAlt}]` : '[Image]';
         });
@@ -82,19 +83,19 @@ export function sanitizeIssueText(rawText, options = {}, contextPath = 'issue') 
     // 3. Truncate massive fenced code blocks / stack traces / logs
     if (maxLogLines > 0) {
         const keepHalf = Math.max(5, Math.floor(maxLogLines / 2));
-        text = text.replace(/(```[^\n]*\n)([\s\S]*?)(\n```)/g, (full, openFence, codeBody, closeFence) => {
-            const lines = codeBody.split('\n');
+        text = text.replace(/^([ \t]*)(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)^\1\2[ \t]*$/gm, (full, indent, fence, info, body) => {
+            const lines = body.replace(/\n$/, '').split('\n');
             if (lines.length <= maxLogLines) return full;
             const head = lines.slice(0, keepHalf).join('\n');
             const tail = lines.slice(-keepHalf).join('\n');
             const omitted = lines.length - (keepHalf * 2);
-            return `${openFence}${head}\n... [${omitted} lines of log/code truncated] ...\n${tail}${closeFence}`;
+            return `${indent}${fence}${info}\n${head}\n... [${omitted} lines of log/code truncated] ...\n${tail}\n${indent}${fence}`;
         });
     }
 
     // 4. Redact secrets using existing secrets.js engine
     if (isRedact) {
-        text = redactSecrets(text, contextPath);
+        text = redactSecrets(text, contextPath, options);
     }
 
     // 5. Collapse excessive blank lines
@@ -109,8 +110,15 @@ export function processIssueThread(issue, rawComments = [], options = {}) {
     const {
         commentScope = 'all', // 'all' | 'maintainers' | 'none'
         filterBots = true,
-        filterNoise = true
+        filterNoise = true,
+        isRedact = true,
+        knownNumbers = null
     } = options;
+
+    const title = isRedact ? redactSecrets(issue.title || '', `issue-${issue.number}-title`, options) : (issue.title || '');
+    const labels = Array.isArray(issue.labels)
+        ? issue.labels.map(lbl => isRedact ? redactSecrets(lbl, `issue-${issue.number}-label`, options) : lbl)
+        : [];
 
     const cleanedBody = sanitizeIssueText(issue.body, options, `issue-${issue.number}-body`);
     const allRefs = new Set(extractIssueReferences(issue.body, issue.number));
@@ -145,10 +153,17 @@ export function processIssueThread(issue, rawComments = [], options = {}) {
         }
     }
 
+    let relatedList = Array.from(allRefs).sort((a, b) => a - b);
+    if (knownNumbers && knownNumbers instanceof Set) {
+        relatedList = relatedList.filter(n => knownNumbers.has(n));
+    }
+
     return {
         ...issue,
+        title,
+        labels,
         cleanedBody,
-        relatedIssues: Array.from(allRefs).sort((a, b) => a - b),
+        relatedIssues: relatedList,
         cleanedComments: keptComments
     };
 }

@@ -189,7 +189,7 @@ function findMatchesInternal(path, content) {
         },
         {
             type: 'google-key',
-            regex: /AIza[0-9A-Za-z\-_]{35}\b/g,
+            regex: /AIza[0-9A-Za-z\-_]{35}(?![0-9A-Za-z\-_])/g,
             check: (m) => !isPlaceholder(m[0])
         },
         {
@@ -204,19 +204,40 @@ function findMatchesInternal(path, content) {
         },
         {
             type: 'anthropic-key',
-            regex: /(?<![A-Za-z0-9_-])sk-ant-[a-zA-Z0-9_\-]{20,100}\b/g,
+            regex: /(?<![A-Za-z0-9])sk-ant-[a-zA-Z0-9_\-]{20,}(?![A-Za-z0-9_-])/g,
             check: (m) => !isPlaceholder(m[0])
         },
         {
             type: 'openai-key',
-            regex: /(?<![A-Za-z0-9_-])sk-(?!ant-)(?:proj-)?[a-zA-Z0-9_\-]{20,100}\b/g,
+            regex: /(?<![A-Za-z0-9])sk-(?!ant-)(?:proj-|svcacct-|admin-)?[a-zA-Z0-9_\-]{20,}(?![A-Za-z0-9_-])/g,
             check: (m) => {
                 if (isPlaceholder(m[0])) return false;
                 if (m[0].length < 32) return false;
-                if (/^sk-(?:proj-)?[a-z0-9-]+$/.test(m[0]) && !/[0-9_]/.test(m[0]) && getCharacterClassCount(m[0]) < 2) return false;
+                if (/^sk-(?:proj-|svcacct-|admin-)?[a-z0-9-]+$/.test(m[0]) && !/[0-9_]/.test(m[0]) && getCharacterClassCount(m[0]) < 2) return false;
                 if (calculateEntropy(m[0]) < 3.0) return false;
                 return true;
             }
+        },
+        {
+            type: 'provider-token',
+            regex: /(?<![A-Za-z0-9])(?:glpat-[A-Za-z0-9_\-]{20,}|npm_[A-Za-z0-9]{36}|hf_[A-Za-z0-9]{34,}|SG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}|pypi-AgEIcHlwaS5vcmc[A-Za-z0-9_\-]{50,}|dop_v1_[a-f0-9]{64})(?![A-Za-z0-9_-])/g,
+            check: (m) => !isPlaceholder(m[0])
+        },
+        {
+            type: 'url-credentials',
+            regex: /\b[a-zA-Z][a-zA-Z0-9+.-]{0,15}:\/\/[^\s:@/]+:([^\s@/]{8,})@/gi,
+            check: (m) => !isPlaceholder(m[1]),
+            getValue: (m) => m[1],
+            getIndex: (m) => m.index + m[0].lastIndexOf(m[1]),
+            getLength: (m) => m[1].length
+        },
+        {
+            type: 'authorization-header',
+            regex: /\bAuthorization\s*:\s*(?:Bearer|Basic)\s+([A-Za-z0-9_.\-~/+=]{10,})/gi,
+            check: (m) => !isPlaceholder(m[1]),
+            getValue: (m) => m[1],
+            getIndex: (m) => m.index + m[0].lastIndexOf(m[1]),
+            getLength: (m) => m[1].length
         },
         {
             type: 'generic-secret',
