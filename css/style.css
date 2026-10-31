@@ -740,6 +740,53 @@ html, body {
 .status-near { color: var(--near); }
 .status-over { color: var(--over); }
 
+.budget-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+}
+
+.budget-suggestions:empty {
+    display: none;
+}
+
+.budget-suggestions button {
+    background: var(--page);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    border-radius: var(--radius-control);
+    padding: 0.25rem 0.5rem;
+    font-size: 0.78125rem;
+    cursor: pointer;
+}
+
+.budget-suggestions button:hover {
+    border-color: var(--cobalt);
+    color: var(--cobalt);
+}
+
+#defaultsNote {
+    margin: 0.4rem 0.85rem;
+    font-size: 0.8125rem;
+    color: var(--ink-soft);
+}
+
+#defaultsNote button {
+    margin-left: 0.35rem;
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 0.8125rem;
+    color: var(--cobalt);
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+#defaultsNote button:hover {
+    color: var(--ink);
+}
+
 /* Layout Panes (Desktop 2-pane, Tablet stack, Mobile single pane) */
 .workspace-panes {
     display: grid;

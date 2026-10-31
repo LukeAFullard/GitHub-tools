@@ -5,6 +5,7 @@ import { copyLabel } from '../js/ui-labels.js';
 import { detectTarget, TARGETS } from '../js/targets.js';
 import { buildSettingsSummary } from '../js/settings-summary.js';
 import { commentCostHint } from '../js/comment-cost.js';
+import { defaultExcludedPaths, rankSuggestions, DEFAULT_EXCLUDED_DIRS } from '../js/suggestions.js';
 
 test('targets: detectTarget identifies known targets and falls back to custom', () => {
     // 3 matches
@@ -246,4 +247,90 @@ test('commentCostHint: 60 recent issues in a 200-issue universe (bulk, small cou
     // n = 1
     const hint = commentCostHint(selected, universe, new Set(), 'all');
     assert.deepEqual(hint, { requests: 1, text: 'About 1 GitHub request.' });
+});
+
+test('defaultExcludedPaths: excludes matched directories but not file names or non-matching paths', () => {
+    const inputPaths = [
+        'tests/a.js',           // excluded: 'tests' in DEFAULT_EXCLUDED_DIRS
+        'src/tests.js',         // NOT excluded: 'tests.js' is filename, 'src' not in list
+        'docs/x.md',            // excluded: 'docs' in DEFAULT_EXCLUDED_DIRS
+        'src/Docs/y.md',        // excluded: case-insensitive match for 'Docs'
+        'test.js',              // NOT excluded: root file, not in a directory
+        'lib/utils.js',         // NOT excluded
+        'nested/test/deep.js'   // excluded: 'test' in DEFAULT_EXCLUDED_DIRS
+    ];
+
+    const { excluded, folders } = defaultExcludedPaths(inputPaths);
+
+    assert.deepEqual(excluded, [
+        'tests/a.js',
+        'docs/x.md',
+        'src/Docs/y.md',
+        'nested/test/deep.js'
+    ]);
+
+    assert.deepEqual(folders, [
+        'tests',
+        'docs',
+        'src/Docs',
+        'nested/test'
+    ]);
+});
+
+test('rankSuggestions: ordering, limit, minShare cutoff, and path grouping', () => {
+    // files: total tokens = 1000 + 500 + 400 + 200 + 50 + 20 = 2170
+    // Group src/components: 1000 + 500 = 1500 (69.1%)
+    // Group src/utils: 400 (18.4%)
+    // Group tests: 200 (9.2%)
+    // Group root_file.js: 50 (2.3% - below default minShare 0.05)
+    // Group other/tiny: 20 (0.9% - below default minShare 0.05)
+    const files = [
+        { path: 'src/components/Header.jsx', tokens: 1000 },
+        { path: 'src/components/Footer.jsx', tokens: 500 },
+        { path: 'src/utils/math.js', tokens: 400 },
+        { path: 'tests/app.test.js', tokens: 200 },
+        { path: 'root_file.js', tokens: 50 },
+        { path: 'other/tiny/file.js', tokens: 20 }
+    ];
+
+    // Default limit = 3, minShare = 0.05
+    const suggestions = rankSuggestions(files);
+    assert.equal(suggestions.length, 3);
+    assert.equal(suggestions[0].path, 'src/components');
+    assert.equal(suggestions[0].tokens, 1500);
+    assert.equal(Math.round(suggestions[0].share * 100), 69);
+
+    assert.equal(suggestions[1].path, 'src/utils');
+    assert.equal(suggestions[1].tokens, 400);
+
+    assert.equal(suggestions[2].path, 'tests');
+    assert.equal(suggestions[2].tokens, 200);
+
+    // Test custom limit = 2
+    const top2 = rankSuggestions(files, 2);
+    assert.equal(top2.length, 2);
+    assert.equal(top2[0].path, 'src/components');
+    assert.equal(top2[1].path, 'src/utils');
+
+    // Test higher minShare cut-off
+    const highCutoff = rankSuggestions(files, 5, 0.20);
+    assert.equal(highCutoff.length, 1);
+    assert.equal(highCutoff[0].path, 'src/components');
+
+    // Test single-segment paths and top-level folder grouping
+    const singleFolderFiles = [
+        { path: 'main.js', tokens: 600 },
+        { path: 'docs/index.md', tokens: 400 }
+    ];
+    // total = 1000
+    // main.js: 600 (60%)
+    // docs: 400 (40%)
+    const singleRes = rankSuggestions(singleFolderFiles);
+    assert.equal(singleRes.length, 2);
+    assert.equal(singleRes[0].path, 'main.js');
+    assert.equal(singleRes[0].tokens, 600);
+    assert.equal(singleRes[0].share, 0.6);
+    assert.equal(singleRes[1].path, 'docs');
+    assert.equal(singleRes[1].tokens, 400);
+    assert.equal(singleRes[1].share, 0.4);
 });
