@@ -1537,7 +1537,16 @@ if (urlParams.has('format')) {
 } else {
     let savedTarget = null;
     try { savedTarget = localStorage.getItem('cfg_target'); } catch (_) {}
-    applyTarget(savedTarget && (savedTarget in TARGETS) ? savedTarget : 'claude');
+    if (savedTarget && (savedTarget in TARGETS)) {
+        applyTarget(savedTarget);
+    } else {
+        // Returning user from before targets existed: keep their saved format and split size.
+        let hasLegacySettings = false;
+        try { hasLegacySettings = localStorage.getItem('cfg_format') !== null || localStorage.getItem('cfg_chunkLimit') !== null; } catch (_) {}
+        applyTarget(hasLegacySettings
+            ? detectTarget(dom.format ? dom.format.value : '', parseInt(dom.chunkLimit ? dom.chunkLimit.value : '0', 10) || 0)
+            : 'claude');
+    }
 }
 
 updateSettingsSummary();
