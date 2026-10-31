@@ -133,25 +133,27 @@ export function processIssueThread(issue, rawComments = [], options = {}) {
     const allRefs = new Set(extractIssueReferences(issue.body, issue.number));
 
     const keptComments = [];
+    const commentStats = { raw: Array.isArray(rawComments) ? rawComments.length : 0, kept: 0, bots: 0, scope: 0, noise: 0, empty: 0 };
     if (commentScope !== 'none' && Array.isArray(rawComments)) {
         for (const c of rawComments) {
-            if (filterBots && isBotUser(c.author, c.authorType)) continue;
+            if (filterBots && isBotUser(c.author, c.authorType)) { commentStats.bots++; continue; }
 
             if (commentScope === 'maintainers') {
                 const isAuthor = c.author === issue.author;
                 const isMaintainer = AUTHORITATIVE_ROLES.has(c.authorAssociation);
-                if (!isAuthor && !isMaintainer) continue;
+                if (!isAuthor && !isMaintainer) { commentStats.scope++; continue; }
             }
 
-            if (filterNoise && isLowSignalComment(c.body)) continue;
+            if (filterNoise && isLowSignalComment(c.body)) { commentStats.noise++; continue; }
 
             const cleanedCommentBody = sanitizeIssueText(c.body, options, `issue-${issue.number}-comment-${c.id}`);
-            if (!cleanedCommentBody) continue;
+            if (!cleanedCommentBody) { commentStats.empty++; continue; }
 
             for (const r of extractIssueReferences(c.body, issue.number)) {
                 allRefs.add(r);
             }
 
+            commentStats.kept++;
             keptComments.push({
                 author: c.author,
                 role: c.authorAssociation || 'NONE',
@@ -174,6 +176,7 @@ export function processIssueThread(issue, rawComments = [], options = {}) {
         cleanedBody,
         relatedIssues: relatedList,
         cleanedComments: keptComments,
+        commentStats,
         commentsFetchFailed: Boolean(options.commentsFetchFailed || issue.commentsFetchFailed),
         commentsFetchError: options.commentsFetchError || issue.commentsFetchError || null,
         commentsTruncated: Boolean(options.commentsTruncated || issue.commentsTruncated || rawComments.truncated)

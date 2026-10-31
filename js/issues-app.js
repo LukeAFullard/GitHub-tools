@@ -731,6 +731,16 @@ async function buildSelectedContext(summaryOnly = false) {
         });
 
     const totalCommentsIncluded = processedIssues.reduce((acc, i) => acc + i.cleanedComments.length, 0);
+    if (!summaryOnly && commentScope !== 'none') {
+        const agg = processedIssues.reduce((a, i) => {
+            const cs = i.commentStats || {};
+            for (const k of ['raw', 'kept', 'bots', 'scope', 'noise', 'empty']) a[k] += cs[k] || 0;
+            return a;
+        }, { raw: 0, kept: 0, bots: 0, scope: 0, noise: 0, empty: 0 });
+        const failedThreads = processedIssues.filter(i => i.commentsFetchFailed).length;
+        const noCommentThreads = processedIssues.filter(i => i.commentsCount > 0 && !i.commentsFetchFailed && i.commentStats && i.commentStats.raw === 0).length;
+        log(`[INFO] Comments: ${agg.kept} kept of ${agg.raw} fetched (dropped: ${agg.bots} bot, ${agg.scope} out-of-scope, ${agg.noise} low-signal, ${agg.empty} empty); ${failedThreads} thread(s) failed; ${noCommentThreads} thread(s) expected comments but returned none.`);
+    }
     const chunkLimitVal = parseInt(dom.chunkLimit.value, 10) || 0;
 
     const formatOptions = {

@@ -28,18 +28,27 @@ async function fetchWithRetry(url, pat, signal, onHeaders) {
         if (res.ok) {
             return await res.json();
         }
-        if (isRateLimitResponse(res, meta)) {
+        let apiMessage = '';
+        if (res.status === 403 || res.status === 429) {
+            try { apiMessage = (await res.clone().json()).message || ''; } catch (_) {}
+        }
+        if (isRateLimitResponse(res, meta) || (res.status === 403 && /rate limit|abuse/i.test(apiMessage))) {
             const nowSec = Math.floor(Date.now() / 1000);
             const waitSec = meta.retryAfter ?? (meta.reset ? Math.max(1, meta.reset - nowSec) : 60);
             if (waitSec > 90 || retries >= 2) {
                 const when = meta.reset ? new Date(meta.reset * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'later';
-                throw new Error(`GitHub rate limit reached. Resets at ${when}. Add a token to raise the limit.`);
+                const rlErr = new Error(`GitHub rate limit reached. Resets at ${when}. Add a token to raise the limit.`);
+                rlErr.isRateLimit = true;
+                throw rlErr;
             }
             retries++;
             await sleep(waitSec * 1000, signal);
             continue;
         }
-        throw new Error(`GitHub API error (${res.status}): ${res.statusText}`);
+        if (!apiMessage) {
+            try { apiMessage = (await res.clone().json()).message || ''; } catch (_) {}
+        }
+        throw new Error(`GitHub API error (${res.status}): ${apiMessage || res.statusText || 'request failed'}`);
     }
 }
 
@@ -209,6 +218,12 @@ export async function fetchCommentsForIssues(owner, repo, selectedIssues, option
             }
         } catch (err) {
             if (err.name === 'AbortError') throw err;
+            if (err.isRateLimit) {
+                // Per-issue requests would hit the same wall: report every thread as failed and stop.
+                for (const iss of needsComments) failures.push({ number: iss.number, error: err.message });
+                stats.rateLimited = true;
+                return { commentsByIssue, failures, stats };
+            }
             // Bulk failed (e.g. rate limit mid-way): fall back to per-issue for everything.
             byIssue.clear();
         }
@@ -243,9 +258,11 @@ export async function fetchCommentsForIssues(owner, repo, selectedIssues, option
     let idx = 0;
     let completed = needsComments.length - pending.length;
 
+    let rateLimitError = null;
     async function worker() {
         while (idx < pending.length) {
             if (signal && signal.aborted) break;
+            if (rateLimitError) break;
             const current = pending[idx++];
             const baseUrl = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${current.number}/comments?per_page=100`;
 
@@ -260,6 +277,7 @@ export async function fetchCommentsForIssues(owner, repo, selectedIssues, option
             } catch (err) {
                 if (err.name === 'AbortError') throw err;
                 failures.push({ number: current.number, error: err.message || String(err) });
+                if (err.isRateLimit) rateLimitError = err;
             }
 
             completed++;
@@ -273,6 +291,16 @@ export async function fetchCommentsForIssues(owner, repo, selectedIssues, option
 
     if (signal && signal.aborted) {
         throw new DOMException('Aborted', 'AbortError');
+    }
+
+    if (rateLimitError) {
+        stats.rateLimited = true;
+        const seen = new Set(failures.map(f => f.number));
+        for (const iss of pending) {
+            if (!commentsByIssue.has(iss.number) && !seen.has(iss.number)) {
+                failures.push({ number: iss.number, error: rateLimitError.message });
+            }
+        }
     }
 
     return { commentsByIssue, failures, stats };
