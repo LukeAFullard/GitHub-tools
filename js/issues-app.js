@@ -13,6 +13,7 @@ import { buildBannerItems, renderBanner } from './ui-banner.js';
 import { copyLabel } from './ui-labels.js';
 import { TARGETS, detectTarget } from './targets.js';
 import { buildSettingsSummary } from './settings-summary.js';
+import { commentCostHint } from './comment-cost.js';
 
 let loadController = null;
 let buildController = null;
@@ -75,6 +76,10 @@ const dom = {
     formatField: document.getElementById('formatField'),
     format: document.getElementById('format'),
     commentScope: document.getElementById('commentScope'),
+    commentScopeBar: document.getElementById('commentScopeBar'),
+    commentCostHint: document.getElementById('commentCostHint'),
+    selectionSummary: document.getElementById('selectionSummary'),
+    hiddenSelectedNote: document.getElementById('hiddenSelectedNote'),
     maxLogLines: document.getElementById('maxLogLines'),
     chunkLimitField: document.getElementById('chunkLimitField'),
     chunkLimit: document.getElementById('chunkLimit'),
@@ -467,7 +472,7 @@ dom.logHeader.addEventListener('click', () => dom.logToggleBtn.click());
 dom.toggleNlpCollapseBtn.addEventListener('click', () => {
     const hidden = dom.nlpBody.style.display === 'none';
     dom.nlpBody.style.display = hidden ? 'grid' : 'none';
-    dom.toggleNlpCollapseBtn.textContent = hidden ? 'Hide insights' : 'Show insights';
+    dom.toggleNlpCollapseBtn.textContent = hidden ? 'Hide topics' : 'Show topics';
 });
 
 function getFilteredIssues() {
@@ -512,6 +517,15 @@ function getFilteredIssues() {
     return filtered;
 }
 
+function updateCommentScopeBarUI() {
+    if (!dom.commentScopeBar) return;
+    const currentScope = dom.commentScope ? dom.commentScope.value : 'all';
+    const buttons = dom.commentScopeBar.querySelectorAll('button[data-scope]');
+    buttons.forEach(btn => {
+        btn.setAttribute('aria-pressed', btn.dataset.scope === currentScope ? 'true' : 'false');
+    });
+}
+
 function updateSelectionTelemetry() {
     const selectedList = allIssues.filter(iss => selectedIssueNumbers.has(iss.number));
     let totalBodyBytes = 0;
@@ -519,7 +533,31 @@ function updateSelectionTelemetry() {
         totalBodyBytes += (iss.title.length + iss.body.length);
     }
     const estBodyTokens = Math.round(totalBodyBytes / 3.8);
-    dom.selectedTokensBadge.textContent = `${selectedList.length} selected (~${estBodyTokens.toLocaleString()} estimated body tokens)`;
+    const n = selectedList.length;
+    const tokens = estBodyTokens.toLocaleString();
+
+    if (dom.selectedTokensBadge) {
+        dom.selectedTokensBadge.textContent = `${n} selected (~${tokens} estimated body tokens)`;
+    }
+    if (dom.selectionSummary) {
+        dom.selectionSummary.textContent = `${n} selected · ~${tokens} tokens (estimated)`;
+    }
+
+    const filtered = getFilteredIssues();
+    const visibleNums = new Set(filtered.map(i => i.number));
+    const hidden = selectedList.filter(i => !visibleNums.has(i.number)).length;
+    if (dom.hiddenSelectedNote) {
+        dom.hiddenSelectedNote.textContent = hidden > 0
+            ? `${hidden} selected issue(s) are hidden by the current filters.`
+            : '';
+    }
+
+    if (dom.commentCostHint) {
+        const cachedNumbers = new Set(cachedCommentsByIssue.keys());
+        const scope = dom.commentScope ? dom.commentScope.value : 'all';
+        const cost = commentCostHint(selectedList, allIssues, cachedNumbers, scope);
+        dom.commentCostHint.textContent = cost.text;
+    }
 }
 
 function renderIssuesList() {
@@ -1225,10 +1263,26 @@ if (dom.secretsControl) {
         if (el === dom.redactSecrets || el === dom.aggressiveRedact) {
             syncRedactLevelFromCheckboxes();
         }
+        if (el === dom.commentScope) {
+            updateCommentScopeBarUI();
+            updateSelectionTelemetry();
+        }
         updateSettingsSummary();
         if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
     });
 });
+
+if (dom.commentScopeBar) {
+    dom.commentScopeBar.addEventListener('click', (e) => {
+        const b = e.target.closest('button[data-scope]');
+        if (!b) return;
+        if (dom.commentScope) {
+            dom.commentScope.value = b.dataset.scope;
+            updateCommentScopeBarUI();
+            dom.commentScope.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    });
+}
 
 dom.aiInstructions.addEventListener('input', () => {
     dom.instructionsCharCount.textContent = `${dom.aiInstructions.value.length} chars`;
@@ -1403,6 +1457,7 @@ dom.shareUrlBtn.addEventListener('click', async () => {
 });
 
 syncRedactLevelFromCheckboxes();
+updateCommentScopeBarUI();
 
 // Startup target resolution:
 // ?format= in URL -> 'custom'; else saved cfg_target; else 'claude'

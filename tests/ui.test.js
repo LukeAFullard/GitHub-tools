@@ -4,6 +4,7 @@ import { buildBannerItems, renderBanner } from '../js/ui-banner.js';
 import { copyLabel } from '../js/ui-labels.js';
 import { detectTarget, TARGETS } from '../js/targets.js';
 import { buildSettingsSummary } from '../js/settings-summary.js';
+import { commentCostHint } from '../js/comment-cost.js';
 
 test('targets: detectTarget identifies known targets and falls back to custom', () => {
     // 3 matches
@@ -199,4 +200,50 @@ test('ui: copyLabel formats single-part and multi-part labels correctly', () => 
 
     // 3 parts - part index 2 (third part)
     assert.equal(copyLabel(2, 3), 'Copy part 3 of 3');
+});
+
+test('commentCostHint: scope none', () => {
+    const selected = [{ number: 1, commentsCount: 5, createdAt: '2024-01-01' }];
+    const hint = commentCostHint(selected, selected, new Set(), 'none');
+    assert.deepEqual(hint, { requests: 0, text: 'No extra requests.' });
+});
+
+test('commentCostHint: all cached', () => {
+    const selected = [
+        { number: 1, commentsCount: 5, createdAt: '2024-01-01' },
+        { number: 2, commentsCount: 0, createdAt: '2024-01-02' }
+    ];
+    const hint = commentCostHint(selected, selected, new Set([1]), 'all');
+    assert.deepEqual(hint, { requests: 0, text: 'Comments already loaded.' });
+});
+
+test('commentCostHint: 3 issues (per-issue count)', () => {
+    const selected = [
+        { number: 1, commentsCount: 10, createdAt: '2024-01-01' },
+        { number: 2, commentsCount: 15, createdAt: '2024-01-02' },
+        { number: 3, commentsCount: 5, createdAt: '2024-01-03' }
+    ];
+    // Needs 3 issues, perIssue = 1 + 1 + 1 = 3
+    // bulk condition requires perIssue >= 4, so it stays perIssue
+    const hint = commentCostHint(selected, selected, new Set(), 'all');
+    assert.deepEqual(hint, { requests: 3, text: 'About 3 GitHub requests.' });
+});
+
+test('commentCostHint: 60 recent issues in a 200-issue universe (bulk, small count)', () => {
+    // 200 issues total; the most recent 60 have comments, but total inWindow comments is small
+    const universe = [];
+    for (let i = 1; i <= 200; i++) {
+        universe.push({
+            number: i,
+            commentsCount: 1,
+            createdAt: i <= 60 ? '2024-06-01' : '2023-01-01'
+        });
+    }
+    const selected = universe.slice(0, 60);
+    // needs.length = 60, perIssue = 60
+    // inWindow = 60 * 1 = 60 comments -> bulkPages = Math.ceil(60/100) = 1
+    // bulk = perIssue >= 4 (60 >= 4) && bulkPages (1) <= 60 * 0.3 (18) -> true!
+    // n = 1
+    const hint = commentCostHint(selected, universe, new Set(), 'all');
+    assert.deepEqual(hint, { requests: 1, text: 'About 1 GitHub request.' });
 });
