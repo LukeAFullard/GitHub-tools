@@ -22,6 +22,7 @@ import { buildBannerItems, renderBanner } from './ui-banner.js';
 import { copyLabel } from './ui-labels.js';
 import { TARGETS, detectTarget } from './targets.js';
 import { buildSettingsSummary } from './settings-summary.js';
+import { defaultExcludedPaths, rankSuggestions } from './suggestions.js';
 import {
     parseRepoInput,
     fetchRateLimit,
@@ -75,6 +76,7 @@ const dom = {
     quotaRemainingText: document.getElementById('quotaRemainingText'),
     resetVal: document.getElementById('resetVal'),
     budgetBanner: document.getElementById('budgetBanner'),
+    budgetSuggestions: document.getElementById('budgetSuggestions'),
     budgetPresets: document.querySelector('.budget-presets'),
     workspacePanes: document.getElementById('workspacePanes'),
     logCard: document.getElementById('logCard'),
@@ -128,6 +130,7 @@ const dom = {
     manifestCount: document.getElementById('manifestCount'),
     selectedCount: document.getElementById('selectedCount'),
     selectedTokensBadge: document.getElementById('selectedTokensBadge'),
+    defaultsNote: document.getElementById('defaultsNote'),
     selectAllBtn: document.getElementById('selectAllBtn'),
     deselectAllBtn: document.getElementById('deselectAllBtn'),
     deselectLargeBtn: document.getElementById('deselectLargeBtn'),
@@ -549,42 +552,29 @@ function updateBudgetMeterUI(totalTokens, numChunks = 1, isPreBuild = false, max
 
     const chunkLimitVal = parseInt(dom.chunkLimit ? dom.chunkLimit.value : '0', 10) || 0;
 
-    if (isPreBuild && chunkLimitVal > 0 && totalTokens > chunkLimitVal) {
-        const estChunks = Math.ceil(totalTokens / chunkLimitVal);
-        const ratio = currentBudgetWindow > 0 ? (totalTokens / currentBudgetWindow) : 0;
-        const pct = Math.min(Math.round((totalTokens / currentBudgetWindow) * 100), 100);
-
-        if (dom.budgetFill) {
-            dom.budgetFill.style.width = `${pct}%`;
-            dom.budgetFill.className = 'budget-fill ' + (
-                ratio <= 0.85 ? 'fits' : ratio <= 1.0 ? 'near' : 'over'
-            );
-        }
-
-        if (dom.budgetStatusText) {
-            dom.budgetStatusText.textContent = `About ${totalTokens.toLocaleString()} tokens, will split into about ${estChunks} parts`;
-            dom.budgetStatusText.className = 'budget-status-text ' + (
-                ratio <= 0.85 ? 'status-fits' : ratio <= 1.0 ? 'status-near' : 'status-over'
-            );
-        }
-        return;
-    }
-
     const isSplit = numChunks > 1 || (chunkLimitVal > 0 && totalTokens > chunkLimitVal);
     const evaluatedTokens = isSplit ? (maxChunkTokens || (chunkLimitVal > 0 ? Math.min(totalTokens, chunkLimitVal) : Math.round(totalTokens / numChunks))) : totalTokens;
 
     const ratio = currentBudgetWindow > 0 ? (evaluatedTokens / currentBudgetWindow) : 0;
     const pct = Math.min(Math.round((totalTokens / currentBudgetWindow) * 100), 100);
 
+    const isOver = hasOversizedChunk || ratio > 1.0;
+
     if (dom.budgetFill) {
         dom.budgetFill.style.width = `${pct}%`;
         dom.budgetFill.className = 'budget-fill ' + (
-            (hasOversizedChunk || ratio > 1.0) ? 'over' : ratio <= 0.85 ? 'fits' : 'near'
+            isOver ? 'over' : ratio <= 0.85 ? 'fits' : 'near'
         );
     }
 
     if (dom.budgetStatusText) {
-        if (isSplit && numChunks > 1) {
+        if (isPreBuild && isSplit) {
+            const estChunks = Math.ceil(totalTokens / chunkLimitVal);
+            dom.budgetStatusText.textContent = `About ${totalTokens.toLocaleString()} tokens, will split into about ${estChunks} parts`;
+            dom.budgetStatusText.className = 'budget-status-text ' + (
+                isOver ? 'status-over' : ratio <= 0.85 ? 'status-fits' : 'status-near'
+            );
+        } else if (isSplit && numChunks > 1) {
             const displayTokens = maxChunkTokens || Math.round(totalTokens / numChunks);
             if (hasOversizedChunk) {
                 dom.budgetStatusText.textContent = `Split into ${numChunks} parts (largest: ${displayTokens.toLocaleString()} tok) - 1+ part exceeds split limit`;
@@ -603,6 +593,39 @@ function updateBudgetMeterUI(totalTokens, numChunks = 1, isPreBuild = false, max
             const overTokens = (totalTokens - currentBudgetWindow).toLocaleString();
             dom.budgetStatusText.textContent = `Over by ${overTokens} tokens. Split into parts or deselect files.`;
             dom.budgetStatusText.className = 'budget-status-text status-over';
+        }
+    }
+
+    if (dom.budgetSuggestions) {
+        if (isOver && activeTreeControls) {
+            const selectedNodes = activeTreeControls.getSelectedNodes();
+            const files = selectedNodes.map(node => ({
+                path: node.path,
+                tokens: Math.round((node.size || 0) / 3.8)
+            }));
+            const suggestions = rankSuggestions(files, 3, 0.05);
+            if (suggestions.length > 0) {
+                dom.budgetSuggestions.innerHTML = '';
+                suggestions.forEach(s => {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.textContent = `${s.path} is ~${Math.round(s.tokens / 1000)}k tokens. Exclude it?`;
+                    btn.onclick = () => {
+                        const currentNodes = activeTreeControls.getSelectedNodes();
+                        const toExclude = currentNodes
+                            .filter(n => n.path === s.path || n.path.startsWith(s.path + '/'))
+                            .map(n => n.path);
+                        if (toExclude.length > 0) {
+                            activeTreeControls.setPathsChecked(toExclude, false);
+                        }
+                    };
+                    dom.budgetSuggestions.appendChild(btn);
+                });
+            } else {
+                dom.budgetSuggestions.innerHTML = '';
+            }
+        } else {
+            dom.budgetSuggestions.innerHTML = '';
         }
     }
 }
@@ -1420,6 +1443,35 @@ dom.packBtn.addEventListener('click', async () => {
         );
         activeTreeControls = treeControls;
         currentActiveSelection = activeSelection;
+
+        if (!repoInfo.subpath) {
+            const allFilePaths = processable.map(f => f.path);
+            const { excluded, folders } = defaultExcludedPaths(allFilePaths);
+            if (excluded.length > 0) {
+                treeControls.setPathsChecked(excluded, false);
+                if (dom.defaultsNote) {
+                    dom.defaultsNote.hidden = false;
+                    dom.defaultsNote.innerHTML = '';
+                    const noteText = document.createTextNode(`Left out ${folders.length} folder(s): ${folders.slice(0, 4).join(', ')}. `);
+                    const incBtn = document.createElement('button');
+                    incBtn.type = 'button';
+                    incBtn.textContent = 'Include them';
+                    incBtn.onclick = () => {
+                        treeControls.setPathsChecked(excluded, true);
+                        dom.defaultsNote.hidden = true;
+                        dom.defaultsNote.innerHTML = '';
+                    };
+                    dom.defaultsNote.appendChild(noteText);
+                    dom.defaultsNote.appendChild(incBtn);
+                }
+            } else if (dom.defaultsNote) {
+                dom.defaultsNote.hidden = true;
+                dom.defaultsNote.innerHTML = '';
+            }
+        } else if (dom.defaultsNote) {
+            dom.defaultsNote.hidden = true;
+            dom.defaultsNote.innerHTML = '';
+        }
 
         if (treeControls.getSelectedStats && dom.selectedTokensBadge) {
             const stats = treeControls.getSelectedStats();
