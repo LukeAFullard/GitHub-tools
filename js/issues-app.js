@@ -14,6 +14,7 @@ import { copyLabel } from './ui-labels.js';
 import { TARGETS, detectTarget } from './targets.js';
 import { buildSettingsSummary } from './settings-summary.js';
 import { commentCostHint } from './comment-cost.js';
+import { buildSummaryLines } from './ui-summary.js';
 
 let loadController = null;
 let buildController = null;
@@ -141,11 +142,8 @@ const dom = {
     downloadBtn: document.getElementById('downloadBtn'),
     downloadAllBtn: document.getElementById('downloadAllBtn'),
     warningBanner: document.getElementById('warningBanner'),
-    buildSummaryCard: document.getElementById('buildSummaryCard'),
-    summaryItemsCount: document.getElementById('summaryItemsCount'),
-    summaryTokensCount: document.getElementById('summaryTokensCount'),
-    summaryPartsCount: document.getElementById('summaryPartsCount'),
-    summarySecretsCount: document.getElementById('summarySecretsCount'),
+    summaryCard: document.getElementById('summaryCard'),
+    togglePreviewBtn: document.getElementById('togglePreviewBtn'),
     secretsWarningPanel: document.getElementById('secretsWarningPanel'),
     secretsWarningSummary: document.getElementById('secretsWarningSummary'),
     excludeAllSecretsBtn: document.getElementById('excludeAllSecretsBtn'),
@@ -779,7 +777,15 @@ dom.selectLinkedBtn.addEventListener('click', () => {
 dom.loadIssuesBtn.addEventListener('click', async () => {
     dom.repoInputError.style.display = 'none';
     hidePersistentWarning();
-    if (dom.buildSummaryCard) dom.buildSummaryCard.style.display = 'none';
+    if (dom.summaryCard) {
+        dom.summaryCard.hidden = true;
+        dom.summaryCard.innerHTML = '';
+    }
+    if (dom.togglePreviewBtn) {
+        dom.togglePreviewBtn.style.display = 'none';
+        dom.togglePreviewBtn.setAttribute('aria-expanded', 'false');
+        dom.togglePreviewBtn.textContent = 'Show preview';
+    }
     const repoInfo = parseRepoInput(dom.repoUrl.value);
     if (!repoInfo) {
         dom.repoInputError.style.display = 'block';
@@ -1091,41 +1097,16 @@ async function buildSelectedContext(summaryOnly = false) {
     }
 
     dom.outputEmptyState.style.display = 'none';
-    dom.previewNotice.style.display = packedOutputText.length > 45000 ? 'block' : 'none';
-    dom.previewArea.style.display = 'block';
+    dom.previewNotice.style.display = 'none';
+    dom.previewArea.style.display = 'none';
+    if (dom.togglePreviewBtn) {
+        dom.togglePreviewBtn.style.display = 'inline-flex';
+        dom.togglePreviewBtn.setAttribute('aria-expanded', 'false');
+        dom.togglePreviewBtn.textContent = 'Show preview';
+    }
     dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview] ...' : '');
     dom.copyBtn.disabled = false;
     dom.downloadBtn.disabled = false;
-
-    if (dom.buildSummaryCard) {
-        if (dom.summaryItemsCount) {
-            dom.summaryItemsCount.textContent = `${targetIssues.length} issue${targetIssues.length === 1 ? '' : 's'} (${totalCommentsIncluded} comment${totalCommentsIncluded === 1 ? '' : 's'})`;
-        }
-        if (dom.summaryTokensCount) {
-            dom.summaryTokensCount.textContent = `~${totalTokens.toLocaleString()} estimated tokens`;
-        }
-        if (dom.summaryPartsCount) {
-            dom.summaryPartsCount.textContent = generatedChunks.length > 1 ? `${generatedChunks.length} parts` : '1 part';
-        }
-        if (dom.summarySecretsCount) {
-            const isRedactOn = dom.redactSecrets ? dom.redactSecrets.checked : true;
-            const isAggressiveOn = dom.aggressiveRedact ? dom.aggressiveRedact.checked : true;
-            let totalSecrets = 0;
-            let redactedSecrets = 0;
-            secretRows.forEach(r => {
-                totalSecrets++;
-                if (isRedactOn && (r.type !== 'generic-secret' || isAggressiveOn)) redactedSecrets++;
-            });
-            if (totalSecrets === 0) {
-                dom.summarySecretsCount.textContent = 'None detected';
-            } else if (redactedSecrets === totalSecrets) {
-                dom.summarySecretsCount.textContent = `${redactedSecrets} hidden`;
-            } else {
-                dom.summarySecretsCount.textContent = `${redactedSecrets} hidden (${totalSecrets - redactedSecrets} present)`;
-            }
-        }
-        dom.buildSummaryCard.style.display = 'flex';
-    }
 
     const failedThreads = processedIssues.filter(i => i.commentsFetchFailed).length;
     const resetTime = dom.resetVal ? dom.resetVal.textContent : '';
@@ -1139,6 +1120,32 @@ async function buildSelectedContext(summaryOnly = false) {
     });
     if (dom.warningBanner) {
         renderBanner(dom.warningBanner, bannerItems);
+    }
+
+    if (dom.summaryCard) {
+        const isRedactOn = dom.redactSecrets ? dom.redactSecrets.checked : true;
+        const isAggressiveOn = dom.aggressiveRedact ? dom.aggressiveRedact.checked : true;
+        let redactedSecrets = 0;
+        secretRows.forEach(r => {
+            if (isRedactOn && (r.type !== 'generic-secret' || isAggressiveOn)) redactedSecrets++;
+        });
+
+        const summaryLines = buildSummaryLines({
+            kind: 'issues',
+            items: targetIssues.length,
+            comments: totalCommentsIncluded,
+            tokens: totalTokens,
+            parts: generatedChunks.length,
+            secretsHidden: redactedSecrets,
+            warnings: bannerItems.length
+        });
+        dom.summaryCard.innerHTML = '';
+        summaryLines.forEach(line => {
+            const lineEl = document.createElement('div');
+            lineEl.textContent = line;
+            dom.summaryCard.appendChild(lineEl);
+        });
+        dom.summaryCard.hidden = false;
     }
 
     setAppState('built');
@@ -1379,8 +1386,10 @@ function updateActiveChunkView(index) {
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
     }
 
-    if (dom.previewNotice) dom.previewNotice.style.display = packedOutputText.length > 45000 ? 'block' : 'none';
     dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview] ...' : '');
+    const isExpanded = dom.togglePreviewBtn && dom.togglePreviewBtn.getAttribute('aria-expanded') === 'true';
+    if (dom.previewNotice) dom.previewNotice.style.display = isExpanded && packedOutputText.length > 45000 ? 'block' : 'none';
+    if (dom.previewArea) dom.previewArea.style.display = isExpanded ? 'block' : 'none';
 }
 
 dom.chunkSelect.addEventListener('change', () => {
@@ -1441,6 +1450,23 @@ dom.copyBtn.addEventListener('click', async () => {
         showToast('Unable to copy automatically.', 'error');
     }
 });
+
+if (dom.togglePreviewBtn && dom.previewArea) {
+    dom.togglePreviewBtn.addEventListener('click', () => {
+        const isExpanded = dom.togglePreviewBtn.getAttribute('aria-expanded') === 'true';
+        if (isExpanded) {
+            dom.togglePreviewBtn.setAttribute('aria-expanded', 'false');
+            dom.togglePreviewBtn.textContent = 'Show preview';
+            dom.previewArea.style.display = 'none';
+            if (dom.previewNotice) dom.previewNotice.style.display = 'none';
+        } else {
+            dom.togglePreviewBtn.setAttribute('aria-expanded', 'true');
+            dom.togglePreviewBtn.textContent = 'Hide preview';
+            dom.previewArea.style.display = 'block';
+            if (dom.previewNotice) dom.previewNotice.style.display = packedOutputText.length > 45000 ? 'block' : 'none';
+        }
+    });
+}
 
 dom.wrapToggleBtn.addEventListener('click', () => {
     dom.previewArea.classList.toggle('wrap');

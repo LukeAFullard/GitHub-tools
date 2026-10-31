@@ -23,6 +23,7 @@ import { copyLabel } from './ui-labels.js';
 import { TARGETS, detectTarget } from './targets.js';
 import { buildSettingsSummary } from './settings-summary.js';
 import { defaultExcludedPaths, rankSuggestions } from './suggestions.js';
+import { buildSummaryLines } from './ui-summary.js';
 import {
     parseRepoInput,
     fetchRateLimit,
@@ -96,11 +97,8 @@ const dom = {
     aiInstructions: document.getElementById('aiInstructions'),
     clearInstructionsBtn: document.getElementById('clearInstructionsBtn'),
     instructionsCharCount: document.getElementById('instructionsCharCount'),
-    buildSummaryCard: document.getElementById('buildSummaryCard'),
-    summaryItemsCount: document.getElementById('summaryItemsCount'),
-    summaryTokensCount: document.getElementById('summaryTokensCount'),
-    summaryPartsCount: document.getElementById('summaryPartsCount'),
-    summarySecretsCount: document.getElementById('summarySecretsCount'),
+    summaryCard: document.getElementById('summaryCard'),
+    togglePreviewBtn: document.getElementById('togglePreviewBtn'),
     secretsWarningPanel: document.getElementById('secretsWarningPanel'),
     secretsWarningSummary: document.getElementById('secretsWarningSummary'),
     excludeAllSecretsBtn: document.getElementById('excludeAllSecretsBtn'),
@@ -512,6 +510,24 @@ if (dom.mobilePrimaryBtn) {
     });
 }
 
+// Preview toggle
+if (dom.togglePreviewBtn && dom.previewArea) {
+    dom.togglePreviewBtn.addEventListener('click', () => {
+        const isExpanded = dom.togglePreviewBtn.getAttribute('aria-expanded') === 'true';
+        if (isExpanded) {
+            dom.togglePreviewBtn.setAttribute('aria-expanded', 'false');
+            dom.togglePreviewBtn.textContent = 'Show preview';
+            dom.previewArea.style.display = 'none';
+            if (dom.previewNotice) dom.previewNotice.style.display = 'none';
+        } else {
+            dom.togglePreviewBtn.setAttribute('aria-expanded', 'true');
+            dom.togglePreviewBtn.textContent = 'Hide preview';
+            dom.previewArea.style.display = 'block';
+            if (dom.previewNotice) dom.previewNotice.style.display = packedOutputText.length > 45000 ? 'block' : 'none';
+        }
+    });
+}
+
 // Wrap toggle
 if (dom.wrapToggleBtn && dom.previewArea) {
     dom.wrapToggleBtn.addEventListener('click', () => {
@@ -693,7 +709,15 @@ function clearOutputState() {
     activeChunkIndex = 0;
     packedOutputText = "";
     totalTokensAllChunks = 0;
-    if (dom.buildSummaryCard) dom.buildSummaryCard.style.display = 'none';
+    if (dom.summaryCard) {
+        dom.summaryCard.hidden = true;
+        dom.summaryCard.innerHTML = '';
+    }
+    if (dom.togglePreviewBtn) {
+        dom.togglePreviewBtn.style.display = 'none';
+        dom.togglePreviewBtn.setAttribute('aria-expanded', 'false');
+        dom.togglePreviewBtn.textContent = 'Show preview';
+    }
     if (dom.previewArea) dom.previewArea.value = "";
     if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'flex';
     if (dom.previewNotice) dom.previewNotice.style.display = 'none';
@@ -1055,52 +1079,55 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
 
     dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview; complete text will download] ...' : '');
     if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'none';
-    if (dom.previewNotice) dom.previewNotice.style.display = packedOutputText.length > 45000 ? 'block' : 'none';
-    if (dom.previewArea) dom.previewArea.style.display = 'block';
+    if (dom.previewNotice) dom.previewNotice.style.display = 'none';
+    if (dom.previewArea) dom.previewArea.style.display = 'none';
+    if (dom.togglePreviewBtn) {
+        dom.togglePreviewBtn.style.display = 'inline-flex';
+        dom.togglePreviewBtn.setAttribute('aria-expanded', 'false');
+        dom.togglePreviewBtn.textContent = 'Show preview';
+    }
     if (dom.downloadBtn) dom.downloadBtn.disabled = false;
     if (dom.copyBtn) dom.copyBtn.disabled = false;
 
-    if (dom.buildSummaryCard) {
-        let totalFindings = 0;
-        let redactedFindings = 0;
-        targetFiles.forEach(f => {
-            const fileSecrets = secretsMap.get(f.path) || [];
-            fileSecrets.forEach(sec => {
-                totalFindings++;
-                const isRedacted = isRedact && (sec.type !== 'generic-secret' || isAggressive);
-                if (isRedacted) redactedFindings++;
-            });
+    let totalFindings = 0;
+    let redactedFindings = 0;
+    targetFiles.forEach(f => {
+        const fileSecrets = secretsMap.get(f.path) || [];
+        fileSecrets.forEach(sec => {
+            totalFindings++;
+            const isRedacted = isRedact && (sec.type !== 'generic-secret' || isAggressive);
+            if (isRedacted) redactedFindings++;
         });
+    });
 
-        if (dom.summaryItemsCount) dom.summaryItemsCount.textContent = `${processedFiles.length} file${processedFiles.length === 1 ? '' : 's'}`;
-        if (dom.summaryTokensCount) dom.summaryTokensCount.textContent = `~${totalTokensAllChunks.toLocaleString()} estimated tokens`;
-        if (dom.summaryPartsCount) dom.summaryPartsCount.textContent = generatedChunks.length > 1 ? `${generatedChunks.length} parts` : '1 part';
-        if (dom.summarySecretsCount) {
-            if (totalFindings === 0) {
-                dom.summarySecretsCount.textContent = 'None detected';
-            } else if (redactedFindings === totalFindings) {
-                dom.summarySecretsCount.textContent = `${redactedFindings} hidden`;
-            } else {
-                dom.summarySecretsCount.textContent = `${redactedFindings} hidden (${totalFindings - redactedFindings} present)`;
-            }
-        }
-        dom.buildSummaryCard.style.display = 'flex';
-    }
-
+    let bannerItems = [];
     if (dom.warningBanner) {
-        let totalFindings = 0;
-        targetFiles.forEach(f => {
-            const fileSecrets = secretsMap.get(f.path) || [];
-            totalFindings += fileSecrets.length;
-        });
         const redactionOff = dom.redactSecrets ? !dom.redactSecrets.checked : false;
-        const bannerItems = buildBannerItems({
+        bannerItems = buildBannerItems({
             truncatedTree: isTreeTruncated,
             skippedLarge: countSkippedLarge,
             redactionOff,
             secretCount: totalFindings
         });
         renderBanner(dom.warningBanner, bannerItems);
+    }
+
+    if (dom.summaryCard) {
+        const summaryLines = buildSummaryLines({
+            kind: 'files',
+            items: processedFiles.length,
+            tokens: totalTokensAllChunks,
+            parts: generatedChunks.length,
+            secretsHidden: redactedFindings,
+            warnings: bannerItems.length
+        });
+        dom.summaryCard.innerHTML = '';
+        summaryLines.forEach(line => {
+            const lineEl = document.createElement('div');
+            lineEl.textContent = line;
+            dom.summaryCard.appendChild(lineEl);
+        });
+        dom.summaryCard.hidden = false;
     }
 
     setAppState('built');
@@ -1840,8 +1867,10 @@ function updateActiveChunkView(index) {
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
     }
 
-    if (dom.previewNotice) dom.previewNotice.style.display = packedOutputText.length > 45000 ? 'block' : 'none';
     dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview; complete text will download] ...' : '');
+    const isExpanded = dom.togglePreviewBtn && dom.togglePreviewBtn.getAttribute('aria-expanded') === 'true';
+    if (dom.previewNotice) dom.previewNotice.style.display = isExpanded && packedOutputText.length > 45000 ? 'block' : 'none';
+    if (dom.previewArea) dom.previewArea.style.display = isExpanded ? 'block' : 'none';
 }
 
 dom.chunkSelect.addEventListener('change', () => {
