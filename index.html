@@ -129,15 +129,6 @@
 
             <div id="branchTokenGroup" class="branch-token-group secondary-control">
                 <div class="option-field">
-                    <label for="sendTo">Send to</label>
-                    <select id="sendTo" style="max-width: 140px;">
-                        <option value="claude" selected>Claude (200k)</option>
-                        <option value="chatgpt">ChatGPT (128k)</option>
-                        <option value="gemini">Gemini (1M)</option>
-                        <option value="custom">Custom</option>
-                    </select>
-                </div>
-                <div class="option-field">
                     <label for="branch">Branch / Tag</label>
                     <input type="text" id="branch" placeholder="main/master" style="max-width: 130px;">
                 </div>
@@ -150,9 +141,18 @@
         </form>
     </section>
 
+    <!-- Target Bar -->
+    <div id="targetBar" class="target-bar" role="group" aria-label="Send to">
+        <span class="target-bar-label">Send to:</span>
+        <button type="button" data-target="claude" aria-pressed="true">Claude</button>
+        <button type="button" data-target="chatgpt" aria-pressed="false">ChatGPT</button>
+        <button type="button" data-target="gemini" aria-pressed="false">Gemini</button>
+        <button type="button" data-target="custom" aria-pressed="false">Custom</button>
+    </div>
+
     <!-- Options Collapsible Drawer -->
     <div id="optionsDrawer" class="options-drawer">
-        <div class="option-field">
+        <div class="option-field" id="formatField">
             <label for="format">Format</label>
             <select id="format">
                 <option value="claude-xml">Anthropic Claude XML</option>
@@ -171,26 +171,31 @@
             </select>
         </div>
 
-        <div class="option-field">
+        <div class="option-field" id="chunkLimitField">
             <label for="chunkLimit">Split into parts of up to N tokens (0 = don't split)</label>
             <input type="number" id="chunkLimit" value="0" min="0" step="10000" placeholder="0 = Auto / single file">
         </div>
 
         <div class="option-field">
-            <label for="secretsControl">Hide secrets in output</label>
-            <select id="secretsControl">
+            <label for="redactLevel">Hide secrets</label>
+            <select id="redactLevel">
                 <option value="off">Off</option>
                 <option value="standard" selected>Standard</option>
-                <option value="strict">Strict secret hiding (also catches generic passwords)</option>
+                <option value="strict">Strict</option>
             </select>
             <!-- Preserved hidden inputs for backward compatibility -->
-            <input type="checkbox" id="redactSecrets" checked style="display: none;">
-            <input type="checkbox" id="aggressiveRedact" style="display: none;">
+            <input type="checkbox" id="redactSecrets" checked hidden style="display: none;">
+            <input type="checkbox" id="aggressiveRedact" hidden style="display: none;">
         </div>
 
         <!-- Content Group -->
         <div class="settings-group-header full-width">
             <span>Content</span>
+        </div>
+
+        <div class="option-field" id="throttleMsField" hidden>
+            <label for="throttleMs">Throttle (ms)</label>
+            <input type="number" id="throttleMs" value="80" min="0" max="1000">
         </div>
 
         <div class="option-field">

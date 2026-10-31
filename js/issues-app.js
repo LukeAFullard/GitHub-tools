@@ -11,6 +11,8 @@ import { scanForSecrets } from './secrets.js';
 import { switchTab } from './ui-tabs.js';
 import { buildBannerItems, renderBanner } from './ui-banner.js';
 import { copyLabel } from './ui-labels.js';
+import { TARGETS, detectTarget } from './targets.js';
+import { buildSettingsSummary } from './settings-summary.js';
 
 let loadController = null;
 let buildController = null;
@@ -30,6 +32,7 @@ let outputExt = 'xml';
 let outputMime = 'application/xml';
 let currentBudgetWindow = 200000;
 let currentAppState = 'empty';
+let currentTargetKey = 'claude';
 let nlpWorker = null;
 let buildGeneration = 0;
 let inputDebounceTimer = null;
@@ -55,6 +58,7 @@ const dom = {
     quotaRemainingText: document.getElementById('quotaRemainingText'),
     resetVal: document.getElementById('resetVal'),
     budgetBanner: document.getElementById('budgetBanner'),
+    budgetPresets: document.querySelector('.budget-presets'),
     workspacePanes: document.getElementById('workspacePanes'),
     logCard: document.getElementById('logCard'),
     themeToggleBtn: document.getElementById('themeToggleBtn'),
@@ -65,11 +69,14 @@ const dom = {
     warningBannerRetryBtn: document.getElementById('warningBannerRetryBtn'),
     warningBannerDismissBtn: document.getElementById('warningBannerDismissBtn'),
 
-    sendTo: document.getElementById('sendTo'),
+    targetBar: document.getElementById('targetBar'),
+    formatField: document.getElementById('formatField'),
     format: document.getElementById('format'),
     commentScope: document.getElementById('commentScope'),
     maxLogLines: document.getElementById('maxLogLines'),
+    chunkLimitField: document.getElementById('chunkLimitField'),
     chunkLimit: document.getElementById('chunkLimit'),
+    redactLevel: document.getElementById('redactLevel'),
     secretsControl: document.getElementById('secretsControl'),
     stripImages: document.getElementById('stripImages'),
     filterBots: document.getElementById('filterBots'),
@@ -350,85 +357,94 @@ if (urlParams.get('repo') && dom.repoUrl) {
 }
 
 export function formatSettingsSummaryIssues({ format, secretsMode }) {
-    const formatLabels = {
-        'claude-xml': 'Claude XML',
-        'markdown': 'Markdown',
-        'generic-xml': 'Generic XML',
-        'json': 'JSON'
-    };
-    const fmtText = formatLabels[format] || 'Claude XML';
-
-    let secText = 'secrets hidden';
-    if (secretsMode === 'off') secText = 'secrets visible';
-    else if (secretsMode === 'strict') secText = 'strict secrets hidden';
-
-    return `Settings: ${fmtText} · ${secText}`;
+    const targetKey = detectTarget(format, currentBudgetWindow);
+    const targetLabel = TARGETS[targetKey]?.label || 'Custom';
+    return 'Settings: ' + buildSettingsSummary({
+        targetLabel,
+        minifyMode: 'none',
+        redactLevel: secretsMode,
+        chunkLimit: parseInt(dom.chunkLimit ? dom.chunkLimit.value : '0', 10) || 0
+    });
 }
 
 function updateSettingsSummary() {
-    if (!dom.optionsToggleSummary) return;
-    const format = dom.format ? dom.format.value : 'claude-xml';
-    const secretsMode = dom.secretsControl ? dom.secretsControl.value : (
-        dom.redactSecrets && !dom.redactSecrets.checked ? 'off' :
-        dom.aggressiveRedact && dom.aggressiveRedact.checked ? 'strict' : 'standard'
-    );
-    dom.optionsToggleSummary.textContent = formatSettingsSummaryIssues({ format, secretsMode });
+    const target = TARGETS[currentTargetKey] || TARGETS.custom;
+    const targetLabel = target.label;
+    const redactLevel = dom.redactLevel ? dom.redactLevel.value : 'strict';
+    const chunkLimit = parseInt(dom.chunkLimit ? dom.chunkLimit.value : '0', 10) || 0;
+
+    const summaryText = 'Settings: ' + buildSettingsSummary({
+        targetLabel,
+        minifyMode: 'none',
+        redactLevel,
+        chunkLimit
+    });
+
+    const summarySpan = dom.optionsToggleSummary || (dom.optionsToggleBtn ? dom.optionsToggleBtn.querySelector('span') : null);
+    if (summarySpan) {
+        summarySpan.textContent = summaryText;
+    }
 }
 
-function syncSecretsControlFromCheckboxes() {
-    if (!dom.secretsControl) return;
+function syncRedactLevelFromCheckboxes() {
     const isRedact = dom.redactSecrets ? dom.redactSecrets.checked : true;
     const isAggressive = dom.aggressiveRedact ? dom.aggressiveRedact.checked : true;
-    if (!isRedact) {
-        dom.secretsControl.value = 'off';
-    } else if (isAggressive) {
-        dom.secretsControl.value = 'strict';
-    } else {
-        dom.secretsControl.value = 'standard';
+    const level = !isRedact ? 'off' : (isAggressive ? 'strict' : 'standard');
+    if (dom.redactLevel) dom.redactLevel.value = level;
+    if (dom.secretsControl) dom.secretsControl.value = level;
+}
+
+function syncCheckboxesFromRedactLevel() {
+    const level = dom.redactLevel ? dom.redactLevel.value : (dom.secretsControl ? dom.secretsControl.value : 'strict');
+    if (dom.redactSecrets) {
+        dom.redactSecrets.checked = (level !== 'off');
+        dom.redactSecrets.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (dom.aggressiveRedact) {
+        dom.aggressiveRedact.checked = (level === 'strict');
+        dom.aggressiveRedact.dispatchEvent(new Event('change', { bubbles: true }));
     }
 }
 
-function syncCheckboxesFromSecretsControl() {
-    if (!dom.secretsControl) return;
-    const val = dom.secretsControl.value;
-    if (dom.redactSecrets) dom.redactSecrets.checked = (val !== 'off');
-    if (dom.aggressiveRedact) dom.aggressiveRedact.checked = (val === 'strict');
+function updateTargetVisibility(key) {
+    const isCustom = key === 'custom';
+    const formatEl = dom.formatField || (dom.format ? dom.format.closest('.option-field') : null);
+    const chunkLimitEl = dom.chunkLimitField || (dom.chunkLimit ? dom.chunkLimit.closest('.option-field') : null);
+    const presetsEl = dom.budgetPresets || document.querySelector('.budget-presets');
+
+    if (formatEl) formatEl.hidden = !isCustom;
+    if (chunkLimitEl) chunkLimitEl.hidden = !isCustom;
+    if (presetsEl) presetsEl.hidden = !isCustom;
 }
 
-function syncSendToFromValues() {
-    if (!dom.sendTo) return;
-    const fmt = dom.format ? dom.format.value : 'claude-xml';
-    const chunkVal = parseInt(dom.chunkLimit ? dom.chunkLimit.value : '0', 10) || 0;
+export function applyTarget(key) {
+    currentTargetKey = key in TARGETS ? key : 'custom';
+    const target = TARGETS[currentTargetKey];
 
-    if (fmt === 'claude-xml' && currentBudgetWindow === 200000 && (chunkVal === 0 || chunkVal === 200000)) {
-        dom.sendTo.value = 'claude';
-    } else if (fmt === 'markdown' && currentBudgetWindow === 128000 && (chunkVal === 0 || chunkVal === 128000)) {
-        dom.sendTo.value = 'chatgpt';
-    } else if (fmt === 'markdown' && currentBudgetWindow === 1000000 && (chunkVal === 0 || chunkVal === 1000000)) {
-        dom.sendTo.value = 'gemini';
-    } else {
-        dom.sendTo.value = 'custom';
+    if (currentTargetKey !== 'custom' && target.format && target.budget !== undefined) {
+        if (dom.format) dom.format.value = target.format;
+        if (dom.chunkLimit) dom.chunkLimit.value = String(target.budget);
+        currentBudgetWindow = target.budget;
+        if (dom.targetBudgetDisplay) {
+            dom.targetBudgetDisplay.textContent = 'of ' + target.budget.toLocaleString() + ' estimated tokens';
+        }
+        if (dom.format) dom.format.dispatchEvent(new Event('change', { bubbles: true }));
+        if (dom.chunkLimit) dom.chunkLimit.dispatchEvent(new Event('change', { bubbles: true }));
     }
-}
 
-function applySendToPreset(target) {
-    if (!target || target === 'custom') return;
-    if (target === 'claude') {
-        if (dom.format) dom.format.value = 'claude-xml';
-        currentBudgetWindow = 200000;
-        if (dom.chunkLimit) dom.chunkLimit.value = '200000';
-    } else if (target === 'chatgpt') {
-        if (dom.format) dom.format.value = 'markdown';
-        currentBudgetWindow = 128000;
-        if (dom.chunkLimit) dom.chunkLimit.value = '128000';
-    } else if (target === 'gemini') {
-        if (dom.format) dom.format.value = 'markdown';
-        currentBudgetWindow = 1000000;
-        if (dom.chunkLimit) dom.chunkLimit.value = '1000000';
+    updateTargetVisibility(currentTargetKey);
+
+    if (dom.targetBar) {
+        const buttons = dom.targetBar.querySelectorAll('button[data-target]');
+        buttons.forEach(btn => {
+            btn.setAttribute('aria-pressed', btn.dataset.target === currentTargetKey ? 'true' : 'false');
+        });
     }
-    if (dom.targetBudgetDisplay) {
-        dom.targetBudgetDisplay.textContent = `of ${currentBudgetWindow.toLocaleString()} estimated tokens`;
-    }
+
+    try {
+        localStorage.setItem('cfg_target', currentTargetKey);
+    } catch (_) {}
+
     updateSettingsSummary();
     updateCopyBtnLabel();
 }
@@ -447,9 +463,8 @@ export function getCopyButtonLabel(target, activeIndex = 0, totalParts = 1) {
 
 function updateCopyBtnLabel(activeIndex = 0) {
     if (!dom.copyBtn) return;
-    const target = dom.sendTo ? dom.sendTo.value : 'claude';
     const totalParts = generatedChunks.length;
-    dom.copyBtn.textContent = getCopyButtonLabel(target, activeIndex, totalParts);
+    dom.copyBtn.textContent = getCopyButtonLabel(currentTargetKey, activeIndex, totalParts);
 }
 
 dom.optionsToggleBtn.addEventListener('click', () => {
@@ -1175,29 +1190,57 @@ dom.abortBtn.addEventListener('click', () => {
     if (buildController) buildController.abort();
 });
 
-if (dom.sendTo) {
-    dom.sendTo.addEventListener('change', () => {
-        applySendToPreset(dom.sendTo.value);
+if (dom.targetBar) {
+    dom.targetBar.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-target]');
+        if (!b) return;
+        applyTarget(b.dataset.target);
+        if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
+    });
+}
+
+if (dom.redactLevel) {
+    dom.redactLevel.addEventListener('change', () => {
+        syncCheckboxesFromRedactLevel();
+        updateSettingsSummary();
         if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
     });
 }
 
 if (dom.secretsControl) {
     dom.secretsControl.addEventListener('change', () => {
-        syncCheckboxesFromSecretsControl();
+        if (dom.redactLevel) dom.redactLevel.value = dom.secretsControl.value;
+        syncCheckboxesFromRedactLevel();
         updateSettingsSummary();
         if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
     });
 }
 
-[dom.format, dom.commentScope, dom.maxLogLines, dom.chunkLimit, dom.stripImages, dom.filterBots, dom.filterNoise, dom.includeNlpSummary, dom.redactSecrets, dom.aggressiveRedact, dom.stripTemplates].forEach(el => {
+[dom.format, dom.chunkLimit].forEach(el => {
     if (el) el.addEventListener('change', () => {
-        if (el === dom.format || el === dom.chunkLimit) {
-            syncSendToFromValues();
-            updateCopyBtnLabel();
+        const fmt = dom.format ? dom.format.value : '';
+        const chunkVal = parseInt(dom.chunkLimit ? dom.chunkLimit.value : '0', 10) || 0;
+        const detected = detectTarget(fmt, chunkVal);
+        if (currentTargetKey !== detected) {
+            currentTargetKey = detected;
+            updateTargetVisibility(currentTargetKey);
+            if (dom.targetBar) {
+                const buttons = dom.targetBar.querySelectorAll('button[data-target]');
+                buttons.forEach(btn => {
+                    btn.setAttribute('aria-pressed', btn.dataset.target === currentTargetKey ? 'true' : 'false');
+                });
+            }
         }
+        updateCopyBtnLabel();
+        updateSettingsSummary();
+        if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
+    });
+});
+
+[dom.commentScope, dom.maxLogLines, dom.stripImages, dom.filterBots, dom.filterNoise, dom.includeNlpSummary, dom.redactSecrets, dom.aggressiveRedact, dom.stripTemplates].forEach(el => {
+    if (el) el.addEventListener('change', () => {
         if (el === dom.redactSecrets || el === dom.aggressiveRedact) {
-            syncSecretsControlFromCheckboxes();
+            syncRedactLevelFromCheckboxes();
         }
         updateSettingsSummary();
         if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
@@ -1269,8 +1312,12 @@ document.querySelectorAll('.budget-presets .preset-btn').forEach(btn => {
         if (val) {
             currentBudgetWindow = val;
             dom.targetBudgetDisplay.textContent = `of ${val.toLocaleString()} estimated tokens`;
-            syncSendToFromValues();
-            updateCopyBtnLabel();
+            if (dom.chunkLimit) {
+                dom.chunkLimit.value = val.toString();
+                dom.chunkLimit.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            const detected = detectTarget(dom.format ? dom.format.value : '', val);
+            applyTarget(detected);
             if (currentAppState === 'built') buildSelectedContext(false);
         }
     });
@@ -1372,8 +1419,18 @@ dom.shareUrlBtn.addEventListener('click', async () => {
     } catch (_) {}
 });
 
-syncSecretsControlFromCheckboxes();
-syncSendToFromValues();
+syncRedactLevelFromCheckboxes();
+
+// Startup target resolution:
+// ?format= in URL -> 'custom'; else saved cfg_target; else 'claude'
+if (urlParams.has('format')) {
+    applyTarget('custom');
+} else {
+    let savedTarget = null;
+    try { savedTarget = localStorage.getItem('cfg_target'); } catch (_) {}
+    applyTarget(savedTarget && (savedTarget in TARGETS) ? savedTarget : 'claude');
+}
+
 updateSettingsSummary();
 updateCopyBtnLabel(0);
 updateWorkspaceVisibility();

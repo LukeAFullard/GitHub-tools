@@ -2,6 +2,59 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildBannerItems, renderBanner } from '../js/ui-banner.js';
 import { copyLabel } from '../js/ui-labels.js';
+import { detectTarget, TARGETS } from '../js/targets.js';
+import { buildSettingsSummary } from '../js/settings-summary.js';
+
+test('targets: detectTarget identifies known targets and falls back to custom', () => {
+    // 3 matches
+    assert.equal(detectTarget('claude-xml', 200000), 'claude');
+    assert.equal(detectTarget('markdown', 128000), 'chatgpt');
+    assert.equal(detectTarget('markdown', 1000000), 'gemini');
+
+    // Mismatches return 'custom'
+    assert.equal(detectTarget('json', 200000), 'custom');
+    assert.equal(detectTarget('claude-xml', 100000), 'custom');
+    assert.equal(detectTarget('markdown', 500000), 'custom');
+    assert.equal(detectTarget('unknown', 0), 'custom');
+});
+
+test('settings-summary: buildSettingsSummary handles target, minify, redact and chunk limits', () => {
+    // Case 1: All features enabled, split chunk limit
+    const case1 = buildSettingsSummary({
+        targetLabel: 'Claude',
+        minifyMode: 'basic',
+        redactLevel: 'standard',
+        chunkLimit: 200000
+    });
+    assert.equal(case1, 'Claude · blank lines removed · secrets hidden · split at 200k');
+
+    // Case 2: Aggressive minify and strict secrets, split at 128k
+    const case2 = buildSettingsSummary({
+        targetLabel: 'ChatGPT',
+        minifyMode: 'aggressive',
+        redactLevel: 'strict',
+        chunkLimit: 128000
+    });
+    assert.equal(case2, 'ChatGPT · comments removed · strict secret hiding · split at 128k');
+
+    // Case 3: chunkLimit is 0 (no split note), secrets off, minifyMode none
+    const case3 = buildSettingsSummary({
+        targetLabel: 'Gemini',
+        minifyMode: 'none',
+        redactLevel: 'off',
+        chunkLimit: 0
+    });
+    assert.equal(case3, 'Gemini · secrets NOT hidden');
+
+    // Case 4: Issues page format (no minifyMode), custom target, chunkLimit 50k
+    const case4 = buildSettingsSummary({
+        targetLabel: 'Custom',
+        minifyMode: 'none',
+        redactLevel: 'standard',
+        chunkLimit: 50000
+    });
+    assert.equal(case4, 'Custom · secrets hidden · split at 50k');
+});
 
 test('ui: buildBannerItems returns empty array when no warnings or errors apply', () => {
     const items = buildBannerItems({});
