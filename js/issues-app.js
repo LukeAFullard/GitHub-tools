@@ -15,6 +15,7 @@ import { TARGETS, detectTarget } from './targets.js';
 import { buildSettingsSummary } from './settings-summary.js';
 import { commentCostHint } from './comment-cost.js';
 import { buildSummaryLines } from './ui-summary.js';
+import { buildTabHref } from './nav.js';
 
 let loadController = null;
 let buildController = null;
@@ -45,6 +46,8 @@ const dom = {
     tokenPanel: document.getElementById('tokenPanel'),
     tokenPanelMessage: document.getElementById('tokenPanelMessage'),
     drawerTokenLink: document.getElementById('drawerTokenLink'),
+    tabCodeLink: document.getElementById('tabCodeLink'),
+    tabIssuesLink: document.getElementById('tabIssuesLink'),
     branchTokenGroup: document.getElementById('branchTokenGroup'),
     repoUrl: document.getElementById('repoUrl'),
     switchToCodeLink: document.getElementById('switchToCodeLink'),
@@ -259,6 +262,17 @@ if (dom.switchToCodeLink) {
     });
 }
 
+// Navigation tab click listeners
+[dom.tabCodeLink, dom.tabIssuesLink].forEach(link => {
+    if (link) {
+        link.addEventListener('click', () => {
+            const repoVal = dom.repoUrl ? dom.repoUrl.value : '';
+            if (dom.tabCodeLink) dom.tabCodeLink.href = buildTabHref('code', repoVal);
+            if (dom.tabIssuesLink) dom.tabIssuesLink.href = buildTabHref('issues', repoVal);
+        });
+    }
+});
+
 let lastRateLimitRemaining = Infinity;
 
 function showPersistentWarning(message, options = {}) {
@@ -340,6 +354,11 @@ if (dom.warningBannerTokenBtn) {
 const urlParams = new URLSearchParams(window.location.search);
 if (urlParams.get('repo') && dom.repoUrl) {
     dom.repoUrl.value = urlParams.get('repo');
+} else if (!urlParams.get('repo') && dom.repoUrl && !dom.repoUrl.value.trim()) {
+    try {
+        const lastRepo = localStorage.getItem('cfg_lastRepo');
+        if (lastRepo) dom.repoUrl.value = lastRepo;
+    } catch (_) {}
 }
 
 export function formatSettingsSummaryIssues({ format, secretsMode }) {
@@ -847,6 +866,10 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
         renderIssuesList();
         runNlpAnalysis(allIssues);
         setAppState('loaded');
+        try {
+            const loadedRepoVal = `${repoInfo.owner}/${repoInfo.repo}`;
+            localStorage.setItem('cfg_lastRepo', loadedRepoVal);
+        } catch (_) {}
 
         if (manifest.stoppedEarly) {
             log(`[WARN] Reached scan limit (30 pages). Found ${allIssues.length} items.`);

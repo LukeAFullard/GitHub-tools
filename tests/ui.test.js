@@ -7,6 +7,7 @@ import { buildSettingsSummary } from '../js/settings-summary.js';
 import { commentCostHint } from '../js/comment-cost.js';
 import { defaultExcludedPaths, rankSuggestions, DEFAULT_EXCLUDED_DIRS } from '../js/suggestions.js';
 import { buildSummaryLines } from '../js/ui-summary.js';
+import { buildTabHref } from '../js/nav.js';
 
 test('targets: detectTarget identifies known targets and falls back to custom', () => {
     // 3 matches
@@ -426,4 +427,32 @@ test('ui-summary: buildSummaryLines includes secrets and warnings lines when pre
         'About 1,200 tokens (estimated)',
         '1 warning(s) above'
     ]);
+});
+
+test('nav: buildTabHref returns base URL when repoText is empty or whitespace', () => {
+    assert.equal(buildTabHref('code', ''), 'index.html');
+    assert.equal(buildTabHref('code', '   '), 'index.html');
+    assert.equal(buildTabHref('code', undefined), 'index.html');
+    assert.equal(buildTabHref('code', null), 'index.html');
+
+    assert.equal(buildTabHref('issues', ''), 'issues.html');
+    assert.equal(buildTabHref('issues', '   '), 'issues.html');
+    assert.equal(buildTabHref('issues', undefined), 'issues.html');
+    assert.equal(buildTabHref('issues', null), 'issues.html');
+});
+
+test('nav: buildTabHref handles simple repo input', () => {
+    assert.equal(buildTabHref('code', 'owner/repo'), 'index.html?repo=owner%2Frepo');
+    assert.equal(buildTabHref('issues', 'owner/repo'), 'issues.html?repo=owner%2Frepo');
+    assert.equal(buildTabHref('code', '  facebook/react  '), 'index.html?repo=facebook%2Freact');
+});
+
+test('nav: buildTabHref encodes URLs and special characters without including tokens', () => {
+    const fullUrl = 'https://github.com/owner/repo-name_v1.0';
+    assert.equal(buildTabHref('issues', fullUrl), `issues.html?repo=${encodeURIComponent(fullUrl)}`);
+
+    const specialRepo = 'owner/repo with spaces & symbols#tag';
+    const target = buildTabHref('code', specialRepo);
+    assert.equal(target, `index.html?repo=${encodeURIComponent(specialRepo)}`);
+    assert.ok(!target.includes('token') && !target.includes('ghp_'));
 });

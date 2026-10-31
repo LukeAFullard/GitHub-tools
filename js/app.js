@@ -24,6 +24,7 @@ import { TARGETS, detectTarget } from './targets.js';
 import { buildSettingsSummary } from './settings-summary.js';
 import { defaultExcludedPaths, rankSuggestions } from './suggestions.js';
 import { buildSummaryLines } from './ui-summary.js';
+import { buildTabHref } from './nav.js';
 import {
     parseRepoInput,
     fetchRateLimit,
@@ -68,6 +69,8 @@ const dom = {
     tokenPanel: document.getElementById('tokenPanel'),
     tokenPanelMessage: document.getElementById('tokenPanelMessage'),
     drawerTokenLink: document.getElementById('drawerTokenLink'),
+    tabCodeLink: document.getElementById('tabCodeLink'),
+    tabIssuesLink: document.getElementById('tabIssuesLink'),
     branchTokenGroup: document.getElementById('branchTokenGroup'),
     repoUrl: document.getElementById('repoUrl'),
     branch: document.getElementById('branch'),
@@ -813,10 +816,28 @@ function applyUrlParams() {
     if (branchParam && dom.branch) dom.branch.value = branchParam;
     if (formatParam && validFormats.includes(formatParam) && dom.format) dom.format.value = formatParam;
     if (minifyParam && validMinify.includes(minifyParam) && dom.minifyMode) dom.minifyMode.value = minifyParam;
+
+    if (!repoParam && dom.repoUrl && !dom.repoUrl.value.trim()) {
+        try {
+            const lastRepo = localStorage.getItem('cfg_lastRepo');
+            if (lastRepo) dom.repoUrl.value = lastRepo;
+        } catch (_) {}
+    }
 }
 
 clearOutputState();
 loadSavedSettings();
+
+// Navigation tab click listeners
+[dom.tabCodeLink, dom.tabIssuesLink].forEach(link => {
+    if (link) {
+        link.addEventListener('click', () => {
+            const repoVal = dom.repoUrl ? dom.repoUrl.value : '';
+            if (dom.tabCodeLink) dom.tabCodeLink.href = buildTabHref('code', repoVal);
+            if (dom.tabIssuesLink) dom.tabIssuesLink.href = buildTabHref('issues', repoVal);
+        });
+    }
+});
 
 const initialParams = new URLSearchParams(window.location.search);
 applyUrlParams();
@@ -1551,6 +1572,10 @@ dom.packBtn.addEventListener('click', async () => {
         };
 
         setAppState('loaded');
+        try {
+            const loadedRepoVal = `${repoInfo.owner}/${repoInfo.repo}`;
+            localStorage.setItem('cfg_lastRepo', loadedRepoVal);
+        } catch (_) {}
         showToast(`Loaded manifest: ${processable.length} files.`, 'info');
 
         let hasDownloaded = false;

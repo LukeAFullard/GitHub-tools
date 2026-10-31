@@ -1,4 +1,4 @@
-/* --- Top-Level Mode Switcher --- */
+/* --- Top-Level Mode Switcher & Page Tabs --- */
 .brand-With-Switcher {
     display: flex;
     align-items: center;
@@ -6,6 +6,7 @@
     flex-wrap: wrap;
 }
 
+.page-tabs,
 .mode-switcher {
     display: inline-flex;
     background: var(--page);
@@ -15,6 +16,7 @@
     gap: 2px;
 }
 
+.page-tabs a,
 .mode-tab {
     text-decoration: none;
     color: var(--ink-soft);
@@ -25,10 +27,13 @@
     transition: background 0.15s ease, color 0.15s ease;
 }
 
+.page-tabs a:hover,
 .mode-tab:hover {
     color: var(--ink);
 }
 
+.page-tabs a.active,
+.page-tabs a[aria-current="page"],
 .mode-tab.active {
     background: var(--sheet);
     color: var(--cobalt);
