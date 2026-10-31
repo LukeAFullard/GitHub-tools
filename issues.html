@@ -94,7 +94,7 @@
                     <button id="loadIssuesBtn" type="button" class="primary">Load issues</button>
                     <button id="abortBtn" type="button" class="danger" style="display: none;">Cancel</button>
                     <button id="optionsToggleBtn" type="button" class="options-toggle-btn" aria-expanded="false" aria-controls="optionsDrawer">
-                        <span>Sanitization &amp; Options</span>
+                        <span id="optionsToggleSummary">Settings: Claude XML · secrets hidden</span>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                     </button>
                 </div>
@@ -102,6 +102,15 @@
             </div>
 
             <div class="branch-token-group">
+                <div class="option-field">
+                    <label for="sendTo">Send to</label>
+                    <select id="sendTo" style="max-width: 140px;">
+                        <option value="claude" selected>Claude (200k)</option>
+                        <option value="chatgpt">ChatGPT (128k)</option>
+                        <option value="gemini">Gemini (1M)</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
                 <div class="option-field">
                     <label for="maxIssuesLimit">Max issues to scan</label>
                     <select id="maxIssuesLimit" style="max-width: 130px;">
@@ -149,31 +158,44 @@
         </div>
 
         <div class="option-field">
-            <label for="maxLogLines">Truncate code/logs over (lines)</label>
+            <label for="chunkLimit">Split into parts of N tokens</label>
+            <input type="number" id="chunkLimit" value="0" min="0" step="10000" placeholder="0 = Auto / single file">
+        </div>
+
+        <div class="option-field">
+            <label for="secretsControl">Hide secrets</label>
+            <select id="secretsControl">
+                <option value="off">Off</option>
+                <option value="standard" selected>Standard</option>
+                <option value="strict">Strict (include generic)</option>
+            </select>
+            <!-- Preserved hidden inputs for backward compatibility -->
+            <input type="checkbox" id="redactSecrets" checked style="display: none;">
+            <input type="checkbox" id="aggressiveRedact" style="display: none;">
+        </div>
+
+        <!-- Content Group -->
+        <div class="settings-group-header full-width">
+            <span>Content</span>
+        </div>
+
+        <div class="option-field">
+            <label for="maxLogLines">Truncate logs over (lines)</label>
             <input type="number" id="maxLogLines" value="40" min="0" max="500" title="0 = Do not truncate">
         </div>
 
         <div class="option-field">
-            <label for="chunkLimit">Split into parts of N tokens</label>
-            <input type="number" id="chunkLimit" value="0" min="0" step="10000" placeholder="0 = Single file">
+            <label class="checkbox-label"><input type="checkbox" id="stripImages" checked> <span>Strip images and videos</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="filterBots" checked> <span>Hide bot comments</span></label>
         </div>
 
         <div class="option-field">
-            <label class="checkbox-label"><input type="checkbox" id="stripImages" checked> <span>Strip images, videos &amp; Base64 media</span></label>
-            <label class="checkbox-label"><input type="checkbox" id="filterBots" checked> <span>Exclude bot comments (dependabot, actions, etc.)</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="filterNoise" checked> <span>Hide low-signal comments ("+1", "me too")</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="stripTemplates" checked> <span>Strip issue templates and boilerplate</span></label>
         </div>
 
         <div class="option-field">
-            <label class="checkbox-label"><input type="checkbox" id="filterNoise" checked> <span>Filter "+1", "me too", &amp; low-signal replies</span></label>
-            <label class="checkbox-label"><input type="checkbox" id="includeNlpSummary" checked> <span>Include NLP Topic &amp; N-Gram overview in output</span></label>
-        </div>
-
-        <div class="option-field">
-            <label class="checkbox-label"><input type="checkbox" id="redactSecrets" checked> <span>Redact secrets in issue bodies &amp; comments</span></label>
-            <label class="checkbox-label"><input type="checkbox" id="aggressiveRedact" checked> <span>Aggressive redaction (generic passwords &amp; tokens)</span></label>
-        </div>
-        <div class="option-field">
-            <label class="checkbox-label"><input type="checkbox" id="stripTemplates" checked> <span>Strip HTML boilerplate &amp; template comments</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="includeNlpSummary" checked> <span>Include topic clusters &amp; recurring phrases</span></label>
         </div>
 
         <div class="option-field full-width">

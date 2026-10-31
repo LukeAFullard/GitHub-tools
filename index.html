@@ -94,7 +94,7 @@
                     <button id="packBtn" type="button" class="primary">Load files</button>
                     <button id="abortBtn" type="button" class="danger" style="display: none;">Cancel</button>
                     <button id="optionsToggleBtn" type="button" class="options-toggle-btn" aria-expanded="false" aria-controls="optionsDrawer">
-                        <span>Options</span>
+                        <span id="optionsToggleSummary">Settings: Claude XML · original code · secrets hidden</span>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                     </button>
                 </div>
@@ -103,6 +103,15 @@
             </div>
 
             <div class="branch-token-group">
+                <div class="option-field">
+                    <label for="sendTo">Send to</label>
+                    <select id="sendTo" style="max-width: 140px;">
+                        <option value="claude" selected>Claude (200k)</option>
+                        <option value="chatgpt">ChatGPT (128k)</option>
+                        <option value="gemini">Gemini (1M)</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
                 <div class="option-field">
                     <label for="branch">Branch / Tag</label>
                     <input type="text" id="branch" placeholder="main/master" style="max-width: 130px;">
@@ -133,38 +142,35 @@
             <select id="minifyMode">
                 <option value="none">Off (Original)</option>
                 <option value="basic">Remove blank lines</option>
-                <option value="aggressive">Also remove comments</option>
+                <option value="aggressive">Remove comments and blank lines</option>
             </select>
         </div>
 
         <div class="option-field">
             <label for="chunkLimit">Split into parts of N tokens</label>
-            <input type="number" id="chunkLimit" value="0" min="0" step="10000" placeholder="0 = Single file">
+            <input type="number" id="chunkLimit" value="0" min="0" step="10000" placeholder="0 = Auto / single file">
+        </div>
+
+        <div class="option-field">
+            <label for="secretsControl">Hide secrets</label>
+            <select id="secretsControl">
+                <option value="off">Off</option>
+                <option value="standard" selected>Standard</option>
+                <option value="strict">Strict (include generic)</option>
+            </select>
+            <!-- Preserved hidden inputs for backward compatibility -->
+            <input type="checkbox" id="redactSecrets" checked style="display: none;">
+            <input type="checkbox" id="aggressiveRedact" style="display: none;">
+        </div>
+
+        <!-- Content Group -->
+        <div class="settings-group-header full-width">
+            <span>Content</span>
         </div>
 
         <div class="option-field">
             <label for="maxKb">Max file size (KB)</label>
             <input type="number" id="maxKb" value="150" min="5" max="2000">
-        </div>
-
-        <div class="option-field">
-            <label for="throttleMs">Delay between requests (ms)</label>
-            <input type="number" id="throttleMs" value="80" min="20" max="2000">
-        </div>
-
-        <div class="option-field">
-            <label for="redactSecrets" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
-                <input type="checkbox" id="redactSecrets" checked style="width: auto; height: 16px;">
-                <span>Redact secrets in output</span>
-            </label>
-            <p class="field-helper" style="font-size: 0.75rem; margin-top: 0.2rem; color: var(--ink-soft);">Automated scanning is best-effort and not a substitute for manual review.</p>
-        </div>
-
-        <div class="option-field">
-            <label for="aggressiveRedact" style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
-                <input type="checkbox" id="aggressiveRedact" style="width: auto; height: 16px;">
-                <span>Aggressive redaction (include generic secrets)</span>
-            </label>
         </div>
 
         <div class="option-field full-width">

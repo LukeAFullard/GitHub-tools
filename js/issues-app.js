@@ -40,6 +40,7 @@ const dom = {
     loadIssuesBtn: document.getElementById('loadIssuesBtn'),
     abortBtn: document.getElementById('abortBtn'),
     optionsToggleBtn: document.getElementById('optionsToggleBtn'),
+    optionsToggleSummary: document.getElementById('optionsToggleSummary'),
     optionsDrawer: document.getElementById('optionsDrawer'),
     repoInputError: document.getElementById('repoInputError'),
     rateBadge: document.getElementById('rateBadge'),
@@ -53,10 +54,12 @@ const dom = {
     warningBannerRetryBtn: document.getElementById('warningBannerRetryBtn'),
     warningBannerDismissBtn: document.getElementById('warningBannerDismissBtn'),
 
+    sendTo: document.getElementById('sendTo'),
     format: document.getElementById('format'),
     commentScope: document.getElementById('commentScope'),
     maxLogLines: document.getElementById('maxLogLines'),
     chunkLimit: document.getElementById('chunkLimit'),
+    secretsControl: document.getElementById('secretsControl'),
     stripImages: document.getElementById('stripImages'),
     filterBots: document.getElementById('filterBots'),
     filterNoise: document.getElementById('filterNoise'),
@@ -279,6 +282,109 @@ if (dom.warningBannerTokenBtn) {
 const urlParams = new URLSearchParams(window.location.search);
 if (urlParams.get('repo') && dom.repoUrl) {
     dom.repoUrl.value = urlParams.get('repo');
+}
+
+export function formatSettingsSummaryIssues({ format, secretsMode }) {
+    const formatLabels = {
+        'claude-xml': 'Claude XML',
+        'markdown': 'Markdown',
+        'generic-xml': 'Generic XML',
+        'json': 'JSON'
+    };
+    const fmtText = formatLabels[format] || 'Claude XML';
+
+    let secText = 'secrets hidden';
+    if (secretsMode === 'off') secText = 'secrets visible';
+    else if (secretsMode === 'strict') secText = 'strict secrets hidden';
+
+    return `Settings: ${fmtText} · ${secText}`;
+}
+
+function updateSettingsSummary() {
+    if (!dom.optionsToggleSummary) return;
+    const format = dom.format ? dom.format.value : 'claude-xml';
+    const secretsMode = dom.secretsControl ? dom.secretsControl.value : (
+        dom.redactSecrets && !dom.redactSecrets.checked ? 'off' :
+        dom.aggressiveRedact && dom.aggressiveRedact.checked ? 'strict' : 'standard'
+    );
+    dom.optionsToggleSummary.textContent = formatSettingsSummaryIssues({ format, secretsMode });
+}
+
+function syncSecretsControlFromCheckboxes() {
+    if (!dom.secretsControl) return;
+    const isRedact = dom.redactSecrets ? dom.redactSecrets.checked : true;
+    const isAggressive = dom.aggressiveRedact ? dom.aggressiveRedact.checked : true;
+    if (!isRedact) {
+        dom.secretsControl.value = 'off';
+    } else if (isAggressive) {
+        dom.secretsControl.value = 'strict';
+    } else {
+        dom.secretsControl.value = 'standard';
+    }
+}
+
+function syncCheckboxesFromSecretsControl() {
+    if (!dom.secretsControl) return;
+    const val = dom.secretsControl.value;
+    if (dom.redactSecrets) dom.redactSecrets.checked = (val !== 'off');
+    if (dom.aggressiveRedact) dom.aggressiveRedact.checked = (val === 'strict');
+}
+
+function syncSendToFromValues() {
+    if (!dom.sendTo) return;
+    const fmt = dom.format ? dom.format.value : 'claude-xml';
+    const chunkVal = parseInt(dom.chunkLimit ? dom.chunkLimit.value : '0', 10) || 0;
+
+    if (fmt === 'claude-xml' && currentBudgetWindow === 200000 && (chunkVal === 0 || chunkVal === 200000)) {
+        dom.sendTo.value = 'claude';
+    } else if (fmt === 'markdown' && currentBudgetWindow === 128000 && (chunkVal === 0 || chunkVal === 128000)) {
+        dom.sendTo.value = 'chatgpt';
+    } else if (fmt === 'markdown' && currentBudgetWindow === 1000000 && (chunkVal === 0 || chunkVal === 1000000)) {
+        dom.sendTo.value = 'gemini';
+    } else {
+        dom.sendTo.value = 'custom';
+    }
+}
+
+function applySendToPreset(target) {
+    if (!target || target === 'custom') return;
+    if (target === 'claude') {
+        if (dom.format) dom.format.value = 'claude-xml';
+        currentBudgetWindow = 200000;
+        if (dom.chunkLimit) dom.chunkLimit.value = '200000';
+    } else if (target === 'chatgpt') {
+        if (dom.format) dom.format.value = 'markdown';
+        currentBudgetWindow = 128000;
+        if (dom.chunkLimit) dom.chunkLimit.value = '128000';
+    } else if (target === 'gemini') {
+        if (dom.format) dom.format.value = 'markdown';
+        currentBudgetWindow = 1000000;
+        if (dom.chunkLimit) dom.chunkLimit.value = '1000000';
+    }
+    if (dom.targetBudgetDisplay) {
+        dom.targetBudgetDisplay.textContent = `of ${currentBudgetWindow.toLocaleString()} estimated tokens`;
+    }
+    updateSettingsSummary();
+    updateCopyBtnLabel();
+}
+
+export function getCopyButtonLabel(target, activeIndex = 0, totalParts = 1) {
+    if (totalParts > 1) {
+        return `Copy part ${activeIndex + 1} of ${totalParts}`;
+    }
+    switch (target) {
+        case 'claude': return 'Copy for Claude';
+        case 'chatgpt': return 'Copy for ChatGPT';
+        case 'gemini': return 'Copy for Gemini';
+        default: return 'Copy';
+    }
+}
+
+function updateCopyBtnLabel(activeIndex = 0) {
+    if (!dom.copyBtn) return;
+    const target = dom.sendTo ? dom.sendTo.value : 'claude';
+    const totalParts = generatedChunks.length;
+    dom.copyBtn.textContent = getCopyButtonLabel(target, activeIndex, totalParts);
 }
 
 dom.optionsToggleBtn.addEventListener('click', () => {
@@ -861,13 +967,13 @@ async function buildSelectedContext(summaryOnly = false) {
         dom.chunkSelect.style.display = 'inline-block';
         dom.downloadAllBtn.style.display = 'inline-flex';
         dom.chunkSelect.innerHTML = generatedChunks.map((_, i) => `<option value="${i}">Part ${i + 1} of ${generatedChunks.length}</option>`).join('');
-        dom.copyBtn.textContent = `Copy part 1 of ${generatedChunks.length}`;
+        updateCopyBtnLabel(0);
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'inline-flex';
     } else {
         dom.chunkSelectLabel.style.display = 'none';
         dom.chunkSelect.style.display = 'none';
         dom.downloadAllBtn.style.display = 'none';
-        dom.copyBtn.textContent = 'Copy';
+        updateCopyBtnLabel(0);
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
     }
 
@@ -978,8 +1084,31 @@ dom.abortBtn.addEventListener('click', () => {
     if (buildController) buildController.abort();
 });
 
+if (dom.sendTo) {
+    dom.sendTo.addEventListener('change', () => {
+        applySendToPreset(dom.sendTo.value);
+        if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
+    });
+}
+
+if (dom.secretsControl) {
+    dom.secretsControl.addEventListener('change', () => {
+        syncCheckboxesFromSecretsControl();
+        updateSettingsSummary();
+        if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
+    });
+}
+
 [dom.format, dom.commentScope, dom.maxLogLines, dom.chunkLimit, dom.stripImages, dom.filterBots, dom.filterNoise, dom.includeNlpSummary, dom.redactSecrets, dom.aggressiveRedact, dom.stripTemplates].forEach(el => {
     if (el) el.addEventListener('change', () => {
+        if (el === dom.format || el === dom.chunkLimit) {
+            syncSendToFromValues();
+            updateCopyBtnLabel();
+        }
+        if (el === dom.redactSecrets || el === dom.aggressiveRedact) {
+            syncSecretsControlFromCheckboxes();
+        }
+        updateSettingsSummary();
         if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
     });
 });
@@ -1049,6 +1178,8 @@ document.querySelectorAll('.budget-presets .preset-btn').forEach(btn => {
         if (val) {
             currentBudgetWindow = val;
             dom.targetBudgetDisplay.textContent = `of ${val.toLocaleString()} estimated tokens`;
+            syncSendToFromValues();
+            updateCopyBtnLabel();
             if (currentAppState === 'built') buildSelectedContext(false);
         }
     });
@@ -1064,13 +1195,12 @@ function updateActiveChunkView(index) {
     outputExt = chunk.ext;
     outputMime = chunk.mime;
 
+    updateCopyBtnLabel(activeChunkIndex);
     if (generatedChunks.length > 1) {
-        dom.copyBtn.textContent = `Copy part ${activeChunkIndex + 1} of ${generatedChunks.length}`;
         if (dom.nextPartBtn) {
             dom.nextPartBtn.style.display = activeChunkIndex < generatedChunks.length - 1 ? 'inline-flex' : 'none';
         }
     } else {
-        dom.copyBtn.textContent = 'Copy';
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
     }
 
@@ -1126,9 +1256,7 @@ dom.copyBtn.addEventListener('click', async () => {
         const originalText = dom.copyBtn.textContent;
         dom.copyBtn.textContent = 'Copied!';
         setTimeout(() => {
-            dom.copyBtn.textContent = numParts > 1
-                ? `Copy part ${activeChunkIndex + 1} of ${numParts}`
-                : originalText;
+            updateCopyBtnLabel(activeChunkIndex);
         }, 2000);
     } catch (_) {
         showToast('Unable to copy automatically.', 'error');
@@ -1148,3 +1276,8 @@ dom.shareUrlBtn.addEventListener('click', async () => {
         showToast('Deep-link URL copied!', 'info');
     } catch (_) {}
 });
+
+syncSecretsControlFromCheckboxes();
+syncSendToFromValues();
+updateSettingsSummary();
+updateCopyBtnLabel(0);

@@ -672,6 +672,154 @@ test('ui: PR1 copy button dynamic label and next part advancement', () => {
     assert.equal(nextPartBtn.style.display, 'none', 'Next part button should be hidden on last part');
 });
 
+test('ui: PR2 Send-to presets configuration mappings', () => {
+    function getPresetConfig(target) {
+        switch (target) {
+            case 'claude':
+                return { format: 'claude-xml', budget: 200000, chunkLimit: 200000 };
+            case 'chatgpt':
+                return { format: 'markdown', budget: 128000, chunkLimit: 128000 };
+            case 'gemini':
+                return { format: 'markdown', budget: 1000000, chunkLimit: 1000000 };
+            default:
+                return null;
+        }
+    }
+
+    assert.deepEqual(getPresetConfig('claude'), {
+        format: 'claude-xml',
+        budget: 200000,
+        chunkLimit: 200000
+    });
+    assert.deepEqual(getPresetConfig('chatgpt'), {
+        format: 'markdown',
+        budget: 128000,
+        chunkLimit: 128000
+    });
+    assert.deepEqual(getPresetConfig('gemini'), {
+        format: 'markdown',
+        budget: 1000000,
+        chunkLimit: 1000000
+    });
+});
+
+test('ui: PR2 dynamic copy button labels based on Send-to target and parts', () => {
+    function getCopyButtonLabel(target, activeIndex = 0, totalParts = 1) {
+        if (totalParts > 1) {
+            return `Copy part ${activeIndex + 1} of ${totalParts}`;
+        }
+        switch (target) {
+            case 'claude': return 'Copy for Claude';
+            case 'chatgpt': return 'Copy for ChatGPT';
+            case 'gemini': return 'Copy for Gemini';
+            default: return 'Copy';
+        }
+    }
+
+    // Single chunk copy labels
+    assert.equal(getCopyButtonLabel('claude', 0, 1), 'Copy for Claude');
+    assert.equal(getCopyButtonLabel('chatgpt', 0, 1), 'Copy for ChatGPT');
+    assert.equal(getCopyButtonLabel('gemini', 0, 1), 'Copy for Gemini');
+    assert.equal(getCopyButtonLabel('custom', 0, 1), 'Copy');
+
+    // Multi-part overrides target name
+    assert.equal(getCopyButtonLabel('claude', 0, 3), 'Copy part 1 of 3');
+    assert.equal(getCopyButtonLabel('claude', 1, 3), 'Copy part 2 of 3');
+    assert.equal(getCopyButtonLabel('chatgpt', 2, 4), 'Copy part 3 of 4');
+});
+
+test('ui: PR2 settings summary formatting for Code Packer and Issues Explorer', () => {
+    function formatSettingsSummaryCode({ format, minifyMode, secretsMode }) {
+        const formatLabels = {
+            'claude-xml': 'Claude XML',
+            'markdown': 'Markdown',
+            'generic-xml': 'Generic XML',
+            'json': 'JSON'
+        };
+        const fmtText = formatLabels[format] || 'Claude XML';
+
+        let codeText = 'original code';
+        if (minifyMode === 'basic') codeText = 'blank lines removed';
+        else if (minifyMode === 'aggressive') codeText = 'comments removed';
+
+        let secText = 'secrets hidden';
+        if (secretsMode === 'off') secText = 'secrets visible';
+        else if (secretsMode === 'strict') secText = 'strict secrets hidden';
+
+        return `Settings: ${fmtText} · ${codeText} · ${secText}`;
+    }
+
+    function formatSettingsSummaryIssues({ format, secretsMode }) {
+        const formatLabels = {
+            'claude-xml': 'Claude XML',
+            'markdown': 'Markdown',
+            'generic-xml': 'Generic XML',
+            'json': 'JSON'
+        };
+        const fmtText = formatLabels[format] || 'Claude XML';
+
+        let secText = 'secrets hidden';
+        if (secretsMode === 'off') secText = 'secrets visible';
+        else if (secretsMode === 'strict') secText = 'strict secrets hidden';
+
+        return `Settings: ${fmtText} · ${secText}`;
+    }
+
+    // Code Packer default
+    assert.equal(
+        formatSettingsSummaryCode({ format: 'claude-xml', minifyMode: 'none', secretsMode: 'standard' }),
+        'Settings: Claude XML · original code · secrets hidden'
+    );
+
+    // Code Packer with blank lines stripped and strict secrets
+    assert.equal(
+        formatSettingsSummaryCode({ format: 'markdown', minifyMode: 'basic', secretsMode: 'strict' }),
+        'Settings: Markdown · blank lines removed · strict secrets hidden'
+    );
+
+    // Code Packer with comments removed and secrets off
+    assert.equal(
+        formatSettingsSummaryCode({ format: 'json', minifyMode: 'aggressive', secretsMode: 'off' }),
+        'Settings: JSON · comments removed · secrets visible'
+    );
+
+    // Issues Explorer default
+    assert.equal(
+        formatSettingsSummaryIssues({ format: 'claude-xml', secretsMode: 'standard' }),
+        'Settings: Claude XML · secrets hidden'
+    );
+
+    // Issues Explorer with markdown and secrets off
+    assert.equal(
+        formatSettingsSummaryIssues({ format: 'markdown', secretsMode: 'off' }),
+        'Settings: Markdown · secrets visible'
+    );
+});
+
+test('ui: PR2 unified secrets control mode mapping', () => {
+    function mapSecretsMode(redact, aggressive) {
+        if (!redact) return 'off';
+        if (aggressive) return 'strict';
+        return 'standard';
+    }
+
+    assert.equal(mapSecretsMode(false, false), 'off');
+    assert.equal(mapSecretsMode(false, true), 'off');
+    assert.equal(mapSecretsMode(true, false), 'standard');
+    assert.equal(mapSecretsMode(true, true), 'strict');
+
+    function applySecretsMode(mode) {
+        return {
+            redact: mode !== 'off',
+            aggressive: mode === 'strict'
+        };
+    }
+
+    assert.deepEqual(applySecretsMode('off'), { redact: false, aggressive: false });
+    assert.deepEqual(applySecretsMode('standard'), { redact: true, aggressive: false });
+    assert.deepEqual(applySecretsMode('strict'), { redact: true, aggressive: true });
+});
+
 // --- Regression & Verification Tests for Review Findings ---
 
 test('issue-cleaner: titled image long URL and unclosed image performance', () => {
