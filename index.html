@@ -324,27 +324,7 @@
 
             <div class="output-viewport">
                 <div id="warningBanner" class="warning-banner" role="status" aria-live="polite" style="display:none"></div>
-                <!-- Build Summary Card -->
-                <div id="buildSummaryCard" class="build-summary-card" role="region" aria-label="Build Context Summary">
-                    <div class="build-summary-grid">
-                        <div class="build-summary-item">
-                            <span class="build-summary-label">Included</span>
-                            <span id="summaryItemsCount" class="build-summary-value">0 files</span>
-                        </div>
-                        <div class="build-summary-item">
-                            <span class="build-summary-label">Estimated Tokens</span>
-                            <span id="summaryTokensCount" class="build-summary-value">~0</span>
-                        </div>
-                        <div class="build-summary-item">
-                            <span class="build-summary-label">Parts</span>
-                            <span id="summaryPartsCount" class="build-summary-value">1 part</span>
-                        </div>
-                        <div class="build-summary-item">
-                            <span class="build-summary-label">Secrets Redacted</span>
-                            <span id="summarySecretsCount" class="build-summary-value">No secrets detected</span>
-                        </div>
-                    </div>
-                </div>
+                <div id="summaryCard" class="summary-card" hidden></div>
 
                 <!-- Secrets Warning Panel -->
                 <div id="secretsWarningPanel" class="secrets-warning-panel" role="status" aria-live="polite" style="display: none;">
@@ -377,7 +357,7 @@
                     <p class="secrets-help-text">Secret scanning is best-effort and not a substitute for manual security review.</p>
                 </div>
 
-                <div id="previewNotice" class="preview-notice">
+                <div id="previewNotice" class="preview-notice" style="display: none;">
                     Preview shows the first 45,000 characters. Copy and Download include everything.
                 </div>
 
@@ -387,6 +367,9 @@
                         <polyline points="13 2 13 9 20 9"></polyline>
                     </svg>
                     <p>Build the context to see it here.</p>
+                </div>
+                <div class="preview-toolbar" style="padding: 0.5rem 0.85rem 0; display: flex; align-items: center;">
+                    <button id="togglePreviewBtn" type="button" class="secondary btn-sm" aria-expanded="false" style="display: none;">Show preview</button>
                 </div>
                 <textarea id="previewArea" class="preview wrap" readonly style="display: none;"></textarea>
             </div>

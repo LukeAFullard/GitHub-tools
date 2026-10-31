@@ -6,6 +6,7 @@ import { detectTarget, TARGETS } from '../js/targets.js';
 import { buildSettingsSummary } from '../js/settings-summary.js';
 import { commentCostHint } from '../js/comment-cost.js';
 import { defaultExcludedPaths, rankSuggestions, DEFAULT_EXCLUDED_DIRS } from '../js/suggestions.js';
+import { buildSummaryLines } from '../js/ui-summary.js';
 
 test('targets: detectTarget identifies known targets and falls back to custom', () => {
     // 3 matches
@@ -333,4 +334,96 @@ test('rankSuggestions: ordering, limit, minShare cutoff, and path grouping', () 
     assert.equal(singleRes[1].path, 'docs');
     assert.equal(singleRes[1].tokens, 400);
     assert.equal(singleRes[1].share, 0.4);
+});
+
+test('ui-summary: buildSummaryLines formats code build correctly', () => {
+    const lines = buildSummaryLines({
+        kind: 'files',
+        items: 12,
+        tokens: 45000,
+        parts: 1,
+        secretsHidden: 0,
+        warnings: 0
+    });
+    assert.deepEqual(lines, [
+        '12 files included',
+        'About 45,000 tokens (estimated)'
+    ]);
+});
+
+test('ui-summary: buildSummaryLines formats issues build with comments', () => {
+    const lines = buildSummaryLines({
+        kind: 'issues',
+        items: 5,
+        comments: 23,
+        tokens: 12500,
+        parts: 1,
+        secretsHidden: 0,
+        warnings: 0
+    });
+    assert.deepEqual(lines, [
+        '5 issues included · 23 comments',
+        'About 12,500 tokens (estimated)'
+    ]);
+});
+
+test('ui-summary: buildSummaryLines formats multi-part builds', () => {
+    const lines = buildSummaryLines({
+        kind: 'files',
+        items: 50,
+        tokens: 250000,
+        parts: 3,
+        secretsHidden: 0,
+        warnings: 0
+    });
+    assert.deepEqual(lines, [
+        '50 files included',
+        'About 250,000 tokens (estimated) · 3 parts'
+    ]);
+});
+
+test('ui-summary: buildSummaryLines includes secrets and warnings lines when present', () => {
+    const linesWithSecretsAndWarnings = buildSummaryLines({
+        kind: 'issues',
+        items: 8,
+        comments: 14,
+        tokens: 82000,
+        parts: 2,
+        secretsHidden: 4,
+        warnings: 2
+    });
+    assert.deepEqual(linesWithSecretsAndWarnings, [
+        '8 issues included · 14 comments',
+        'About 82,000 tokens (estimated) · 2 parts',
+        '4 possible secret(s) hidden',
+        '2 warning(s) above'
+    ]);
+
+    const linesWithOnlySecrets = buildSummaryLines({
+        kind: 'files',
+        items: 3,
+        tokens: 1200,
+        parts: 1,
+        secretsHidden: 1,
+        warnings: 0
+    });
+    assert.deepEqual(linesWithOnlySecrets, [
+        '3 files included',
+        'About 1,200 tokens (estimated)',
+        '1 possible secret(s) hidden'
+    ]);
+
+    const linesWithOnlyWarnings = buildSummaryLines({
+        kind: 'files',
+        items: 3,
+        tokens: 1200,
+        parts: 1,
+        secretsHidden: 0,
+        warnings: 1
+    });
+    assert.deepEqual(linesWithOnlyWarnings, [
+        '3 files included',
+        'About 1,200 tokens (estimated)',
+        '1 warning(s) above'
+    ]);
 });
