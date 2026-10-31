@@ -57,3 +57,13 @@ test('maintainers scope keeps fewer comments than all', async () => {
     const m = commentsIn();
     assert.ok(m > 0 && m < all, `maintainers=${m} all=${all}`);
 });
+
+test('targetBar sets format and chunkLimit preset values', async () => {
+    await fire('targetBar', 'click', {
+        target: {
+            closest: () => ({ dataset: { target: 'chatgpt' } })
+        }
+    });
+    assert.equal(el('format').value, 'markdown');
+    assert.equal(el('chunkLimit').value, '128000');
+});

@@ -362,6 +362,47 @@ html, body {
     color: var(--ink-soft);
 }
 
+/* Target Bar Segmented Control */
+.target-bar {
+    background: var(--sheet);
+    border-bottom: 1px solid var(--line);
+    padding: 0.5rem 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.target-bar-label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--ink-soft);
+    margin-right: 0.25rem;
+}
+
+.target-bar button {
+    background: var(--page);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    padding: 0.35rem 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    border-radius: var(--radius-control);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.target-bar button:hover {
+    border-color: var(--cobalt);
+    color: var(--cobalt);
+}
+
+.target-bar button[aria-pressed="true"] {
+    background: var(--cobalt);
+    border-color: var(--cobalt);
+    color: #FFFFFF;
+}
+
 /* Options Drawer */
 .options-drawer {
     display: none;
@@ -380,6 +421,10 @@ html, body {
     display: flex;
     flex-direction: column;
     gap: 0.35rem;
+}
+
+.option-field[hidden], .budget-presets[hidden] {
+    display: none !important;
 }
 
 .option-field.full-width {

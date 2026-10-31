@@ -41,7 +41,12 @@ const tok = await import(ROOT + '/js/tokenizer.js');
 globalThis.Worker = class { constructor(url) { this.url = String(url); }
   postMessage(msg) { if (this.url.includes('tokenizer')) setTimeout(() => this.onmessage && this.onmessage({ data: { id: msg.id, tokens: tok.estimateTokens(msg.text) } }), 0); }
   terminate(){} };
-export const fire = async (id, type) => { for (const fn of (listeners.get(id)?.[type] || [])) await fn({ target: registry.get(id), preventDefault(){}, stopPropagation(){} }); };
+export const fire = async (id, type, extraProps = {}) => {
+  for (const fn of (listeners.get(id)?.[type] || [])) {
+    const baseEvent = { target: registry.get(id), preventDefault(){}, stopPropagation(){} };
+    await fn(Object.assign(baseEvent, extraProps));
+  }
+};
 export const el = (id) => document.getElementById(id);
 export const wait = (ms) => new Promise(r => setTimeout(r, ms));
 export { registry, listeners, ROOT };
