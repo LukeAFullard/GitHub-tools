@@ -163,7 +163,7 @@
         </div>
 
         <div class="option-field">
-            <label for="minifyMode">Shrink code</label>
+            <label for="minifyMode">Clean up code</label>
             <select id="minifyMode">
                 <option value="none">Off (Original)</option>
                 <option value="basic">Remove blank lines</option>
@@ -172,16 +172,16 @@
         </div>
 
         <div class="option-field">
-            <label for="chunkLimit">Split into parts of N tokens</label>
+            <label for="chunkLimit">Split into parts of up to N tokens (0 = don't split)</label>
             <input type="number" id="chunkLimit" value="0" min="0" step="10000" placeholder="0 = Auto / single file">
         </div>
 
         <div class="option-field">
-            <label for="secretsControl">Hide secrets</label>
+            <label for="secretsControl">Hide secrets in output</label>
             <select id="secretsControl">
                 <option value="off">Off</option>
                 <option value="standard" selected>Standard</option>
-                <option value="strict">Strict (include generic)</option>
+                <option value="strict">Strict secret hiding (also catches generic passwords)</option>
             </select>
             <!-- Preserved hidden inputs for backward compatibility -->
             <input type="checkbox" id="redactSecrets" checked style="display: none;">
@@ -325,6 +325,7 @@
             </div>
 
             <div class="output-viewport">
+                <div id="warningBanner" class="warning-banner" role="status" aria-live="polite" style="display:none"></div>
                 <!-- Build Summary Card -->
                 <div id="buildSummaryCard" class="build-summary-card" role="region" aria-label="Build Context Summary">
                     <div class="build-summary-grid">

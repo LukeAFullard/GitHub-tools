@@ -18,6 +18,8 @@ import { generateTree, renderInteractiveTree } from './tree.js';
 import { buildContextOutput, chunkContextOutput, escapeXml } from './formatters.js';
 import { minifyCode } from './minifier.js';
 import { scanForSecrets, redactSecrets } from './secrets.js';
+import { buildBannerItems, renderBanner } from './ui-banner.js';
+import { copyLabel } from './ui-labels.js';
 import {
     parseRepoInput,
     fetchRateLimit,
@@ -42,6 +44,8 @@ let cachedSkippedPaths = new Set();
 let cachedRepoInfo = null;
 let cachedBranch = "";
 let cachedFailedCount = 0;
+let isTreeTruncated = false;
+let countSkippedLarge = 0;
 let currentActiveSelection = [];
 let isPrivateRepo = false;
 let currentGeneration = 0;
@@ -142,6 +146,7 @@ const dom = {
     nextPartBtn: document.getElementById('nextPartBtn'),
     downloadBtn: document.getElementById('downloadBtn'),
     downloadAllBtn: document.getElementById('downloadAllBtn'),
+    warningBanner: document.getElementById('warningBanner'),
     toastContainer: document.getElementById('toastContainer'),
     tabFilesBtn: document.getElementById('tabFilesBtn'),
     tabOutputBtn: document.getElementById('tabOutputBtn'),
@@ -460,7 +465,7 @@ function setAppState(state, note = '') {
         } else if (state === 'loaded') {
             dom.mobilePrimaryBtn.textContent = note ? note : 'Build context';
         } else if (state === 'built') {
-            dom.mobilePrimaryBtn.textContent = 'Copy context';
+            dom.mobilePrimaryBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
         }
     }
     if (dom.startDownloadBtn) {
@@ -722,7 +727,7 @@ function updateRateLimitUI(meta) {
                 dom.quotaRemainingText.innerHTML = `${remaining} requests left, resets <span id="resetVal">${resetTimeStr}</span>`;
             }
             if (dom.rateBadge) {
-                dom.rateBadge.style.display = remaining < 10 ? 'flex' : 'none';
+                dom.rateBadge.style.display = remaining < 30 ? 'flex' : 'none';
             }
             if (remaining < 10) {
                 showTokenField('rate-limit quota under 10');
@@ -1008,14 +1013,14 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
         dom.chunkSelect.style.display = 'inline-block';
         dom.downloadAllBtn.style.display = 'inline-flex';
         dom.chunkSelect.innerHTML = generatedChunks.map((_, idx) => `<option value="${idx}">Part ${idx + 1} of ${generatedChunks.length}</option>`).join('');
-        updateCopyBtnLabel(0);
+        dom.copyBtn.textContent = copyLabel(0, generatedChunks.length);
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'inline-flex';
     } else {
         dom.chunkSelectLabel.style.display = 'none';
         dom.chunkSelect.style.display = 'none';
         dom.downloadAllBtn.style.display = 'none';
         dom.chunkSelect.innerHTML = '';
-        updateCopyBtnLabel(0);
+        dom.copyBtn.textContent = copyLabel(0, generatedChunks.length);
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
     }
 
@@ -1051,6 +1056,22 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
             }
         }
         dom.buildSummaryCard.style.display = 'flex';
+    }
+
+    if (dom.warningBanner) {
+        let totalFindings = 0;
+        targetFiles.forEach(f => {
+            const fileSecrets = secretsMap.get(f.path) || [];
+            totalFindings += fileSecrets.length;
+        });
+        const redactionOff = dom.redactSecrets ? !dom.redactSecrets.checked : false;
+        const bannerItems = buildBannerItems({
+            truncatedTree: isTreeTruncated,
+            skippedLarge: countSkippedLarge,
+            redactionOff,
+            secretCount: totalFindings
+        });
+        renderBanner(dom.warningBanner, bannerItems);
     }
 
     setAppState('built');
@@ -1165,9 +1186,12 @@ dom.packBtn.addEventListener('click', async () => {
     cachedRepoInfo = null;
     cachedBranch = "";
     cachedFailedCount = 0;
+    isTreeTruncated = false;
+    countSkippedLarge = 0;
     currentActiveSelection = [];
     isPrivateRepo = false;
     clearOutputState();
+    if (dom.warningBanner) renderBanner(dom.warningBanner, []);
 
     const userTypedBranch = dom.branch ? dom.branch.value.trim() : '';
 
@@ -1276,6 +1300,7 @@ dom.packBtn.addEventListener('click', async () => {
             if (!rawTree) throw err;
         }
 
+        isTreeTruncated = Boolean(rawTree.truncated);
         if (rawTree.truncated) {
             log(`[WARN] GitHub returned a partial file list. Narrow the path or pick a branch with fewer files.`);
             showToast("GitHub returned a partial file list. Narrow the path or pick a branch with fewer files.", "warn");
@@ -1317,6 +1342,7 @@ dom.packBtn.addEventListener('click', async () => {
 
             return true;
         });
+        countSkippedLarge = ignoredSizeCount;
 
         log(`[FETCH] Discovered ${rawTree.length} objects. Excluded: ${ignoredDirCount} in ignored dirs, ${ignoredFileCount} ignored files, ${ignoredExtCount} ignored exts, ${ignoredSizeCount} >${maxKb}KB. Selected ${processable.length} files.`);
 
@@ -1712,7 +1738,7 @@ function updateActiveChunkView(index) {
         ? `${packedOutputText.length.toLocaleString()} (Part ${activeChunkIndex + 1}) / ${totalChars.toLocaleString()} total`
         : totalChars.toLocaleString();
 
-    updateCopyBtnLabel(activeChunkIndex);
+    if (dom.copyBtn) dom.copyBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
     if (generatedChunks.length > 1) {
         if (dom.nextPartBtn) {
             dom.nextPartBtn.style.display = activeChunkIndex < generatedChunks.length - 1 ? 'inline-flex' : 'none';
@@ -1728,6 +1754,7 @@ function updateActiveChunkView(index) {
 dom.chunkSelect.addEventListener('change', () => {
     const idx = parseInt(dom.chunkSelect.value, 10) || 0;
     updateActiveChunkView(idx);
+    dom.copyBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
 });
 
 if (dom.nextPartBtn) {
@@ -1774,12 +1801,15 @@ dom.copyBtn.addEventListener('click', async () => {
     try {
         await navigator.clipboard.writeText(packedOutputText);
         const numParts = generatedChunks.length;
-        const partInfo = numParts > 1 ? ` (part ${activeChunkIndex + 1} of ${numParts})` : '';
-        showToast(`Copied context to clipboard${partInfo}!`, "info");
+        if (numParts > 1) {
+            showToast(`Copied part ${activeChunkIndex + 1} of ${numParts}. Pick the next part from the Part menu.`, 'info');
+        } else {
+            showToast('Copied context to clipboard!', "info");
+        }
         const originalText = dom.copyBtn.textContent;
         dom.copyBtn.textContent = 'Copied!';
         setTimeout(() => {
-            updateCopyBtnLabel(activeChunkIndex);
+            dom.copyBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
         }, 2000);
     } catch (_) {
         showToast('Unable to copy automatically. Please copy directly from preview.', 'error');
