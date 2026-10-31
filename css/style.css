@@ -1359,43 +1359,53 @@ button:disabled {
     }
 }
 
-/* --- PR3: First Screen Hero, Example Repos & Workspace Visibility --- */
-.first-screen-hero {
+/* --- PR 03: Simple first screen & Token on Demand --- */
+#heroBlock {
+    display: none;
+}
+
+.is-empty #heroBlock {
+    display: block;
+}
+
+.hero-block {
     max-width: 680px;
-    margin: 1.25rem auto 1.5rem auto;
-    text-align: left;
+    margin: 1.5rem auto 1rem auto;
+    padding: 0 1.25rem;
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: 0.6rem;
 }
 
-.first-screen-hero.hero-hidden {
-    display: none !important;
-}
-
-.hero-headline {
-    font-size: 1.25rem;
-    line-height: 1.4;
+.hero-block h2 {
+    font-size: 1.35rem;
+    line-height: 1.3;
     font-weight: 600;
     color: var(--ink);
-    margin: 0;
+}
+
+.hero-block p {
+    font-size: 0.9375rem;
+    color: var(--ink-soft);
+    line-height: 1.45;
 }
 
 .example-repos {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.5rem;
     font-size: 0.8125rem;
     color: var(--ink-soft);
+    margin-top: 0.3rem;
 }
 
-.example-label {
+.example-repos span {
     font-weight: 500;
-    margin-right: 0.2rem;
+    margin-right: 0.15rem;
 }
 
-.example-repo-btn {
+.example-repos button {
     appearance: none;
     background: var(--sheet);
     border: 1px solid var(--line);
@@ -1408,65 +1418,74 @@ button:disabled {
     transition: all 0.15s ease;
 }
 
-.example-repo-btn:hover {
+.example-repos button:hover {
     background: var(--cobalt-subtle);
     border-color: var(--cobalt);
     color: var(--cobalt);
 }
 
-.mode-choice-group {
-    border: none;
-    padding: 0;
-    margin: 0.25rem 0;
-    display: flex;
-    align-items: center;
-    gap: 1.25rem;
-    font-size: 0.875rem;
-    color: var(--ink);
-}
-
-.mode-choice-group legend {
-    font-weight: 600;
-    color: var(--ink);
-    margin-right: 0.5rem;
-    float: left;
-}
-
-.mode-radio-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    cursor: pointer;
-    font-weight: 500;
-}
-
-.mode-radio-label input[type="radio"] {
-    width: auto;
-    margin: 0;
-    cursor: pointer;
-}
-
-.trust-note {
-    font-size: 0.78125rem;
-    color: var(--ink-soft);
-    margin: 0;
-}
-
-.workspace-hidden {
+/* While .is-empty, hide secondary and workspace elements */
+.is-empty .branch-token-group,
+.is-empty #optionsToggleBtn,
+.is-empty #targetBar,
+.is-empty .budget-banner,
+.is-empty .log-card,
+.is-empty .segmented-control,
+.is-empty .workspace-panes,
+.is-empty #stickyActionBar,
+.is-empty .step-indicator,
+.is-empty #step1,
+.is-empty #step2,
+.is-empty #step3 {
     display: none !important;
 }
 
-.hero-details {
+/* Token on demand panel */
+.token-panel {
+    margin-top: 0.6rem;
+    padding: 0.75rem 0.85rem;
+    background: var(--page);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-control);
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
-    margin-top: 0.5rem;
+    gap: 0.4rem;
 }
 
-.hero-details.hero-hidden {
+.token-panel[hidden] {
     display: none !important;
 }
 
-.secondary-control.control-hidden {
-    display: none !important;
+.token-panel-message {
+    font-size: 0.8125rem;
+    color: var(--over);
+    font-weight: 600;
+    margin-bottom: 0.2rem;
+}
+
+.token-panel-message:empty {
+    display: none;
+}
+
+.token-panel label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--ink);
+}
+
+.token-panel input {
+    background: var(--sheet);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-control);
+    padding: 0.45rem 0.6rem;
+    color: var(--ink);
+    font-size: 0.875rem;
+    max-width: 320px;
+}
+
+.token-panel .field-helper {
+    font-size: 0.75rem;
+    color: var(--ink-soft);
+    line-height: 1.4;
+    max-width: 580px;
 }

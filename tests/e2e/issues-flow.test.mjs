@@ -67,3 +67,16 @@ test('targetBar sets format and chunkLimit preset values', async () => {
     assert.equal(el('format').value, 'markdown');
     assert.equal(el('chunkLimit').value, '128000');
 });
+
+test('exampleRepos chip click sets repoUrl and triggers issues load', async () => {
+    const beforeCalls = fake.calls.length;
+    await fire('exampleRepos', 'click', {
+        target: {
+            closest: () => ({ dataset: { repo: 'o/r' } })
+        }
+    });
+    await wait(100);
+    assert.equal(el('repoUrl').value, 'o/r');
+    const madeCalls = fake.calls.slice(beforeCalls);
+    assert.ok(madeCalls.some(c => c.includes('/issues')), 'fake GitHub received an /issues request');
+});

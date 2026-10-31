@@ -857,48 +857,29 @@ test('ui: PR3 rate limit quota badge threshold (< 10) and text format', () => {
 });
 
 test('ui: PR3 token on demand display trigger conditions and DOM reveal', () => {
-    function showTokenFieldMock(dom, reason) {
-        if (dom.branchTokenGroup) {
-            dom.branchTokenGroup.classList.remove('control-hidden');
+    function showTokenPanelMock(dom, message) {
+        if (dom.tokenPanel) {
+            dom.tokenPanel.hidden = false;
         }
-        if (dom.patContainer) {
-            dom.patContainer.style.display = 'block';
-            dom.patContainer.classList.remove('control-hidden');
-        }
-        if (dom.pat) {
-            dom.pat.focused = true;
+        if (dom.tokenPanelMessage) {
+            dom.tokenPanelMessage.textContent = message || '';
         }
     }
 
     const domMock = {
-        branchTokenGroup: {
-            classList: {
-                classes: new Set(['control-hidden']),
-                remove(c) { this.classes.delete(c); },
-                contains(c) { return this.classes.has(c); }
-            }
-        },
-        patContainer: {
-            style: { display: 'none' },
-            classList: {
-                classes: new Set(['control-hidden']),
-                remove(c) { this.classes.delete(c); },
-                contains(c) { return this.classes.has(c); }
-            }
-        },
+        tokenPanel: { hidden: true },
+        tokenPanelMessage: { textContent: '' },
         pat: { focused: false }
     };
 
     // Initially hidden
-    assert.equal(domMock.branchTokenGroup.classList.contains('control-hidden'), true);
-    assert.equal(domMock.patContainer.style.display, 'none');
+    assert.equal(domMock.tokenPanel.hidden, true);
 
-    // Trigger showTokenField
-    showTokenFieldMock(domMock, 'rate-limit');
-    assert.equal(domMock.branchTokenGroup.classList.contains('control-hidden'), false);
-    assert.equal(domMock.patContainer.style.display, 'block');
-    assert.equal(domMock.patContainer.classList.contains('control-hidden'), false);
-    assert.equal(domMock.pat.focused, true);
+    // Trigger showTokenPanel
+    showTokenPanelMock(domMock, 'If this is a private repo, add a token.');
+    assert.equal(domMock.tokenPanel.hidden, false);
+    assert.equal(domMock.tokenPanelMessage.textContent, 'If this is a private repo, add a token.');
+    assert.equal(domMock.pat.focused, false); // Focus is not moved
 });
 
 test('ui: PR3 example repos and mode switch radio behavior', () => {

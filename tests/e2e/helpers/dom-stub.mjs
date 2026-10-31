@@ -43,8 +43,9 @@ globalThis.Worker = class { constructor(url) { this.url = String(url); }
   terminate(){} };
 export const fire = async (id, type, extraProps = {}) => {
   for (const fn of (listeners.get(id)?.[type] || [])) {
-    const baseEvent = { target: registry.get(id), preventDefault(){}, stopPropagation(){} };
-    await fn(Object.assign(baseEvent, extraProps));
+    const targetObj = Object.assign({}, registry.get(id), extraProps.target || {});
+    const baseEvent = { target: targetObj, preventDefault(){}, stopPropagation(){} };
+    await fn(Object.assign(baseEvent, extraProps, { target: targetObj }));
   }
 };
 export const el = (id) => document.getElementById(id);
