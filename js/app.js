@@ -411,10 +411,15 @@ function log(msg) {
 
 // --- Token On Demand & Workspace Visibility ---
 export function showTokenField(reason = '') {
+    if (dom.branchTokenGroup) {
+        dom.branchTokenGroup.classList.remove('control-hidden');
+    }
     if (dom.patContainer) {
         dom.patContainer.style.display = 'block';
+        dom.patContainer.classList.remove('control-hidden');
     } else if (dom.pat && dom.pat.parentElement) {
         dom.pat.parentElement.style.display = 'block';
+        dom.pat.parentElement.classList.remove('control-hidden');
     }
     if (dom.pat) {
         dom.pat.focus();

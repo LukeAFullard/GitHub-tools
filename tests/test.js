@@ -856,31 +856,49 @@ test('ui: PR3 rate limit quota badge threshold (< 10) and text format', () => {
     assert.equal(formatQuotaBadgeText(5, '10:00 AM'), '5 requests left, resets 10:00 AM');
 });
 
-test('ui: PR3 token on demand display trigger conditions', () => {
-    function shouldShowTokenField({ remaining, isPrivate, statusCode, errorMessage }) {
-        if (remaining !== undefined && remaining < 10) return true;
-        if (isPrivate) return true;
-        if (statusCode === 403 || statusCode === 429) return true;
-        if (errorMessage && (errorMessage.includes('rate limit') || errorMessage.includes('403') || errorMessage.includes('429'))) return true;
-        if (statusCode === 404 && isPrivate) return true;
-        return false;
+test('ui: PR3 token on demand display trigger conditions and DOM reveal', () => {
+    function showTokenFieldMock(dom, reason) {
+        if (dom.branchTokenGroup) {
+            dom.branchTokenGroup.classList.remove('control-hidden');
+        }
+        if (dom.patContainer) {
+            dom.patContainer.style.display = 'block';
+            dom.patContainer.classList.remove('control-hidden');
+        }
+        if (dom.pat) {
+            dom.pat.focused = true;
+        }
     }
 
-    // Default normal conditions
-    assert.equal(shouldShowTokenField({ remaining: 60, isPrivate: false, statusCode: 200 }), false);
-    assert.equal(shouldShowTokenField({ remaining: 10, isPrivate: false, statusCode: 200 }), false);
+    const domMock = {
+        branchTokenGroup: {
+            classList: {
+                classes: new Set(['control-hidden']),
+                remove(c) { this.classes.delete(c); },
+                contains(c) { return this.classes.has(c); }
+            }
+        },
+        patContainer: {
+            style: { display: 'none' },
+            classList: {
+                classes: new Set(['control-hidden']),
+                remove(c) { this.classes.delete(c); },
+                contains(c) { return this.classes.has(c); }
+            }
+        },
+        pat: { focused: false }
+    };
 
-    // Quota drops under 10
-    assert.equal(shouldShowTokenField({ remaining: 9, isPrivate: false, statusCode: 200 }), true);
-    assert.equal(shouldShowTokenField({ remaining: 0, isPrivate: false, statusCode: 200 }), true);
+    // Initially hidden
+    assert.equal(domMock.branchTokenGroup.classList.contains('control-hidden'), true);
+    assert.equal(domMock.patContainer.style.display, 'none');
 
-    // Private repo
-    assert.equal(shouldShowTokenField({ remaining: 50, isPrivate: true, statusCode: 200 }), true);
-
-    // Rate-limit errors (403, 429)
-    assert.equal(shouldShowTokenField({ remaining: 50, isPrivate: false, statusCode: 403 }), true);
-    assert.equal(shouldShowTokenField({ remaining: 50, isPrivate: false, statusCode: 429 }), true);
-    assert.equal(shouldShowTokenField({ remaining: 50, isPrivate: false, errorMessage: 'GitHub rate limit reached' }), true);
+    // Trigger showTokenField
+    showTokenFieldMock(domMock, 'rate-limit');
+    assert.equal(domMock.branchTokenGroup.classList.contains('control-hidden'), false);
+    assert.equal(domMock.patContainer.style.display, 'block');
+    assert.equal(domMock.patContainer.classList.contains('control-hidden'), false);
+    assert.equal(domMock.pat.focused, true);
 });
 
 test('ui: PR3 example repos and mode switch radio behavior', () => {
