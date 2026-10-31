@@ -58,6 +58,33 @@ test('maintainers scope keeps fewer comments than all', async () => {
     assert.ok(m > 0 && m < all, `maintainers=${m} all=${all}`);
 });
 
+test('commentScopeBar click sets commentScope and triggers change', async () => {
+    await fire('commentScopeBar', 'click', {
+        target: {
+            closest: () => ({ dataset: { scope: 'maintainers' } })
+        }
+    });
+    assert.equal(el('commentScope').value, 'maintainers');
+});
+
+test('selection telemetry displays selectionSummary and hiddenSelectedNote', async () => {
+    // 25 issues selected
+    assert.match(el('selectionSummary').textContent, /25 selected · ~\d+ tokens \(estimated\)/);
+
+    // Apply a search filter that matches none of the selected issues
+    el('issueSearchInput').value = 'nonexistent_search_query_xyz';
+    await fire('issueSearchInput', 'input');
+    await wait(50);
+
+    assert.equal(el('hiddenSelectedNote').textContent, '25 selected issue(s) are hidden by the current filters.');
+
+    // Reset search
+    el('issueSearchInput').value = '';
+    await fire('issueSearchInput', 'input');
+    await wait(50);
+    assert.equal(el('hiddenSelectedNote').textContent, '');
+});
+
 test('targetBar sets format and chunkLimit preset values', async () => {
     await fire('targetBar', 'click', {
         target: {

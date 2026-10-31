@@ -167,7 +167,7 @@
 
 .filter-controls-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
     gap: 0.4rem;
 }
 
@@ -180,6 +180,79 @@
     font-size: 0.78125rem;
     color: var(--ink);
     font-family: var(--font-sans);
+}
+
+.more-filters-details {
+    font-size: 0.8125rem;
+    color: var(--ink-soft);
+}
+
+.more-filters-details summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--cobalt);
+    user-select: none;
+    margin-top: 0.15rem;
+}
+
+.more-filters-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+/* --- Inline Segmented Scope Control --- */
+.segmented-inline {
+    display: inline-flex;
+    background: var(--page);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-control);
+    padding: 2px;
+    gap: 2px;
+    width: 100%;
+    margin-bottom: 0.4rem;
+}
+
+.segmented-inline button {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--ink-soft);
+    padding: 0.35rem 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    border-radius: calc(var(--radius-control) - 2px);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.segmented-inline button:hover {
+    color: var(--ink);
+}
+
+.segmented-inline button[aria-pressed="true"] {
+    background: var(--sheet);
+    color: var(--cobalt);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+#commentCostHint {
+    margin-bottom: 0.35rem;
+    font-size: 0.78125rem;
+}
+
+#selectionSummary {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--ink);
+    margin-bottom: 0.25rem;
+}
+
+#hiddenSelectedNote {
+    color: var(--near);
+    font-size: 0.78125rem;
+    margin-bottom: 0.5rem;
 }
 
 .filter-dates-row {

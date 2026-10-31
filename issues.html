@@ -163,7 +163,7 @@
             </select>
         </div>
 
-        <div class="option-field">
+        <div class="option-field" hidden>
             <label for="commentScope">Comment inclusion</label>
             <select id="commentScope">
                 <option value="all" selected>All human comments</option>
@@ -235,24 +235,26 @@
     <section id="nlpBanner" class="nlp-banner" style="display: none;" aria-label="NLP Topic Modeling and N-Grams">
         <div class="nlp-header">
             <div class="nlp-title-group">
-                <span class="nlp-title">NLP Topic Clusters &amp; N-Grams</span>
+                <span class="nlp-title">Topics in these issues</span>
                 <span id="nlpMetaBadge" class="char-count">Analyzed 0 issues</span>
             </div>
             <div class="nlp-actions">
                 <button type="button" id="clearNlpFilterBtn" class="secondary btn-xs" style="display: none;">Clear topic filter</button>
-                <button type="button" id="selectActiveTopicBtn" class="primary btn-xs" style="display: none;">Select all in topic</button>
-                <button type="button" id="toggleNlpCollapseBtn" class="secondary btn-xs">Hide insights</button>
+                <button type="button" id="selectActiveTopicBtn" class="primary btn-xs" style="display: none;">Select these</button>
+                <button type="button" id="toggleNlpCollapseBtn" class="secondary btn-xs">Hide topics</button>
             </div>
         </div>
 
         <div id="nlpBody" class="nlp-body">
             <div class="nlp-column">
-                <div class="nlp-section-label">Discovered Topic Clusters (TF-IDF + Cosine K-Means)</div>
+                <div class="nlp-section-label">Click a topic to filter</div>
                 <div id="topicClustersContainer" class="pill-container"></div>
             </div>
             <div class="nlp-column">
-                <div class="nlp-section-label">Top Recurring Phrases (Bigrams &amp; Trigrams)</div>
-                <div id="ngramsContainer" class="pill-container"></div>
+                <details>
+                    <summary class="nlp-section-label" style="cursor: pointer;">Common phrases</summary>
+                    <div id="ngramsContainer" class="pill-container" style="margin-top: 0.35rem;"></div>
+                </details>
             </div>
         </div>
     </section>
@@ -328,28 +330,36 @@
                     <select id="labelFilter" aria-label="Filter by label">
                         <option value="">Label: All labels</option>
                     </select>
-
-                    <select id="sortFilter" aria-label="Sort issues">
-                        <option value="newest">Sort: Newest first</option>
-                        <option value="oldest">Sort: Oldest first</option>
-                        <option value="comments">Sort: Most comments</option>
-                        <option value="reactions">Sort: Most reactions (👍)</option>
-                    </select>
                 </div>
 
-                <div class="filter-dates-row">
-                    <label>Created from <input type="date" id="dateFromFilter"></label>
-                    <label>to <input type="date" id="dateToFilter"></label>
-                    <label title="Minimum comments"><span style="color:var(--ink-soft);">Min 💬</span> <input type="number" id="minCommentsFilter" value="0" min="0" max="500" style="width:52px;"></label>
-                </div>
+                <details id="moreFilters" class="more-filters-details">
+                    <summary>More filters</summary>
+                    <div class="more-filters-content">
+                        <div class="filter-controls-grid" style="margin-top: 0.4rem;">
+                            <select id="sortFilter" aria-label="Sort issues">
+                                <option value="newest">Sort: Newest first</option>
+                                <option value="oldest">Sort: Oldest first</option>
+                                <option value="comments">Sort: Most comments</option>
+                                <option value="reactions">Sort: Most reactions (👍)</option>
+                            </select>
+                        </div>
+                        <div class="filter-dates-row" style="margin-top: 0.4rem;">
+                            <label>Created from <input type="date" id="dateFromFilter"></label>
+                            <label>to <input type="date" id="dateToFilter"></label>
+                            <label title="Minimum comments"><span style="color:var(--ink-soft);">Min 💬</span> <input type="number" id="minCommentsFilter" value="0" min="0" max="500" style="width:52px;"></label>
+                        </div>
+                        <div class="more-filters-actions" style="margin-top: 0.5rem; display: flex; gap: 0.4rem;">
+                            <button id="selectLinkedBtn" type="button" class="secondary btn-xs" title="Select issues referenced via #number in currently selected issues">Select linked (#refs)</button>
+                            <button id="exportNlpOnlyBtn" type="button" class="secondary btn-xs" title="Build an LLM summary of topics and issue counts without fetching full threads">Summary only</button>
+                        </div>
+                    </div>
+                </details>
             </div>
 
             <!-- Selection Toolbar -->
             <div class="tree-toolbar">
                 <button id="selectAllVisibleBtn" class="secondary btn-xs">Select visible</button>
                 <button id="deselectAllBtn" class="secondary btn-xs">Deselect all</button>
-                <button id="selectLinkedBtn" class="secondary btn-xs" title="Select issues referenced via #number in currently selected issues">Select linked (#refs)</button>
-                <button id="exportNlpOnlyBtn" class="secondary btn-xs" style="margin-left: auto;" title="Build an LLM summary of topics and issue counts without fetching full threads">Summary only</button>
             </div>
 
             <!-- Issue Rows Viewport -->
@@ -366,6 +376,14 @@
             </div>
 
             <div class="pane-footer">
+                <div id="commentScopeBar" class="segmented-inline" role="group" aria-label="Comments to include">
+                    <button type="button" data-scope="none">Issue only</button>
+                    <button type="button" data-scope="maintainers">Maintainer replies</button>
+                    <button type="button" data-scope="all">Full discussion</button>
+                </div>
+                <p id="commentCostHint" class="field-helper"></p>
+                <p id="selectionSummary"></p>
+                <p id="hiddenSelectedNote" class="field-helper"></p>
                 <button id="buildContextBtn" class="primary btn-full"><span>Build context</span></button>
             </div>
         </section>
