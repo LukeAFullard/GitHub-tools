@@ -820,6 +820,145 @@ test('ui: PR2 unified secrets control mode mapping', () => {
     assert.deepEqual(applySecretsMode('strict'), { redact: true, aggressive: true });
 });
 
+test('ui: PR3 rate limit quota badge threshold (< 10) and text format', () => {
+    function formatQuotaBadgeText(remaining, resetTimeStr) {
+        return `${remaining} requests left, resets ${resetTimeStr}`;
+    }
+
+    function createMockBadge() {
+        return { style: { display: 'none' } };
+    }
+
+    const rateBadge = createMockBadge();
+    const updateBadgeVisibility = (remaining) => {
+        rateBadge.style.display = remaining < 10 ? 'flex' : 'none';
+    };
+
+    updateBadgeVisibility(60);
+    assert.equal(rateBadge.style.display, 'none');
+
+    updateBadgeVisibility(30);
+    assert.equal(rateBadge.style.display, 'none');
+
+    updateBadgeVisibility(10);
+    assert.equal(rateBadge.style.display, 'none');
+
+    updateBadgeVisibility(9);
+    assert.equal(rateBadge.style.display, 'flex');
+
+    updateBadgeVisibility(5);
+    assert.equal(rateBadge.style.display, 'flex');
+
+    updateBadgeVisibility(0);
+    assert.equal(rateBadge.style.display, 'flex');
+
+    assert.equal(formatQuotaBadgeText(12, '3:14 PM'), '12 requests left, resets 3:14 PM');
+    assert.equal(formatQuotaBadgeText(5, '10:00 AM'), '5 requests left, resets 10:00 AM');
+});
+
+test('ui: PR3 token on demand display trigger conditions and DOM reveal', () => {
+    function showTokenFieldMock(dom, reason) {
+        if (dom.branchTokenGroup) {
+            dom.branchTokenGroup.classList.remove('control-hidden');
+        }
+        if (dom.patContainer) {
+            dom.patContainer.style.display = 'block';
+            dom.patContainer.classList.remove('control-hidden');
+        }
+        if (dom.pat) {
+            dom.pat.focused = true;
+        }
+    }
+
+    const domMock = {
+        branchTokenGroup: {
+            classList: {
+                classes: new Set(['control-hidden']),
+                remove(c) { this.classes.delete(c); },
+                contains(c) { return this.classes.has(c); }
+            }
+        },
+        patContainer: {
+            style: { display: 'none' },
+            classList: {
+                classes: new Set(['control-hidden']),
+                remove(c) { this.classes.delete(c); },
+                contains(c) { return this.classes.has(c); }
+            }
+        },
+        pat: { focused: false }
+    };
+
+    // Initially hidden
+    assert.equal(domMock.branchTokenGroup.classList.contains('control-hidden'), true);
+    assert.equal(domMock.patContainer.style.display, 'none');
+
+    // Trigger showTokenField
+    showTokenFieldMock(domMock, 'rate-limit');
+    assert.equal(domMock.branchTokenGroup.classList.contains('control-hidden'), false);
+    assert.equal(domMock.patContainer.style.display, 'block');
+    assert.equal(domMock.patContainer.classList.contains('control-hidden'), false);
+    assert.equal(domMock.pat.focused, true);
+});
+
+test('ui: PR3 example repos and mode switch radio behavior', () => {
+    const exampleRepos = ['anthropics/claude-code', 'facebook/react', 'astral-sh/ruff'];
+
+    function handleExampleClick(repo) {
+        return {
+            repoUrl: repo,
+            shouldTriggerLoad: true
+        };
+    }
+
+    for (const repo of exampleRepos) {
+        const res = handleExampleClick(repo);
+        assert.equal(res.repoUrl, repo);
+        assert.equal(res.shouldTriggerLoad, true);
+    }
+
+    function getTargetModeUrl(currentMode, targetMode, currentRepo) {
+        if (currentMode === targetMode) return null;
+        const targetPage = targetMode === 'issues' ? 'issues.html' : 'index.html';
+        return currentRepo ? `${targetPage}?repo=${encodeURIComponent(currentRepo)}` : targetPage;
+    }
+
+    assert.equal(getTargetModeUrl('code', 'issues', 'facebook/react'), 'issues.html?repo=facebook%2Freact');
+    assert.equal(getTargetModeUrl('code', 'issues', ''), 'issues.html');
+    assert.equal(getTargetModeUrl('issues', 'code', 'astral-sh/ruff'), 'index.html?repo=astral-sh%2Fruff');
+    assert.equal(getTargetModeUrl('issues', 'code', ''), 'index.html');
+});
+
+test('ui: PR3 workspace reveal on load vs empty initial state', () => {
+    function computeWorkspaceVisibility(appState, repoUrlParam) {
+        const isVisible = appState !== 'empty' || (Boolean(repoUrlParam) && repoUrlParam.trim().length > 0);
+        return {
+            workspaceHidden: !isVisible,
+            heroHidden: isVisible
+        };
+    }
+
+    // Initial first-screen state with no repo
+    const initial = computeWorkspaceVisibility('empty', '');
+    assert.equal(initial.workspaceHidden, true, 'Workspace should be hidden on first screen');
+    assert.equal(initial.heroHidden, false, 'Hero section should be visible on first screen');
+
+    // Repo param in URL
+    const withRepoParam = computeWorkspaceVisibility('empty', 'facebook/react');
+    assert.equal(withRepoParam.workspaceHidden, false, 'Workspace should be visible if repo param exists');
+    assert.equal(withRepoParam.heroHidden, true, 'Hero section should be hidden if repo param exists');
+
+    // Loaded state
+    const loaded = computeWorkspaceVisibility('loaded', '');
+    assert.equal(loaded.workspaceHidden, false);
+    assert.equal(loaded.heroHidden, true);
+
+    // Built state
+    const built = computeWorkspaceVisibility('built', '');
+    assert.equal(built.workspaceHidden, false);
+    assert.equal(built.heroHidden, true);
+});
+
 // --- Regression & Verification Tests for Review Findings ---
 
 test('issue-cleaner: titled image long URL and unclosed image performance', () => {

@@ -1270,3 +1270,115 @@ button:disabled {
         scroll-behavior: auto !important;
     }
 }
+
+/* --- PR3: First Screen Hero, Example Repos & Workspace Visibility --- */
+.first-screen-hero {
+    max-width: 680px;
+    margin: 1.25rem auto 1.5rem auto;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.first-screen-hero.hero-hidden {
+    display: none !important;
+}
+
+.hero-headline {
+    font-size: 1.25rem;
+    line-height: 1.4;
+    font-weight: 600;
+    color: var(--ink);
+    margin: 0;
+}
+
+.example-repos {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8125rem;
+    color: var(--ink-soft);
+}
+
+.example-label {
+    font-weight: 500;
+    margin-right: 0.2rem;
+}
+
+.example-repo-btn {
+    appearance: none;
+    background: var(--sheet);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-control);
+    padding: 0.25rem 0.55rem;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.78125rem;
+    color: var(--ink);
+    transition: all 0.15s ease;
+}
+
+.example-repo-btn:hover {
+    background: var(--cobalt-subtle);
+    border-color: var(--cobalt);
+    color: var(--cobalt);
+}
+
+.mode-choice-group {
+    border: none;
+    padding: 0;
+    margin: 0.25rem 0;
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    font-size: 0.875rem;
+    color: var(--ink);
+}
+
+.mode-choice-group legend {
+    font-weight: 600;
+    color: var(--ink);
+    margin-right: 0.5rem;
+    float: left;
+}
+
+.mode-radio-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.mode-radio-label input[type="radio"] {
+    width: auto;
+    margin: 0;
+    cursor: pointer;
+}
+
+.trust-note {
+    font-size: 0.78125rem;
+    color: var(--ink-soft);
+    margin: 0;
+}
+
+.workspace-hidden {
+    display: none !important;
+}
+
+.hero-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
+.hero-details.hero-hidden {
+    display: none !important;
+}
+
+.secondary-control.control-hidden {
+    display: none !important;
+}

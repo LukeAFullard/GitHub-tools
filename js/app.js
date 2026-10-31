@@ -54,12 +54,20 @@ let currentAppState = 'empty'; // 'empty' | 'loaded' | 'built'
 let totalTokensAllChunks = 0;
 
 const dom = {
+    heroSection: document.getElementById('heroSection'),
+    heroDetails: document.getElementById('heroDetails'),
+    branchTokenGroup: document.getElementById('branchTokenGroup'),
+    patContainer: document.getElementById('patContainer'),
     repoUrl: document.getElementById('repoUrl'),
     branch: document.getElementById('branch'),
     pat: document.getElementById('pat'),
     rateBadge: document.getElementById('rateBadge'),
     quotaVal: document.getElementById('quotaVal'),
+    quotaRemainingText: document.getElementById('quotaRemainingText'),
     resetVal: document.getElementById('resetVal'),
+    budgetBanner: document.getElementById('budgetBanner'),
+    workspacePanes: document.getElementById('workspacePanes'),
+    logCard: document.getElementById('logCard'),
     sendTo: document.getElementById('sendTo'),
     format: document.getElementById('format'),
     maxKb: document.getElementById('maxKb'),
@@ -401,12 +409,50 @@ function log(msg) {
     }
 }
 
+// --- Token On Demand & Workspace Visibility ---
+export function showTokenField(reason = '') {
+    if (dom.branchTokenGroup) {
+        dom.branchTokenGroup.classList.remove('control-hidden');
+    }
+    if (dom.patContainer) {
+        dom.patContainer.style.display = 'block';
+        dom.patContainer.classList.remove('control-hidden');
+    } else if (dom.pat && dom.pat.parentElement) {
+        dom.pat.parentElement.style.display = 'block';
+        dom.pat.parentElement.classList.remove('control-hidden');
+    }
+    if (dom.pat) {
+        dom.pat.focus();
+    }
+    if (reason) {
+        log(`[AUTH] GitHub token requested (${reason}).`);
+    }
+}
+
+function updateWorkspaceVisibility() {
+    const isVisible = currentAppState !== 'empty' || (dom.repoUrl && dom.repoUrl.value.trim().length > 0);
+    const workspaceSections = [dom.budgetBanner, dom.workspacePanes, dom.logCard];
+    workspaceSections.forEach(sec => {
+        if (sec) sec.classList.toggle('workspace-hidden', !isVisible);
+    });
+    if (dom.heroSection) {
+        dom.heroSection.classList.toggle('hero-hidden', isVisible);
+    }
+    if (dom.heroDetails) {
+        dom.heroDetails.classList.toggle('hero-hidden', isVisible);
+    }
+    document.querySelectorAll('.secondary-control').forEach(el => {
+        el.classList.toggle('control-hidden', !isVisible);
+    });
+}
+
 // --- App State & Sequence Steps ---
 function setAppState(state, note = '') {
     currentAppState = state;
     if (dom.step1) dom.step1.classList.toggle('active', state === 'empty');
     if (dom.step2) dom.step2.classList.toggle('active', state === 'loaded');
     if (dom.step3) dom.step3.classList.toggle('active', state === 'built');
+    updateWorkspaceVisibility();
 
     if (dom.mobilePrimaryBtn) {
         if (state === 'empty') {
@@ -647,25 +693,40 @@ function clearOutputState() {
     updateBudgetMeterUI(0, 1, false);
 }
 
+export function formatQuotaBadgeText(remaining, resetTimeStr) {
+    return `${remaining} requests left, resets ${resetTimeStr}`;
+}
+
 function updateRateLimitUI(meta) {
-    if (meta.remaining !== null && meta.remaining !== undefined && meta.limit !== null && meta.limit !== undefined) {
-        const remaining = typeof meta.remaining === 'number' ? meta.remaining : parseInt(meta.remaining, 10);
-        const limit = typeof meta.limit === 'number' ? meta.limit : parseInt(meta.limit, 10);
-        if (!Number.isNaN(remaining) && !Number.isNaN(limit)) {
-            dom.quotaVal.textContent = `${remaining} / ${limit}`;
-            dom.quotaVal.className = (
-                remaining < 5 ? 'rate-critical' : remaining < 20 ? 'rate-warning' : 'rate-normal'
-            );
-            if (dom.rateBadge) {
-                dom.rateBadge.style.display = remaining < 30 ? 'flex' : 'none';
-            }
-        }
-    }
+    if (!meta) return;
+    let resetTimeStr = '--:--';
     if (meta.reset) {
         const resetSec = typeof meta.reset === 'number' ? meta.reset : parseInt(meta.reset, 10);
         if (!Number.isNaN(resetSec)) {
             const resetDate = new Date(resetSec * 1000);
-            dom.resetVal.textContent = resetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            resetTimeStr = resetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            if (dom.resetVal) dom.resetVal.textContent = resetTimeStr;
+        }
+    }
+
+    if (meta.remaining !== null && meta.remaining !== undefined) {
+        const remaining = typeof meta.remaining === 'number' ? meta.remaining : parseInt(meta.remaining, 10);
+        if (!Number.isNaN(remaining)) {
+            if (dom.quotaVal) {
+                dom.quotaVal.textContent = `${remaining} / ${meta.limit || '--'}`;
+                dom.quotaVal.className = (
+                    remaining < 5 ? 'rate-critical' : remaining < 10 ? 'rate-warning' : 'rate-normal'
+                );
+            }
+            if (dom.quotaRemainingText) {
+                dom.quotaRemainingText.innerHTML = `${remaining} requests left, resets <span id="resetVal">${resetTimeStr}</span>`;
+            }
+            if (dom.rateBadge) {
+                dom.rateBadge.style.display = remaining < 10 ? 'flex' : 'none';
+            }
+            if (remaining < 10) {
+                showTokenField('rate-limit quota under 10');
+            }
         }
     }
 }
@@ -687,7 +748,7 @@ if (dom.warningBannerDismissBtn) {
 }
 if (dom.warningBannerTokenBtn) {
     dom.warningBannerTokenBtn.addEventListener('click', () => {
-        if (dom.pat) dom.pat.focus();
+        showTokenField('warning-banner');
     });
 }
 
@@ -713,6 +774,29 @@ applyUrlParams();
 syncSendToFromValues();
 updateSettingsSummary();
 updateCopyBtnLabel();
+updateWorkspaceVisibility();
+
+// Example repo buttons
+document.querySelectorAll('.example-repo-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const repo = btn.getAttribute('data-repo');
+        if (repo && dom.repoUrl) {
+            dom.repoUrl.value = repo;
+            showInlineError(false);
+            if (dom.packBtn) dom.packBtn.click();
+        }
+    });
+});
+
+// Mode choice radio toggle (Code vs Issues)
+document.querySelectorAll('input[name="sendMode"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+        if (radio.checked && radio.value === 'issues') {
+            const currentRepo = dom.repoUrl ? dom.repoUrl.value.trim() : '';
+            window.location.href = currentRepo ? `issues.html?repo=${encodeURIComponent(currentRepo)}` : 'issues.html';
+        }
+    });
+});
 
 function getDeepLinkUrl() {
     const repo = dom.repoUrl ? dom.repoUrl.value.trim() : '';
@@ -1130,12 +1214,20 @@ dom.packBtn.addEventListener('click', async () => {
             );
             if (!targetBranch) targetBranch = repoMeta.branch;
             isPrivateRepo = repoMeta.isPrivate;
+            if (isPrivateRepo && !pat) {
+                showTokenField('private repo detected');
+            }
         } catch (err) {
             if (err.name === 'AbortError') throw err;
+            if (err.message && (err.message.includes('rate limit') || err.message.includes('403') || err.message.includes('429'))) {
+                showTokenField('rate limit or access forbidden');
+            } else if (err.message && err.message.includes('404')) {
+                showTokenField('repo not found or private repo');
+            }
             if (!targetBranch) {
                 if (err.message && err.message.includes('404')) {
                     showToast("Can't find that repo or branch. For a private repo, add a token with read access to contents.", "error");
-                } else if (err.message && (err.message.includes('rate limit') || err.message.includes('403'))) {
+                } else if (err.message && (err.message.includes('rate limit') || err.message.includes('403') || err.message.includes('429'))) {
                     showToast("GitHub rate limit reached or access forbidden. Add a token to raise the limit.", "error");
                 } else {
                     showToast(err.message, "error");

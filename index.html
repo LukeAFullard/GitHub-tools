@@ -38,9 +38,8 @@
 
         <div class="header-controls">
             <div id="rateBadge" class="rate-badge" title="GitHub API Rate Limit Quota" style="display: none;">
-                <span>API Quota:</span>
-                <b id="quotaVal" class="rate-normal">-- / --</b>
-                <span id="resetValContainer" style="color: var(--ink-soft); font-size: 0.75rem;">(Reset: <span id="resetVal">--:--</span>)</span>
+                <b id="quotaVal" class="rate-normal" style="display:none;">-- / --</b>
+                <span id="quotaRemainingText">12 requests left, resets <span id="resetVal">--:--</span></span>
             </div>
 
             <button id="themeToggleBtn" class="secondary btn-sm" aria-label="Toggle dark/light theme" title="Toggle theme">
@@ -84,6 +83,11 @@
         </div>
     </div>
 
+    <!-- First Screen Hero -->
+    <section id="heroSection" class="first-screen-hero">
+        <h1 class="hero-headline">Turn a repo (or its issues) into one file for Claude, ChatGPT or Gemini.</h1>
+    </section>
+
     <!-- Source Input Bar -->
     <section class="source-bar">
         <form id="sourceForm" class="source-form" onsubmit="return false;">
@@ -93,16 +97,37 @@
                     <input type="text" id="repoUrl" placeholder="owner/repo or https://github.com/owner/repo" value="">
                     <button id="packBtn" type="button" class="primary">Load files</button>
                     <button id="abortBtn" type="button" class="danger" style="display: none;">Cancel</button>
-                    <button id="optionsToggleBtn" type="button" class="options-toggle-btn" aria-expanded="false" aria-controls="optionsDrawer">
+                    <button id="optionsToggleBtn" type="button" class="options-toggle-btn secondary-control" aria-expanded="false" aria-controls="optionsDrawer">
                         <span id="optionsToggleSummary">Settings: Claude XML · original code · secrets hidden</span>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                     </button>
                 </div>
                 <div id="repoInputError" class="inline-error">Enter a repo as owner/name or a GitHub URL.</div>
-                <p class="field-helper">Paste a GitHub URL or owner/repo.</p>
+                <p class="field-helper secondary-control">Paste a GitHub URL or owner/repo.</p>
             </div>
 
-            <div class="branch-token-group">
+            <div id="heroDetails" class="hero-details">
+                <div class="example-repos">
+                    <span class="example-label">Try:</span>
+                    <button type="button" class="example-repo-btn" data-repo="anthropics/claude-code">anthropics/claude-code</button>
+                    <button type="button" class="example-repo-btn" data-repo="facebook/react">facebook/react</button>
+                    <button type="button" class="example-repo-btn" data-repo="astral-sh/ruff">astral-sh/ruff</button>
+                </div>
+                <fieldset class="mode-choice-group" aria-label="What do you want to send?">
+                    <legend>What do you want to send?</legend>
+                    <label class="mode-radio-label">
+                        <input type="radio" name="sendMode" value="code" checked>
+                        <span>Code</span>
+                    </label>
+                    <label class="mode-radio-label">
+                        <input type="radio" name="sendMode" value="issues">
+                        <span>Issues</span>
+                    </label>
+                </fieldset>
+                <p class="trust-note">Runs in your browser. Your token is never stored.</p>
+            </div>
+
+            <div id="branchTokenGroup" class="branch-token-group secondary-control">
                 <div class="option-field">
                     <label for="sendTo">Send to</label>
                     <select id="sendTo" style="max-width: 140px;">
@@ -116,13 +141,13 @@
                     <label for="branch">Branch / Tag</label>
                     <input type="text" id="branch" placeholder="main/master" style="max-width: 130px;">
                 </div>
-                <div class="option-field">
+                <div class="option-field" id="patContainer" style="display: none;">
                     <label for="pat">GitHub token</label>
                     <input type="password" id="pat" placeholder="ghp_... (Optional)" autocomplete="off" style="max-width: 170px;">
+                    <p class="field-helper" style="font-size: 0.75rem; color: var(--ink-soft); margin-top: 0.2rem;">Optional. Used only for requests to GitHub. Not stored.</p>
                 </div>
             </div>
         </form>
-        <p class="field-helper" style="font-size: 0.78125rem; color: var(--ink-soft);">Token helper: Optional. Used only for requests to GitHub from this page. Not stored.</p>
     </section>
 
     <!-- Options Collapsible Drawer -->
@@ -198,7 +223,7 @@
     </div>
 
     <!-- Budget Meter Banner -->
-    <section class="budget-banner" aria-label="Context Budget Meter">
+    <section id="budgetBanner" class="budget-banner workspace-section" aria-label="Context Budget Meter">
         <div class="budget-header">
             <div class="budget-numbers">
                 <span id="statTokens" class="budget-hero-number">0</span>
@@ -234,7 +259,7 @@
     </div>
 
     <!-- Main Workspace Panes (Files | Output) -->
-    <main class="workspace-panes">
+    <main id="workspacePanes" class="workspace-panes workspace-section">
         <!-- Files Pane -->
         <section class="pane active-mobile" id="treeCard" role="tabpanel" aria-labelledby="tabFilesBtn">
             <div class="pane-header">
@@ -370,7 +395,7 @@
     </main>
 
     <!-- Terminal Activity Log -->
-    <section class="log-card">
+    <section id="logCard" class="log-card workspace-section">
         <div id="logHeader" class="log-header">
             <span id="logSummary" class="log-summary-text">Ready</span>
             <button id="logToggleBtn" class="secondary btn-xs" type="button">Details</button>

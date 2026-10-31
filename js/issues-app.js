@@ -32,6 +32,10 @@ let buildGeneration = 0;
 let inputDebounceTimer = null;
 
 const dom = {
+    heroSection: document.getElementById('heroSection'),
+    heroDetails: document.getElementById('heroDetails'),
+    branchTokenGroup: document.getElementById('branchTokenGroup'),
+    patContainer: document.getElementById('patContainer'),
     repoUrl: document.getElementById('repoUrl'),
     switchToCodeLink: document.getElementById('switchToCodeLink'),
     maxIssuesLimit: document.getElementById('maxIssuesLimit'),
@@ -45,7 +49,11 @@ const dom = {
     repoInputError: document.getElementById('repoInputError'),
     rateBadge: document.getElementById('rateBadge'),
     quotaVal: document.getElementById('quotaVal'),
+    quotaRemainingText: document.getElementById('quotaRemainingText'),
     resetVal: document.getElementById('resetVal'),
+    budgetBanner: document.getElementById('budgetBanner'),
+    workspacePanes: document.getElementById('workspacePanes'),
+    logCard: document.getElementById('logCard'),
     themeToggleBtn: document.getElementById('themeToggleBtn'),
     shareUrlBtn: document.getElementById('shareUrlBtn'),
     persistentWarningBanner: document.getElementById('persistentWarningBanner'),
@@ -172,11 +180,49 @@ function updateProgressBar(percent) {
     if (dom.progressTrack) dom.progressTrack.setAttribute('aria-valuenow', val.toString());
 }
 
+// --- Token On Demand & Workspace Visibility ---
+export function showTokenField(reason = '') {
+    if (dom.branchTokenGroup) {
+        dom.branchTokenGroup.classList.remove('control-hidden');
+    }
+    if (dom.patContainer) {
+        dom.patContainer.style.display = 'block';
+        dom.patContainer.classList.remove('control-hidden');
+    } else if (dom.pat && dom.pat.parentElement) {
+        dom.pat.parentElement.style.display = 'block';
+        dom.pat.parentElement.classList.remove('control-hidden');
+    }
+    if (dom.pat) {
+        dom.pat.focus();
+    }
+    if (reason) {
+        log(`[AUTH] GitHub token requested (${reason}).`);
+    }
+}
+
+function updateWorkspaceVisibility() {
+    const isVisible = currentAppState !== 'empty' || (dom.repoUrl && dom.repoUrl.value.trim().length > 0);
+    const workspaceSections = [dom.budgetBanner, dom.workspacePanes, dom.logCard];
+    workspaceSections.forEach(sec => {
+        if (sec) sec.classList.toggle('workspace-hidden', !isVisible);
+    });
+    if (dom.heroSection) {
+        dom.heroSection.classList.toggle('hero-hidden', isVisible);
+    }
+    if (dom.heroDetails) {
+        dom.heroDetails.classList.toggle('hero-hidden', isVisible);
+    }
+    document.querySelectorAll('.secondary-control').forEach(el => {
+        el.classList.toggle('control-hidden', !isVisible);
+    });
+}
+
 function setAppState(state) {
     currentAppState = state;
     if (dom.step1) dom.step1.classList.toggle('active', state === 'empty');
     if (dom.step2) dom.step2.classList.toggle('active', state === 'loaded');
     if (dom.step3) dom.step3.classList.toggle('active', state === 'built');
+    updateWorkspaceVisibility();
 
     if (dom.mobilePrimaryBtn) {
         dom.mobilePrimaryBtn.textContent = state === 'empty'
@@ -236,19 +282,34 @@ function hidePersistentWarning() {
     }
 }
 
+export function formatQuotaBadgeText(remaining, resetTimeStr) {
+    return `${remaining} requests left, resets ${resetTimeStr}`;
+}
+
 function updateRateLimitUI(meta) {
     if (!meta) return;
-    if (meta.remaining !== null && meta.remaining !== undefined && meta.limit !== null) {
-        lastRateLimitRemaining = meta.remaining;
-        dom.quotaVal.textContent = `${meta.remaining} / ${meta.limit}`;
-        dom.quotaVal.className = meta.remaining < 5 ? 'rate-critical' : meta.remaining < 20 ? 'rate-warning' : 'rate-normal';
-        if (dom.rateBadge) {
-            dom.rateBadge.style.display = meta.remaining < 30 ? 'flex' : 'none';
-        }
-    }
+    let resetTimeStr = '--:--';
     if (meta.reset) {
         const resetDate = new Date(meta.reset * 1000);
-        dom.resetVal.textContent = resetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        resetTimeStr = resetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        if (dom.resetVal) dom.resetVal.textContent = resetTimeStr;
+    }
+
+    if (meta.remaining !== null && meta.remaining !== undefined) {
+        lastRateLimitRemaining = meta.remaining;
+        if (dom.quotaVal) {
+            dom.quotaVal.textContent = `${meta.remaining} / ${meta.limit || '--'}`;
+            dom.quotaVal.className = meta.remaining < 5 ? 'rate-critical' : meta.remaining < 10 ? 'rate-warning' : 'rate-normal';
+        }
+        if (dom.quotaRemainingText) {
+            dom.quotaRemainingText.innerHTML = `${meta.remaining} requests left, resets <span id="resetVal">${resetTimeStr}</span>`;
+        }
+        if (dom.rateBadge) {
+            dom.rateBadge.style.display = meta.remaining < 10 ? 'flex' : 'none';
+        }
+        if (meta.remaining < 10) {
+            showTokenField('rate-limit quota under 10');
+        }
     }
 }
 
@@ -275,7 +336,7 @@ if (dom.warningBannerDismissBtn) {
 }
 if (dom.warningBannerTokenBtn) {
     dom.warningBannerTokenBtn.addEventListener('click', () => {
-        if (dom.pat) dom.pat.focus();
+        showTokenField('warning-banner');
     });
 }
 
@@ -756,6 +817,11 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
             log('[CANCEL] Manifest load cancelled.');
         } else {
             log(`[ERROR] ${err.message}`);
+            if (err.message && (err.message.includes('rate limit') || err.message.includes('403') || err.message.includes('429'))) {
+                showTokenField('rate limit or access forbidden');
+            } else if (err.message && err.message.includes('404')) {
+                showTokenField('repo not found or private repo');
+            }
             showToast(err.message, 'error');
         }
     } finally {
@@ -1281,3 +1347,26 @@ syncSecretsControlFromCheckboxes();
 syncSendToFromValues();
 updateSettingsSummary();
 updateCopyBtnLabel(0);
+updateWorkspaceVisibility();
+
+// Example repo buttons
+document.querySelectorAll('.example-repo-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const repo = btn.getAttribute('data-repo');
+        if (repo && dom.repoUrl) {
+            dom.repoUrl.value = repo;
+            showInlineError(false);
+            if (dom.loadIssuesBtn) dom.loadIssuesBtn.click();
+        }
+    });
+});
+
+// Mode choice radio toggle (Code vs Issues)
+document.querySelectorAll('input[name="sendMode"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+        if (radio.checked && radio.value === 'code') {
+            const currentRepo = dom.repoUrl ? dom.repoUrl.value.trim() : '';
+            window.location.href = currentRepo ? `index.html?repo=${encodeURIComponent(currentRepo)}` : 'index.html';
+        }
+    });
+});
