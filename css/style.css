@@ -191,11 +191,48 @@ html, body {
     z-index: 20;
 }
 
+.brand-With-Switcher {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
 .brand-group {
     display: flex;
     align-items: center;
     gap: 0.6rem;
     color: var(--ink);
+}
+
+.page-tabs {
+    display: inline-flex;
+    background: var(--page);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-control);
+    padding: 2px;
+    gap: 2px;
+}
+
+.page-tabs a {
+    text-decoration: none;
+    color: var(--ink-soft);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    padding: 0.25rem 0.65rem;
+    border-radius: calc(var(--radius-control) - 2px);
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.page-tabs a:hover {
+    color: var(--ink);
+}
+
+.page-tabs a.active,
+.page-tabs a[aria-current="page"] {
+    background: var(--sheet);
+    color: var(--cobalt);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
 .brand-group svg {
