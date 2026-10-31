@@ -60,12 +60,14 @@ const dom = {
     rateBadge: document.getElementById('rateBadge'),
     quotaVal: document.getElementById('quotaVal'),
     resetVal: document.getElementById('resetVal'),
+    sendTo: document.getElementById('sendTo'),
     format: document.getElementById('format'),
     maxKb: document.getElementById('maxKb'),
     throttleMs: document.getElementById('throttleMs'),
     ignoreExt: document.getElementById('ignoreExt'),
     minifyMode: document.getElementById('minifyMode'),
     chunkLimit: document.getElementById('chunkLimit'),
+    secretsControl: document.getElementById('secretsControl'),
     redactSecrets: document.getElementById('redactSecrets'),
     aggressiveRedact: document.getElementById('aggressiveRedact'),
     aiInstructions: document.getElementById('aiInstructions'),
@@ -89,6 +91,7 @@ const dom = {
     warningBannerDismissBtn: document.getElementById('warningBannerDismissBtn'),
     abortBtn: document.getElementById('abortBtn'),
     optionsToggleBtn: document.getElementById('optionsToggleBtn'),
+    optionsToggleSummary: document.getElementById('optionsToggleSummary'),
     optionsDrawer: document.getElementById('optionsDrawer'),
     themeToggleBtn: document.getElementById('themeToggleBtn'),
     repoInputError: document.getElementById('repoInputError'),
@@ -201,6 +204,113 @@ function updateCharCount() {
     }
 }
 
+export function getCopyButtonLabel(target, activeIndex = 0, totalParts = 1) {
+    if (totalParts > 1) {
+        return `Copy part ${activeIndex + 1} of ${totalParts}`;
+    }
+    switch (target) {
+        case 'claude': return 'Copy for Claude';
+        case 'chatgpt': return 'Copy for ChatGPT';
+        case 'gemini': return 'Copy for Gemini';
+        default: return 'Copy';
+    }
+}
+
+export function formatSettingsSummaryCode({ format, minifyMode, secretsMode }) {
+    const formatLabels = {
+        'claude-xml': 'Claude XML',
+        'markdown': 'Markdown',
+        'generic-xml': 'Generic XML',
+        'json': 'JSON'
+    };
+    const fmtText = formatLabels[format] || 'Claude XML';
+
+    let codeText = 'original code';
+    if (minifyMode === 'basic') codeText = 'blank lines removed';
+    else if (minifyMode === 'aggressive') codeText = 'comments removed';
+
+    let secText = 'secrets hidden';
+    if (secretsMode === 'off') secText = 'secrets visible';
+    else if (secretsMode === 'strict') secText = 'strict secrets hidden';
+
+    return `Settings: ${fmtText} · ${codeText} · ${secText}`;
+}
+
+function updateSettingsSummary() {
+    if (!dom.optionsToggleSummary) return;
+    const format = dom.format ? dom.format.value : 'claude-xml';
+    const minifyMode = dom.minifyMode ? dom.minifyMode.value : 'none';
+    const secretsMode = dom.secretsControl ? dom.secretsControl.value : (
+        dom.redactSecrets && !dom.redactSecrets.checked ? 'off' :
+        dom.aggressiveRedact && dom.aggressiveRedact.checked ? 'strict' : 'standard'
+    );
+    dom.optionsToggleSummary.textContent = formatSettingsSummaryCode({ format, minifyMode, secretsMode });
+}
+
+function syncSecretsControlFromCheckboxes() {
+    if (!dom.secretsControl) return;
+    const isRedact = dom.redactSecrets ? dom.redactSecrets.checked : true;
+    const isAggressive = dom.aggressiveRedact ? dom.aggressiveRedact.checked : false;
+    if (!isRedact) {
+        dom.secretsControl.value = 'off';
+    } else if (isAggressive) {
+        dom.secretsControl.value = 'strict';
+    } else {
+        dom.secretsControl.value = 'standard';
+    }
+}
+
+function syncCheckboxesFromSecretsControl() {
+    if (!dom.secretsControl) return;
+    const val = dom.secretsControl.value;
+    if (dom.redactSecrets) dom.redactSecrets.checked = (val !== 'off');
+    if (dom.aggressiveRedact) dom.aggressiveRedact.checked = (val === 'strict');
+}
+
+function syncSendToFromValues() {
+    if (!dom.sendTo) return;
+    const fmt = dom.format ? dom.format.value : 'claude-xml';
+    const chunkVal = parseInt(dom.chunkLimit ? dom.chunkLimit.value : '0', 10) || 0;
+
+    if (fmt === 'claude-xml' && currentBudgetWindow === 200000 && (chunkVal === 0 || chunkVal === 200000)) {
+        dom.sendTo.value = 'claude';
+    } else if (fmt === 'markdown' && currentBudgetWindow === 128000 && (chunkVal === 0 || chunkVal === 128000)) {
+        dom.sendTo.value = 'chatgpt';
+    } else if (fmt === 'markdown' && currentBudgetWindow === 1000000 && (chunkVal === 0 || chunkVal === 1000000)) {
+        dom.sendTo.value = 'gemini';
+    } else {
+        dom.sendTo.value = 'custom';
+    }
+}
+
+function applySendToPreset(target) {
+    if (!target || target === 'custom') return;
+    if (target === 'claude') {
+        if (dom.format) dom.format.value = 'claude-xml';
+        currentBudgetWindow = 200000;
+        if (dom.chunkLimit) dom.chunkLimit.value = '200000';
+    } else if (target === 'chatgpt') {
+        if (dom.format) dom.format.value = 'markdown';
+        currentBudgetWindow = 128000;
+        if (dom.chunkLimit) dom.chunkLimit.value = '128000';
+    } else if (target === 'gemini') {
+        if (dom.format) dom.format.value = 'markdown';
+        currentBudgetWindow = 1000000;
+        if (dom.chunkLimit) dom.chunkLimit.value = '1000000';
+    }
+    updateBudgetMeterUI(totalTokensAllChunks, generatedChunks.length || 1, currentAppState !== 'built');
+    updateSettingsSummary();
+    updateCopyBtnLabel();
+    saveSettings();
+}
+
+function updateCopyBtnLabel(activeIndex = 0) {
+    if (!dom.copyBtn) return;
+    const target = dom.sendTo ? dom.sendTo.value : 'claude';
+    const totalParts = generatedChunks.length;
+    dom.copyBtn.textContent = getCopyButtonLabel(target, activeIndex, totalParts);
+}
+
 function loadSavedSettings() {
     try {
         if (dom.format && localStorage.getItem('cfg_format')) dom.format.value = localStorage.getItem('cfg_format');
@@ -215,6 +325,7 @@ function loadSavedSettings() {
         if (dom.aggressiveRedact && localStorage.getItem('cfg_aggressiveRedact') !== null) {
             dom.aggressiveRedact.checked = localStorage.getItem('cfg_aggressiveRedact') === 'true';
         }
+        syncSecretsControlFromCheckboxes();
         if (dom.aiInstructions && localStorage.getItem('cfg_aiInstructions') !== null) {
             dom.aiInstructions.value = localStorage.getItem('cfg_aiInstructions');
             updateCharCount();
@@ -222,6 +333,8 @@ function loadSavedSettings() {
         if (localStorage.getItem('cfg_budgetWindow')) {
             currentBudgetWindow = parseInt(localStorage.getItem('cfg_budgetWindow'), 10) || 200000;
         }
+        syncSendToFromValues();
+        updateSettingsSummary();
     } catch (_) {}
 }
 
@@ -237,6 +350,7 @@ function saveSettings() {
         if (dom.aggressiveRedact) localStorage.setItem('cfg_aggressiveRedact', dom.aggressiveRedact.checked ? 'true' : 'false');
         if (dom.aiInstructions) localStorage.setItem('cfg_aiInstructions', dom.aiInstructions.value);
         localStorage.setItem('cfg_budgetWindow', currentBudgetWindow.toString());
+        updateSettingsSummary();
     } catch (_) {}
 }
 
@@ -366,7 +480,7 @@ if (dom.wrapToggleBtn && dom.previewArea) {
 }
 
 // Budget Meter Presets
-document.querySelectorAll('.preset-btn').forEach(btn => {
+document.querySelectorAll('.budget-presets .preset-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         const val = parseInt(btn.getAttribute('data-preset'), 10);
         if (val) {
@@ -375,6 +489,8 @@ document.querySelectorAll('.preset-btn').forEach(btn => {
                 dom.chunkLimit.value = val.toString();
                 dom.chunkLimit.dispatchEvent(new Event('change', { bubbles: true }));
             }
+            syncSendToFromValues();
+            updateCopyBtnLabel();
             saveSettings();
         }
     });
@@ -525,7 +641,7 @@ function clearOutputState() {
     if (dom.downloadBtn) dom.downloadBtn.disabled = true;
     if (dom.copyBtn) {
         dom.copyBtn.disabled = true;
-        dom.copyBtn.textContent = 'Copy';
+        updateCopyBtnLabel(0);
     }
     if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
     updateBudgetMeterUI(0, 1, false);
@@ -592,7 +708,11 @@ function applyUrlParams() {
 }
 
 clearOutputState();
+loadSavedSettings();
 applyUrlParams();
+syncSendToFromValues();
+updateSettingsSummary();
+updateCopyBtnLabel();
 
 function getDeepLinkUrl() {
     const repo = dom.repoUrl ? dom.repoUrl.value.trim() : '';
@@ -804,14 +924,14 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
         dom.chunkSelect.style.display = 'inline-block';
         dom.downloadAllBtn.style.display = 'inline-flex';
         dom.chunkSelect.innerHTML = generatedChunks.map((_, idx) => `<option value="${idx}">Part ${idx + 1} of ${generatedChunks.length}</option>`).join('');
-        dom.copyBtn.textContent = `Copy part 1 of ${generatedChunks.length}`;
+        updateCopyBtnLabel(0);
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'inline-flex';
     } else {
         dom.chunkSelectLabel.style.display = 'none';
         dom.chunkSelect.style.display = 'none';
         dom.downloadAllBtn.style.display = 'none';
         dom.chunkSelect.innerHTML = '';
-        dom.copyBtn.textContent = 'Copy';
+        updateCopyBtnLabel(0);
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
     }
 
@@ -853,10 +973,28 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     log(`[SUCCESS] Context ready: ${generatedChunks.length} part(s), ~${totalTokensAllChunks.toLocaleString()} total tokens.`);
 }
 
+// Send-to and unified secrets listeners
+if (dom.sendTo) {
+    dom.sendTo.addEventListener('change', () => {
+        applySendToPreset(dom.sendTo.value);
+        repackBundleInMemory();
+    });
+}
+
+if (dom.secretsControl) {
+    dom.secretsControl.addEventListener('change', () => {
+        syncCheckboxesFromSecretsControl();
+        saveSettings();
+        repackBundleInMemory();
+    });
+}
+
 // Auto-repack on setting changes if files are already cached
 [dom.format, dom.minifyMode, dom.chunkLimit].forEach(el => {
     if (el) {
         el.addEventListener('change', () => {
+            syncSendToFromValues();
+            updateCopyBtnLabel();
             saveSettings();
             repackBundleInMemory();
         });
@@ -871,12 +1009,14 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
 });
 if (dom.redactSecrets) {
     dom.redactSecrets.addEventListener('change', () => {
+        syncSecretsControlFromCheckboxes();
         saveSettings();
         repackBundleInMemory();
     });
 }
 if (dom.aggressiveRedact) {
     dom.aggressiveRedact.addEventListener('change', () => {
+        syncSecretsControlFromCheckboxes();
         saveSettings();
         repackBundleInMemory();
     });
@@ -1480,13 +1620,12 @@ function updateActiveChunkView(index) {
         ? `${packedOutputText.length.toLocaleString()} (Part ${activeChunkIndex + 1}) / ${totalChars.toLocaleString()} total`
         : totalChars.toLocaleString();
 
+    updateCopyBtnLabel(activeChunkIndex);
     if (generatedChunks.length > 1) {
-        dom.copyBtn.textContent = `Copy part ${activeChunkIndex + 1} of ${generatedChunks.length}`;
         if (dom.nextPartBtn) {
             dom.nextPartBtn.style.display = activeChunkIndex < generatedChunks.length - 1 ? 'inline-flex' : 'none';
         }
     } else {
-        dom.copyBtn.textContent = 'Copy';
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
     }
 
@@ -1548,9 +1687,7 @@ dom.copyBtn.addEventListener('click', async () => {
         const originalText = dom.copyBtn.textContent;
         dom.copyBtn.textContent = 'Copied!';
         setTimeout(() => {
-            dom.copyBtn.textContent = numParts > 1
-                ? `Copy part ${activeChunkIndex + 1} of ${numParts}`
-                : originalText;
+            updateCopyBtnLabel(activeChunkIndex);
         }, 2000);
     } catch (_) {
         showToast('Unable to copy automatically. Please copy directly from preview.', 'error');
