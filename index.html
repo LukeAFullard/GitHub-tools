@@ -216,6 +216,10 @@
                 <button type="button" id="clearInstructionsBtn" class="secondary btn-xs">Clear</button>
             </div>
         </div>
+
+        <div class="option-field full-width">
+            <button type="button" id="drawerDoneBtn" class="primary btn-full drawer-done-btn" style="display: none;">Done</button>
+        </div>
     </div>
 
     <!-- Budget Meter Banner -->
@@ -271,9 +275,9 @@
                         <circle cx="11" cy="11" r="8"></circle>
                         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                     </svg>
-                    <input type="text" id="treeFilterInput" placeholder="Filter files (e.g. *.js, src/)...">
+                    <input type="text" id="treeFilterInput" aria-label="Filter files" placeholder="Filter files (e.g. *.js, src/)...">
                 </div>
-                <span id="searchMatchCount" class="search-count"></span>
+                <span id="searchMatchCount" class="search-count" aria-live="polite"></span>
             </div>
 
             <div class="tree-toolbar">
@@ -284,7 +288,7 @@
 
                 <div class="threshold-group">
                     <button id="deselectLargeBtn" class="secondary btn-xs" title="Uncheck files larger than threshold">Uncheck files over</button>
-                    <input type="number" id="largeFileThresholdKb" value="50" min="1" max="5000">
+                    <input type="number" id="largeFileThresholdKb" aria-label="Large file threshold in kilobytes" value="50" min="1" max="5000">
                     <span style="font-size: 0.75rem; font-family: var(--font-mono); color: var(--ink-soft);">KB</span>
                 </div>
             </div>

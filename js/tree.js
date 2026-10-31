@@ -271,7 +271,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
             });
 
             row.addEventListener('keydown', (e) => {
-                if (e.key === ' ' || e.key === 'Spacebar') {
+                if (e.key === ' ' || e.key === 'Spacebar' || e.key === 'Enter') {
                     e.preventDefault();
                     checkbox.checked = !checkbox.checked;
                     checkbox.dispatchEvent(new Event('change', { bubbles: true }));
@@ -387,7 +387,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
             });
 
             row.addEventListener('keydown', (e) => {
-                if (e.key === ' ' || e.key === 'Spacebar') {
+                if (e.key === ' ' || e.key === 'Spacebar' || e.key === 'Enter') {
                     e.preventDefault();
                     checkbox.checked = !checkbox.checked;
                     checkbox.dispatchEvent(new Event('change', { bubbles: true }));

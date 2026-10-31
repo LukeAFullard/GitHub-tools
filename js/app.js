@@ -117,6 +117,7 @@ const dom = {
     optionsToggleBtn: document.getElementById('optionsToggleBtn'),
     optionsToggleSummary: document.getElementById('optionsToggleSummary'),
     optionsDrawer: document.getElementById('optionsDrawer'),
+    drawerDoneBtn: document.getElementById('drawerDoneBtn'),
     themeToggleBtn: document.getElementById('themeToggleBtn'),
     repoInputError: document.getElementById('repoInputError'),
     progressTrack: document.getElementById('progressTrack'),
@@ -396,6 +397,12 @@ if (dom.optionsToggleBtn && dom.optionsDrawer) {
             dom.optionsDrawer.classList.add('open');
             dom.optionsToggleBtn.setAttribute('aria-expanded', 'true');
         }
+    });
+}
+
+if (dom.drawerDoneBtn && dom.optionsToggleBtn) {
+    dom.drawerDoneBtn.addEventListener('click', () => {
+        dom.optionsToggleBtn.click();
     });
 }
 

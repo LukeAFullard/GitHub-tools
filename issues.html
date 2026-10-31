@@ -201,17 +201,17 @@
         </div>
 
         <div class="option-field">
-            <label class="checkbox-label"><input type="checkbox" id="stripImages" checked> <span>Strip images and videos</span></label>
-            <label class="checkbox-label"><input type="checkbox" id="filterBots" checked> <span>Hide bot comments</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="stripImages" aria-label="Strip images and videos" checked> <span>Strip images and videos</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="filterBots" aria-label="Hide bot comments" checked> <span>Hide bot comments</span></label>
         </div>
 
         <div class="option-field">
-            <label class="checkbox-label"><input type="checkbox" id="filterNoise" checked> <span>Hide low-signal comments ("+1", "me too")</span></label>
-            <label class="checkbox-label"><input type="checkbox" id="stripTemplates" checked> <span>Strip issue templates and boilerplate</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="filterNoise" aria-label="Hide low-signal comments" checked> <span>Hide low-signal comments ("+1", "me too")</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="stripTemplates" aria-label="Strip issue templates and boilerplate" checked> <span>Strip issue templates and boilerplate</span></label>
         </div>
 
         <div class="option-field">
-            <label class="checkbox-label"><input type="checkbox" id="includeNlpSummary" checked> <span>Include topic clusters &amp; recurring phrases</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="includeNlpSummary" aria-label="Include topic clusters and recurring phrases" checked> <span>Include topic clusters &amp; recurring phrases</span></label>
         </div>
 
         <div class="option-field full-width">
@@ -229,6 +229,10 @@
                 </div>
                 <button type="button" id="clearInstructionsBtn" class="secondary btn-xs">Clear</button>
             </div>
+        </div>
+
+        <div class="option-field full-width">
+            <button type="button" id="drawerDoneBtn" class="primary btn-full drawer-done-btn" style="display: none;">Done</button>
         </div>
     </div>
 
@@ -314,9 +318,9 @@
                             <circle cx="11" cy="11" r="8"></circle>
                             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                         </svg>
-                        <input type="text" id="issueSearchInput" placeholder="Search title, body, #number, author...">
+                        <input type="text" id="issueSearchInput" aria-label="Search issues" placeholder="Search title, body, #number, author...">
                     </div>
-                    <span id="searchMatchCount" class="search-count"></span>
+                    <span id="searchMatchCount" class="search-count" aria-live="polite"></span>
                 </div>
 
                 <div class="filter-controls-grid">
@@ -345,9 +349,12 @@
                             </select>
                         </div>
                         <div class="filter-dates-row" style="margin-top: 0.4rem;">
-                            <label>Created from <input type="date" id="dateFromFilter"></label>
-                            <label>to <input type="date" id="dateToFilter"></label>
-                            <label title="Minimum comments"><span style="color:var(--ink-soft);">Min 💬</span> <input type="number" id="minCommentsFilter" value="0" min="0" max="500" style="width:52px;"></label>
+                            <label for="dateFromFilter">Created from</label>
+                            <input type="date" id="dateFromFilter" aria-label="Created from date">
+                            <label for="dateToFilter">to</label>
+                            <input type="date" id="dateToFilter" aria-label="Created to date">
+                            <label for="minCommentsFilter" title="Minimum comments"><span style="color:var(--ink-soft);">Min 💬</span></label>
+                            <input type="number" id="minCommentsFilter" aria-label="Minimum comments count" value="0" min="0" max="500" style="width:52px;">
                         </div>
                         <div class="more-filters-actions" style="margin-top: 0.5rem; display: flex; gap: 0.4rem;">
                             <button id="selectLinkedBtn" type="button" class="secondary btn-xs" title="Select issues referenced via #number in currently selected issues">Select linked (#refs)</button>
@@ -378,9 +385,9 @@
 
             <div class="pane-footer">
                 <div id="commentScopeBar" class="segmented-inline" role="group" aria-label="Comments to include">
-                    <button type="button" data-scope="none">Issue only</button>
-                    <button type="button" data-scope="maintainers">Maintainer replies</button>
-                    <button type="button" data-scope="all">Full discussion</button>
+                    <button type="button" data-scope="none" aria-pressed="false">Issue only</button>
+                    <button type="button" data-scope="maintainers" aria-pressed="false">Maintainer replies</button>
+                    <button type="button" data-scope="all" aria-pressed="true">Full discussion</button>
                 </div>
                 <p id="commentCostHint" class="field-helper"></p>
                 <p id="selectionSummary"></p>
