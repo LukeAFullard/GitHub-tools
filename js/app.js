@@ -57,6 +57,7 @@ const dom = {
     repoUrl: document.getElementById('repoUrl'),
     branch: document.getElementById('branch'),
     pat: document.getElementById('pat'),
+    rateBadge: document.getElementById('rateBadge'),
     quotaVal: document.getElementById('quotaVal'),
     resetVal: document.getElementById('resetVal'),
     format: document.getElementById('format'),
@@ -70,12 +71,22 @@ const dom = {
     aiInstructions: document.getElementById('aiInstructions'),
     clearInstructionsBtn: document.getElementById('clearInstructionsBtn'),
     instructionsCharCount: document.getElementById('instructionsCharCount'),
+    buildSummaryCard: document.getElementById('buildSummaryCard'),
+    summaryItemsCount: document.getElementById('summaryItemsCount'),
+    summaryTokensCount: document.getElementById('summaryTokensCount'),
+    summaryPartsCount: document.getElementById('summaryPartsCount'),
+    summarySecretsCount: document.getElementById('summarySecretsCount'),
     secretsWarningPanel: document.getElementById('secretsWarningPanel'),
     secretsWarningSummary: document.getElementById('secretsWarningSummary'),
     excludeAllSecretsBtn: document.getElementById('excludeAllSecretsBtn'),
     secretsTableBody: document.getElementById('secretsTableBody'),
     packBtn: document.getElementById('packBtn'),
     shareUrlBtn: document.getElementById('shareUrlBtn'),
+    persistentWarningBanner: document.getElementById('persistentWarningBanner'),
+    warningBannerText: document.getElementById('warningBannerText'),
+    warningBannerTokenBtn: document.getElementById('warningBannerTokenBtn'),
+    warningBannerRetryBtn: document.getElementById('warningBannerRetryBtn'),
+    warningBannerDismissBtn: document.getElementById('warningBannerDismissBtn'),
     abortBtn: document.getElementById('abortBtn'),
     optionsToggleBtn: document.getElementById('optionsToggleBtn'),
     optionsDrawer: document.getElementById('optionsDrawer'),
@@ -116,9 +127,10 @@ const dom = {
     previewNotice: document.getElementById('previewNotice'),
     previewArea: document.getElementById('previewArea'),
     wrapToggleBtn: document.getElementById('wrapToggleBtn'),
+    copyBtn: document.getElementById('copyBtn'),
+    nextPartBtn: document.getElementById('nextPartBtn'),
     downloadBtn: document.getElementById('downloadBtn'),
     downloadAllBtn: document.getElementById('downloadAllBtn'),
-    copyBtn: document.getElementById('copyBtn'),
     toastContainer: document.getElementById('toastContainer'),
     tabFilesBtn: document.getElementById('tabFilesBtn'),
     tabOutputBtn: document.getElementById('tabOutputBtn'),
@@ -473,11 +485,30 @@ function isBinaryContent(content) {
     return sample.length > 0 && (nonPrintable / sample.length) > 0.05;
 }
 
+function showPersistentWarning(message, options = {}) {
+    if (!dom.persistentWarningBanner) return;
+    const { showTokenBtn = false, showRetryBtn = false, onRetry = null } = options;
+    if (dom.warningBannerText) dom.warningBannerText.textContent = message;
+    if (dom.warningBannerTokenBtn) dom.warningBannerTokenBtn.style.display = showTokenBtn ? 'inline-block' : 'none';
+    if (dom.warningBannerRetryBtn) {
+        dom.warningBannerRetryBtn.style.display = showRetryBtn ? 'inline-block' : 'none';
+        dom.warningBannerRetryBtn.onclick = onRetry || null;
+    }
+    dom.persistentWarningBanner.style.display = 'flex';
+}
+
+function hidePersistentWarning() {
+    if (dom.persistentWarningBanner) {
+        dom.persistentWarningBanner.style.display = 'none';
+    }
+}
+
 function clearOutputState() {
     generatedChunks = [];
     activeChunkIndex = 0;
     packedOutputText = "";
     totalTokensAllChunks = 0;
+    if (dom.buildSummaryCard) dom.buildSummaryCard.style.display = 'none';
     if (dom.previewArea) dom.previewArea.value = "";
     if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'flex';
     if (dom.previewNotice) dom.previewNotice.style.display = 'none';
@@ -492,7 +523,11 @@ function clearOutputState() {
     if (dom.downloadAllBtn) dom.downloadAllBtn.style.display = 'none';
     if (dom.chunkSelect) dom.chunkSelect.innerHTML = '';
     if (dom.downloadBtn) dom.downloadBtn.disabled = true;
-    if (dom.copyBtn) dom.copyBtn.disabled = true;
+    if (dom.copyBtn) {
+        dom.copyBtn.disabled = true;
+        dom.copyBtn.textContent = 'Copy';
+    }
+    if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
     updateBudgetMeterUI(0, 1, false);
 }
 
@@ -505,6 +540,9 @@ function updateRateLimitUI(meta) {
             dom.quotaVal.className = (
                 remaining < 5 ? 'rate-critical' : remaining < 20 ? 'rate-warning' : 'rate-normal'
             );
+            if (dom.rateBadge) {
+                dom.rateBadge.style.display = remaining < 30 ? 'flex' : 'none';
+            }
         }
     }
     if (meta.reset) {
@@ -527,6 +565,15 @@ async function refreshRateLimitBadge() {
 dom.pat.addEventListener('change', refreshRateLimitBadge);
 refreshRateLimitBadge();
 loadSavedSettings();
+
+if (dom.warningBannerDismissBtn) {
+    dom.warningBannerDismissBtn.addEventListener('click', hidePersistentWarning);
+}
+if (dom.warningBannerTokenBtn) {
+    dom.warningBannerTokenBtn.addEventListener('click', () => {
+        if (dom.pat) dom.pat.focus();
+    });
+}
 
 function applyUrlParams() {
     const params = new URLSearchParams(window.location.search);
@@ -757,11 +804,15 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
         dom.chunkSelect.style.display = 'inline-block';
         dom.downloadAllBtn.style.display = 'inline-flex';
         dom.chunkSelect.innerHTML = generatedChunks.map((_, idx) => `<option value="${idx}">Part ${idx + 1} of ${generatedChunks.length}</option>`).join('');
+        dom.copyBtn.textContent = `Copy part 1 of ${generatedChunks.length}`;
+        if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'inline-flex';
     } else {
         dom.chunkSelectLabel.style.display = 'none';
         dom.chunkSelect.style.display = 'none';
         dom.downloadAllBtn.style.display = 'none';
         dom.chunkSelect.innerHTML = '';
+        dom.copyBtn.textContent = 'Copy';
+        if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
     }
 
     dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview; complete text will download] ...' : '');
@@ -770,6 +821,33 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     if (dom.previewArea) dom.previewArea.style.display = 'block';
     if (dom.downloadBtn) dom.downloadBtn.disabled = false;
     if (dom.copyBtn) dom.copyBtn.disabled = false;
+
+    if (dom.buildSummaryCard) {
+        let totalFindings = 0;
+        let redactedFindings = 0;
+        targetFiles.forEach(f => {
+            const fileSecrets = secretsMap.get(f.path) || [];
+            fileSecrets.forEach(sec => {
+                totalFindings++;
+                const isRedacted = isRedact && (sec.type !== 'generic-secret' || isAggressive);
+                if (isRedacted) redactedFindings++;
+            });
+        });
+
+        if (dom.summaryItemsCount) dom.summaryItemsCount.textContent = `${processedFiles.length} file${processedFiles.length === 1 ? '' : 's'}`;
+        if (dom.summaryTokensCount) dom.summaryTokensCount.textContent = `~${totalTokensAllChunks.toLocaleString()} estimated tokens`;
+        if (dom.summaryPartsCount) dom.summaryPartsCount.textContent = generatedChunks.length > 1 ? `${generatedChunks.length} parts` : '1 part';
+        if (dom.summarySecretsCount) {
+            if (totalFindings === 0) {
+                dom.summarySecretsCount.textContent = 'None detected';
+            } else if (redactedFindings === totalFindings) {
+                dom.summarySecretsCount.textContent = `${redactedFindings} hidden`;
+            } else {
+                dom.summarySecretsCount.textContent = `${redactedFindings} hidden (${totalFindings - redactedFindings} present)`;
+            }
+        }
+        dom.buildSummaryCard.style.display = 'flex';
+    }
 
     setAppState('built');
     log(`[SUCCESS] Context ready: ${generatedChunks.length} part(s), ~${totalTokensAllChunks.toLocaleString()} total tokens.`);
@@ -969,6 +1047,11 @@ dom.packBtn.addEventListener('click', async () => {
         if (rawTree.truncated) {
             log(`[WARN] GitHub returned a partial file list. Narrow the path or pick a branch with fewer files.`);
             showToast("GitHub returned a partial file list. Narrow the path or pick a branch with fewer files.", "warn");
+            showPersistentWarning("GitHub returned a partial file list (repository exceeds tree size limit). Output will be incomplete.", {
+                showTokenBtn: !dom.pat.value.trim(),
+                showRetryBtn: true,
+                onRetry: () => dom.packBtn.click()
+            });
         }
 
         let ignoredDirCount = 0;
@@ -1021,7 +1104,7 @@ dom.packBtn.addEventListener('click', async () => {
                 dom.selectedCount.textContent = activeSelection.length;
                 if (treeControls.getSelectedStats && dom.selectedTokensBadge) {
                     const stats = treeControls.getSelectedStats();
-                    dom.selectedTokensBadge.textContent = `~${stats.estTokens.toLocaleString()} tokens selected`;
+                    dom.selectedTokensBadge.textContent = `~${stats.estTokens.toLocaleString()} estimated tokens selected`;
                     updateBudgetMeterUI(stats.estTokens, 1, true);
                 }
                 if (currentAppState === 'built') {
@@ -1041,7 +1124,7 @@ dom.packBtn.addEventListener('click', async () => {
 
         if (treeControls.getSelectedStats && dom.selectedTokensBadge) {
             const stats = treeControls.getSelectedStats();
-            dom.selectedTokensBadge.textContent = `~${stats.estTokens.toLocaleString()} tokens selected`;
+            dom.selectedTokensBadge.textContent = `~${stats.estTokens.toLocaleString()} estimated tokens selected`;
             updateBudgetMeterUI(stats.estTokens, 1, true);
         }
 
@@ -1183,6 +1266,11 @@ dom.packBtn.addEventListener('click', async () => {
                             cachedFailedCount += deltaFailedCount;
                             log(`[WARN] ${deltaFailedCount} newly checked file(s) failed to download.`);
                             showToast(`${deltaFailedCount} newly checked file(s) failed to download.`, "warn");
+                            showPersistentWarning(`${cachedFailedCount} file(s) failed to download. Check rate limits or permissions.`, {
+                                showTokenBtn: !dom.pat.value.trim(),
+                                showRetryBtn: true,
+                                onRetry: () => repackBundleInMemory()
+                            });
                         }
                     }
                 } finally {
@@ -1328,6 +1416,11 @@ dom.packBtn.addEventListener('click', async () => {
         if (failedCount > 0) {
             log(`[WARN] ${failedCount} file(s) failed to download.`);
             showToast(`${failedCount} file(s) failed to download. Check rate limits or permissions.`, "warn");
+            showPersistentWarning(`${failedCount} file(s) failed to download. Output context is incomplete.`, {
+                showTokenBtn: !dom.pat.value.trim(),
+                showRetryBtn: true,
+                onRetry: () => dom.startDownloadBtn.click()
+            });
         }
 
         if (collectedFiles.length === 0) {
@@ -1371,8 +1464,10 @@ dom.abortBtn.addEventListener('click', () => {
     if (abortController) abortController.abort();
 });
 
-dom.chunkSelect.addEventListener('change', async () => {
-    activeChunkIndex = parseInt(dom.chunkSelect.value, 10) || 0;
+function updateActiveChunkView(index) {
+    if (index < 0 || index >= generatedChunks.length) return;
+    activeChunkIndex = index;
+    if (dom.chunkSelect) dom.chunkSelect.value = String(activeChunkIndex);
     const chunk = generatedChunks[activeChunkIndex];
     if (!chunk) return;
 
@@ -1385,9 +1480,32 @@ dom.chunkSelect.addEventListener('change', async () => {
         ? `${packedOutputText.length.toLocaleString()} (Part ${activeChunkIndex + 1}) / ${totalChars.toLocaleString()} total`
         : totalChars.toLocaleString();
 
+    if (generatedChunks.length > 1) {
+        dom.copyBtn.textContent = `Copy part ${activeChunkIndex + 1} of ${generatedChunks.length}`;
+        if (dom.nextPartBtn) {
+            dom.nextPartBtn.style.display = activeChunkIndex < generatedChunks.length - 1 ? 'inline-flex' : 'none';
+        }
+    } else {
+        dom.copyBtn.textContent = 'Copy';
+        if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
+    }
+
     if (dom.previewNotice) dom.previewNotice.style.display = packedOutputText.length > 45000 ? 'block' : 'none';
     dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview; complete text will download] ...' : '');
+}
+
+dom.chunkSelect.addEventListener('change', () => {
+    const idx = parseInt(dom.chunkSelect.value, 10) || 0;
+    updateActiveChunkView(idx);
 });
+
+if (dom.nextPartBtn) {
+    dom.nextPartBtn.addEventListener('click', () => {
+        if (activeChunkIndex < generatedChunks.length - 1) {
+            updateActiveChunkView(activeChunkIndex + 1);
+        }
+    });
+}
 
 function triggerDownload(content, filename, mimeType) {
     const blob = new Blob([content], { type: mimeType });
@@ -1429,7 +1547,11 @@ dom.copyBtn.addEventListener('click', async () => {
         showToast(`Copied context to clipboard${partInfo}!`, "info");
         const originalText = dom.copyBtn.textContent;
         dom.copyBtn.textContent = 'Copied!';
-        setTimeout(() => { dom.copyBtn.textContent = originalText; }, 2000);
+        setTimeout(() => {
+            dom.copyBtn.textContent = numParts > 1
+                ? `Copy part ${activeChunkIndex + 1} of ${numParts}`
+                : originalText;
+        }, 2000);
     } catch (_) {
         showToast('Unable to copy automatically. Please copy directly from preview.', 'error');
     }

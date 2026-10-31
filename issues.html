@@ -37,7 +37,7 @@
         </nav>
 
         <div class="header-controls">
-            <div class="rate-badge" title="GitHub API Rate Limit Quota">
+            <div id="rateBadge" class="rate-badge" title="GitHub API Rate Limit Quota" style="display: none;">
                 <span>API Quota:</span>
                 <b id="quotaVal" class="rate-normal">-- / --</b>
                 <span id="resetValContainer" style="color: var(--ink-soft); font-size: 0.75rem;">(Reset: <span id="resetVal">--:--</span>)</span>
@@ -66,6 +66,23 @@
             </button>
         </div>
     </header>
+
+    <!-- Persistent Warning Banner -->
+    <div id="persistentWarningBanner" class="persistent-warning-banner" role="alert" aria-live="polite">
+        <div class="persistent-warning-content">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="flex-shrink: 0;">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+            <span id="warningBannerText">Output context may be incomplete.</span>
+        </div>
+        <div class="persistent-warning-actions">
+            <button type="button" id="warningBannerTokenBtn" class="secondary btn-xs" style="display: none;">Add token</button>
+            <button type="button" id="warningBannerRetryBtn" class="primary btn-xs" style="display: none;">Retry</button>
+            <button type="button" id="warningBannerDismissBtn" class="secondary btn-xs" aria-label="Dismiss warning">&times;</button>
+        </div>
+    </div>
 
     <!-- Source Input Bar -->
     <section class="source-bar">
@@ -246,7 +263,7 @@
         <section class="pane active-mobile" id="issuesCard" role="tabpanel" aria-labelledby="tabIssuesBtn">
             <div class="pane-header">
                 <span class="pane-title">Issues</span>
-                <span id="selectedTokensBadge" class="badge" style="font-family: var(--font-mono); font-size: 0.78125rem; color: var(--ink-soft);">0 selected (~0 body tokens)</span>
+                <span id="selectedTokensBadge" class="badge" style="font-family: var(--font-mono); font-size: 0.78125rem; color: var(--ink-soft);">0 selected (~0 estimated body tokens)</span>
             </div>
 
             <!-- Multi-dimensional Filter Controls -->
@@ -328,12 +345,35 @@
                 <div style="display: flex; align-items: center; gap: 0.4rem;">
                     <button id="wrapToggleBtn" class="secondary btn-sm" title="Toggle line wrapping">Wrap</button>
                     <button id="copyBtn" class="primary btn-sm" disabled>Copy</button>
+                    <button id="nextPartBtn" class="secondary btn-sm" style="display:none;" title="Advance to next part">Next part</button>
                     <button id="downloadBtn" class="secondary btn-sm" disabled>Download</button>
                     <button id="downloadAllBtn" class="secondary btn-sm" style="display:none;">Download all parts</button>
                 </div>
             </div>
 
             <div class="output-viewport">
+                <!-- Build Summary Card -->
+                <div id="buildSummaryCard" class="build-summary-card" role="region" aria-label="Build Context Summary">
+                    <div class="build-summary-grid">
+                        <div class="build-summary-item">
+                            <span class="build-summary-label">Included</span>
+                            <span id="summaryItemsCount" class="build-summary-value">0 issues</span>
+                        </div>
+                        <div class="build-summary-item">
+                            <span class="build-summary-label">Estimated Tokens</span>
+                            <span id="summaryTokensCount" class="build-summary-value">~0</span>
+                        </div>
+                        <div class="build-summary-item">
+                            <span class="build-summary-label">Parts</span>
+                            <span id="summaryPartsCount" class="build-summary-value">1 part</span>
+                        </div>
+                        <div class="build-summary-item">
+                            <span class="build-summary-label">Secrets Redacted</span>
+                            <span id="summarySecretsCount" class="build-summary-value">No secrets detected</span>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Secrets Warning Panel -->
                 <div id="secretsWarningPanel" class="secrets-warning-panel" role="status" aria-live="polite" style="display: none;">
                     <div class="secrets-warning-header">

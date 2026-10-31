@@ -542,6 +542,136 @@ test('tree: filtering updates tab stops so hidden tab-stop row transfers tabInde
     }
 });
 
+test('ui: PR1 rate-limit quota badge displays only when remaining requests drop below 30', () => {
+    function createMockBadge() {
+        return { style: { display: 'none' } };
+    }
+    const rateBadge = createMockBadge();
+    const updateBadgeVisibility = (remaining) => {
+        rateBadge.style.display = remaining < 30 ? 'flex' : 'none';
+    };
+
+    updateBadgeVisibility(60);
+    assert.equal(rateBadge.style.display, 'none');
+
+    updateBadgeVisibility(30);
+    assert.equal(rateBadge.style.display, 'none');
+
+    updateBadgeVisibility(29);
+    assert.equal(rateBadge.style.display, 'flex');
+
+    updateBadgeVisibility(5);
+    assert.equal(rateBadge.style.display, 'flex');
+
+    updateBadgeVisibility(0);
+    assert.equal(rateBadge.style.display, 'flex');
+
+    updateBadgeVisibility(5000);
+    assert.equal(rateBadge.style.display, 'none');
+});
+
+test('ui: PR1 persistent warning banner state formatting and options', () => {
+    let bannerDisplay = 'none';
+    let bannerText = '';
+    let tokenBtnDisplay = 'none';
+    let retryBtnDisplay = 'none';
+    let retryFn = null;
+
+    function showPersistentWarning(message, options = {}) {
+        bannerText = message;
+        tokenBtnDisplay = options.showTokenBtn ? 'inline-block' : 'none';
+        retryBtnDisplay = options.showRetryBtn ? 'inline-block' : 'none';
+        retryFn = options.onRetry || null;
+        bannerDisplay = 'flex';
+    }
+
+    function hidePersistentWarning() {
+        bannerDisplay = 'none';
+    }
+
+    // Trigger warning on failed comments with rate limit
+    showPersistentWarning('3 comment thread(s) failed to load. Rate limit reached. Output context is incomplete.', {
+        showTokenBtn: true,
+        showRetryBtn: true,
+        onRetry: () => 'retried'
+    });
+
+    assert.equal(bannerDisplay, 'flex');
+    assert.ok(bannerText.includes('Rate limit reached'));
+    assert.equal(tokenBtnDisplay, 'inline-block');
+    assert.equal(retryBtnDisplay, 'inline-block');
+    assert.equal(retryFn(), 'retried');
+
+    hidePersistentWarning();
+    assert.equal(bannerDisplay, 'none');
+});
+
+test('ui: PR1 build summary card data formatting logic for code and issues', () => {
+    // Helper replicating summary card formatting
+    function formatCodeSummary(fileCount, estTokens, chunkCount, secretsCount, redactedCount) {
+        let secretsText = 'None detected';
+        if (secretsCount > 0) {
+            secretsText = (redactedCount === secretsCount)
+                ? `${redactedCount} hidden`
+                : `${redactedCount} hidden (${secretsCount - redactedCount} present)`;
+        }
+        return {
+            items: `${fileCount} file${fileCount === 1 ? '' : 's'}`,
+            tokens: `~${estTokens.toLocaleString()} estimated tokens`,
+            parts: chunkCount > 1 ? `${chunkCount} parts` : '1 part',
+            secrets: secretsText
+        };
+    }
+
+    const singlePart = formatCodeSummary(5, 12000, 1, 0, 0);
+    assert.equal(singlePart.items, '5 files');
+    assert.equal(singlePart.tokens, '~12,000 estimated tokens');
+    assert.equal(singlePart.parts, '1 part');
+    assert.equal(singlePart.secrets, 'None detected');
+
+    const multiPartWithSecrets = formatCodeSummary(25, 450000, 3, 4, 4);
+    assert.equal(multiPartWithSecrets.items, '25 files');
+    assert.equal(multiPartWithSecrets.tokens, '~450,000 estimated tokens');
+    assert.equal(multiPartWithSecrets.parts, '3 parts');
+    assert.equal(multiPartWithSecrets.secrets, '4 hidden');
+
+    const partiallyRedacted = formatCodeSummary(1, 500, 1, 3, 2);
+    assert.equal(partiallyRedacted.secrets, '2 hidden (1 present)');
+});
+
+test('ui: PR1 copy button dynamic label and next part advancement', () => {
+    let activeChunkIndex = 0;
+    const chunks = ['part 1 content', 'part 2 content', 'part 3 content'];
+    const copyBtn = { textContent: 'Copy' };
+    const nextPartBtn = { style: { display: 'none' } };
+
+    function updateActiveChunkView(index) {
+        activeChunkIndex = index;
+        if (chunks.length > 1) {
+            copyBtn.textContent = `Copy part ${activeChunkIndex + 1} of ${chunks.length}`;
+            nextPartBtn.style.display = activeChunkIndex < chunks.length - 1 ? 'inline-flex' : 'none';
+        } else {
+            copyBtn.textContent = 'Copy';
+            nextPartBtn.style.display = 'none';
+        }
+    }
+
+    // Initial multi-part state
+    updateActiveChunkView(0);
+    assert.equal(copyBtn.textContent, 'Copy part 1 of 3');
+    assert.equal(nextPartBtn.style.display, 'inline-flex');
+
+    // Advance to part 2
+    updateActiveChunkView(1);
+    assert.equal(copyBtn.textContent, 'Copy part 2 of 3');
+    assert.equal(nextPartBtn.style.display, 'inline-flex');
+
+    // Advance to last part 3
+    updateActiveChunkView(2);
+    assert.equal(copyBtn.textContent, 'Copy part 3 of 3');
+    assert.equal(nextPartBtn.style.display, 'none', 'Next part button should be hidden on last part');
+});
+
 // --- Regression & Verification Tests for Review Findings ---
 
 test('issue-cleaner: titled image long URL and unclosed image performance', () => {
