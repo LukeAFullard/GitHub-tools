@@ -42,10 +42,16 @@ const dom = {
     optionsToggleBtn: document.getElementById('optionsToggleBtn'),
     optionsDrawer: document.getElementById('optionsDrawer'),
     repoInputError: document.getElementById('repoInputError'),
+    rateBadge: document.getElementById('rateBadge'),
     quotaVal: document.getElementById('quotaVal'),
     resetVal: document.getElementById('resetVal'),
     themeToggleBtn: document.getElementById('themeToggleBtn'),
     shareUrlBtn: document.getElementById('shareUrlBtn'),
+    persistentWarningBanner: document.getElementById('persistentWarningBanner'),
+    warningBannerText: document.getElementById('warningBannerText'),
+    warningBannerTokenBtn: document.getElementById('warningBannerTokenBtn'),
+    warningBannerRetryBtn: document.getElementById('warningBannerRetryBtn'),
+    warningBannerDismissBtn: document.getElementById('warningBannerDismissBtn'),
 
     format: document.getElementById('format'),
     commentScope: document.getElementById('commentScope'),
@@ -103,8 +109,14 @@ const dom = {
     chunkSelect: document.getElementById('chunkSelect'),
     wrapToggleBtn: document.getElementById('wrapToggleBtn'),
     copyBtn: document.getElementById('copyBtn'),
+    nextPartBtn: document.getElementById('nextPartBtn'),
     downloadBtn: document.getElementById('downloadBtn'),
     downloadAllBtn: document.getElementById('downloadAllBtn'),
+    buildSummaryCard: document.getElementById('buildSummaryCard'),
+    summaryItemsCount: document.getElementById('summaryItemsCount'),
+    summaryTokensCount: document.getElementById('summaryTokensCount'),
+    summaryPartsCount: document.getElementById('summaryPartsCount'),
+    summarySecretsCount: document.getElementById('summarySecretsCount'),
     secretsWarningPanel: document.getElementById('secretsWarningPanel'),
     secretsWarningSummary: document.getElementById('secretsWarningSummary'),
     excludeAllSecretsBtn: document.getElementById('excludeAllSecretsBtn'),
@@ -203,12 +215,33 @@ if (dom.switchToCodeLink) {
 
 let lastRateLimitRemaining = Infinity;
 
+function showPersistentWarning(message, options = {}) {
+    if (!dom.persistentWarningBanner) return;
+    const { showTokenBtn = false, showRetryBtn = false, onRetry = null } = options;
+    if (dom.warningBannerText) dom.warningBannerText.textContent = message;
+    if (dom.warningBannerTokenBtn) dom.warningBannerTokenBtn.style.display = showTokenBtn ? 'inline-block' : 'none';
+    if (dom.warningBannerRetryBtn) {
+        dom.warningBannerRetryBtn.style.display = showRetryBtn ? 'inline-block' : 'none';
+        dom.warningBannerRetryBtn.onclick = onRetry || null;
+    }
+    dom.persistentWarningBanner.style.display = 'flex';
+}
+
+function hidePersistentWarning() {
+    if (dom.persistentWarningBanner) {
+        dom.persistentWarningBanner.style.display = 'none';
+    }
+}
+
 function updateRateLimitUI(meta) {
     if (!meta) return;
     if (meta.remaining !== null && meta.remaining !== undefined && meta.limit !== null) {
         lastRateLimitRemaining = meta.remaining;
         dom.quotaVal.textContent = `${meta.remaining} / ${meta.limit}`;
         dom.quotaVal.className = meta.remaining < 5 ? 'rate-critical' : meta.remaining < 20 ? 'rate-warning' : 'rate-normal';
+        if (dom.rateBadge) {
+            dom.rateBadge.style.display = meta.remaining < 30 ? 'flex' : 'none';
+        }
     }
     if (meta.reset) {
         const resetDate = new Date(meta.reset * 1000);
@@ -233,6 +266,15 @@ if (dom.repoUrl) {
 
 dom.pat.addEventListener('change', refreshRateLimitBadge);
 refreshRateLimitBadge();
+
+if (dom.warningBannerDismissBtn) {
+    dom.warningBannerDismissBtn.addEventListener('click', hidePersistentWarning);
+}
+if (dom.warningBannerTokenBtn) {
+    dom.warningBannerTokenBtn.addEventListener('click', () => {
+        if (dom.pat) dom.pat.focus();
+    });
+}
 
 const urlParams = new URLSearchParams(window.location.search);
 if (urlParams.get('repo') && dom.repoUrl) {
@@ -308,7 +350,7 @@ function updateSelectionTelemetry() {
         totalBodyBytes += (iss.title.length + iss.body.length);
     }
     const estBodyTokens = Math.round(totalBodyBytes / 3.8);
-    dom.selectedTokensBadge.textContent = `${selectedList.length} selected (~${estBodyTokens.toLocaleString()} body tok)`;
+    dom.selectedTokensBadge.textContent = `${selectedList.length} selected (~${estBodyTokens.toLocaleString()} estimated body tokens)`;
 }
 
 function renderIssuesList() {
@@ -529,6 +571,8 @@ dom.selectLinkedBtn.addEventListener('click', () => {
 
 dom.loadIssuesBtn.addEventListener('click', async () => {
     dom.repoInputError.style.display = 'none';
+    hidePersistentWarning();
+    if (dom.buildSummaryCard) dom.buildSummaryCard.style.display = 'none';
     const repoInfo = parseRepoInput(dom.repoUrl.value);
     if (!repoInfo) {
         dom.repoInputError.style.display = 'block';
@@ -592,6 +636,11 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
         if (manifest.stoppedEarly) {
             log(`[WARN] Reached scan limit (30 pages). Found ${allIssues.length} items.`);
             showToast(`Scanned 30 pages, found ${allIssues.length} items. Raise limit or select 'Issues & PRs'.`, 'warn');
+            showPersistentWarning(`Reached scan limit (30 pages). Scanned ${allIssues.length} items. Output may be incomplete.`, {
+                showTokenBtn: !dom.pat.value.trim(),
+                showRetryBtn: true,
+                onRetry: () => dom.loadIssuesBtn.click()
+            });
         } else {
             log(`[SUCCESS] Loaded ${allIssues.length} items. Running background NLP topic clustering...`);
             showToast(`Loaded ${allIssues.length} items.`, 'info');
@@ -670,6 +719,17 @@ async function buildSelectedContext(summaryOnly = false) {
                     }
                     log(`[WARN] ${failures.length} thread(s) failed to load comments.`);
                     showToast(`${failures.length} thread(s) failed to load comments. Rebuild to retry.`, 'warn');
+                    const hasRateLimitFailure = failures.some(f => f.isRateLimit || (f.error && f.error.includes('rate limit')));
+                    showPersistentWarning(
+                        `${failures.length} comment thread(s) failed to load.${hasRateLimitFailure ? ' Rate limit reached.' : ''} Output context is incomplete.`,
+                        {
+                            showTokenBtn: !pat,
+                            showRetryBtn: true,
+                            onRetry: () => buildSelectedContext(summaryOnly)
+                        }
+                    );
+                } else if (fetchFailuresMap.size === 0) {
+                    hidePersistentWarning();
                 }
             } catch (err) {
                 if (err.name === 'AbortError') {
@@ -801,10 +861,14 @@ async function buildSelectedContext(summaryOnly = false) {
         dom.chunkSelect.style.display = 'inline-block';
         dom.downloadAllBtn.style.display = 'inline-flex';
         dom.chunkSelect.innerHTML = generatedChunks.map((_, i) => `<option value="${i}">Part ${i + 1} of ${generatedChunks.length}</option>`).join('');
+        dom.copyBtn.textContent = `Copy part 1 of ${generatedChunks.length}`;
+        if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'inline-flex';
     } else {
         dom.chunkSelectLabel.style.display = 'none';
         dom.chunkSelect.style.display = 'none';
         dom.downloadAllBtn.style.display = 'none';
+        dom.copyBtn.textContent = 'Copy';
+        if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
     }
 
     dom.outputEmptyState.style.display = 'none';
@@ -813,6 +877,36 @@ async function buildSelectedContext(summaryOnly = false) {
     dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview] ...' : '');
     dom.copyBtn.disabled = false;
     dom.downloadBtn.disabled = false;
+
+    if (dom.buildSummaryCard) {
+        if (dom.summaryItemsCount) {
+            dom.summaryItemsCount.textContent = `${targetIssues.length} issue${targetIssues.length === 1 ? '' : 's'} (${totalCommentsIncluded} comment${totalCommentsIncluded === 1 ? '' : 's'})`;
+        }
+        if (dom.summaryTokensCount) {
+            dom.summaryTokensCount.textContent = `~${totalTokens.toLocaleString()} estimated tokens`;
+        }
+        if (dom.summaryPartsCount) {
+            dom.summaryPartsCount.textContent = generatedChunks.length > 1 ? `${generatedChunks.length} parts` : '1 part';
+        }
+        if (dom.summarySecretsCount) {
+            const isRedactOn = dom.redactSecrets ? dom.redactSecrets.checked : true;
+            const isAggressiveOn = dom.aggressiveRedact ? dom.aggressiveRedact.checked : true;
+            let totalSecrets = 0;
+            let redactedSecrets = 0;
+            secretRows.forEach(r => {
+                totalSecrets++;
+                if (isRedactOn && (r.type !== 'generic-secret' || isAggressiveOn)) redactedSecrets++;
+            });
+            if (totalSecrets === 0) {
+                dom.summarySecretsCount.textContent = 'None detected';
+            } else if (redactedSecrets === totalSecrets) {
+                dom.summarySecretsCount.textContent = `${redactedSecrets} hidden`;
+            } else {
+                dom.summarySecretsCount.textContent = `${redactedSecrets} hidden (${totalSecrets - redactedSecrets} present)`;
+            }
+        }
+        dom.buildSummaryCard.style.display = 'flex';
+    }
 
     setAppState('built');
     log(`[SUCCESS] Packed ${targetIssues.length} issues & ${totalCommentsIncluded} comments (~${totalTokens.toLocaleString()} tokens).`);
@@ -960,13 +1054,42 @@ document.querySelectorAll('.budget-presets .preset-btn').forEach(btn => {
     });
 });
 
-dom.chunkSelect.addEventListener('change', () => {
-    activeChunkIndex = parseInt(dom.chunkSelect.value, 10) || 0;
+function updateActiveChunkView(index) {
+    if (index < 0 || index >= generatedChunks.length) return;
+    activeChunkIndex = index;
+    if (dom.chunkSelect) dom.chunkSelect.value = String(activeChunkIndex);
     const chunk = generatedChunks[activeChunkIndex];
     if (!chunk) return;
     packedOutputText = chunk.text;
+    outputExt = chunk.ext;
+    outputMime = chunk.mime;
+
+    if (generatedChunks.length > 1) {
+        dom.copyBtn.textContent = `Copy part ${activeChunkIndex + 1} of ${generatedChunks.length}`;
+        if (dom.nextPartBtn) {
+            dom.nextPartBtn.style.display = activeChunkIndex < generatedChunks.length - 1 ? 'inline-flex' : 'none';
+        }
+    } else {
+        dom.copyBtn.textContent = 'Copy';
+        if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
+    }
+
+    if (dom.previewNotice) dom.previewNotice.style.display = packedOutputText.length > 45000 ? 'block' : 'none';
     dom.previewArea.value = packedOutputText.slice(0, 45000) + (packedOutputText.length > 45000 ? '\n\n... [Truncated for preview] ...' : '');
+}
+
+dom.chunkSelect.addEventListener('change', () => {
+    const idx = parseInt(dom.chunkSelect.value, 10) || 0;
+    updateActiveChunkView(idx);
 });
+
+if (dom.nextPartBtn) {
+    dom.nextPartBtn.addEventListener('click', () => {
+        if (activeChunkIndex < generatedChunks.length - 1) {
+            updateActiveChunkView(activeChunkIndex + 1);
+        }
+    });
+}
 
 function triggerDownload(content, filename, mimeType) {
     const blob = new Blob([content], { type: mimeType });
@@ -997,7 +1120,16 @@ dom.downloadAllBtn.addEventListener('click', async () => {
 dom.copyBtn.addEventListener('click', async () => {
     try {
         await navigator.clipboard.writeText(packedOutputText);
-        showToast('Copied issues context to clipboard!', 'info');
+        const numParts = generatedChunks.length;
+        const partInfo = numParts > 1 ? ` (part ${activeChunkIndex + 1} of ${numParts})` : '';
+        showToast(`Copied issues context to clipboard${partInfo}!`, 'info');
+        const originalText = dom.copyBtn.textContent;
+        dom.copyBtn.textContent = 'Copied!';
+        setTimeout(() => {
+            dom.copyBtn.textContent = numParts > 1
+                ? `Copy part ${activeChunkIndex + 1} of ${numParts}`
+                : originalText;
+        }, 2000);
     } catch (_) {
         showToast('Unable to copy automatically.', 'error');
     }
