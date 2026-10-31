@@ -397,3 +397,12 @@
         grid-template-columns: 1fr;
     }
 }
+
+@media (max-width: 720px) {
+    .more-filters-details[open] .more-filters-content {
+        background: var(--sheet);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-control);
+        padding: 0.6rem;
+    }
+}

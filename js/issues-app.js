@@ -59,6 +59,7 @@ const dom = {
     optionsToggleBtn: document.getElementById('optionsToggleBtn'),
     optionsToggleSummary: document.getElementById('optionsToggleSummary'),
     optionsDrawer: document.getElementById('optionsDrawer'),
+    drawerDoneBtn: document.getElementById('drawerDoneBtn'),
     repoInputError: document.getElementById('repoInputError'),
     rateBadge: document.getElementById('rateBadge'),
     quotaVal: document.getElementById('quotaVal'),
@@ -477,6 +478,12 @@ dom.optionsToggleBtn.addEventListener('click', () => {
     dom.optionsToggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
 });
 
+if (dom.drawerDoneBtn) {
+    dom.drawerDoneBtn.addEventListener('click', () => {
+        dom.optionsToggleBtn.click();
+    });
+}
+
 let logOpen = false;
 dom.logToggleBtn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -596,16 +603,23 @@ function renderIssuesList() {
     for (const iss of visible) {
         const li = document.createElement('li');
         li.className = 'issue-item';
+        li.tabIndex = 0;
+        li.setAttribute('role', 'checkbox');
+        li.setAttribute('aria-checked', selectedIssueNumbers.has(iss.number) ? 'true' : 'false');
+        li.setAttribute('aria-label', `Issue #${iss.number}: ${iss.title}`);
 
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.className = 'issue-checkbox';
         cb.checked = selectedIssueNumbers.has(iss.number);
+        cb.setAttribute('aria-label', `Select issue #${iss.number}`);
+        cb.tabIndex = -1; // row is focused for keyboard navigation
 
         cb.addEventListener('change', (e) => {
             e.stopPropagation();
             if (cb.checked) selectedIssueNumbers.add(iss.number);
             else selectedIssueNumbers.delete(iss.number);
+            li.setAttribute('aria-checked', cb.checked ? 'true' : 'false');
             updateSelectionTelemetry();
         });
 
@@ -613,6 +627,14 @@ function renderIssuesList() {
             if (e.target === cb || e.target.classList.contains('issue-sim-badge')) return;
             cb.checked = !cb.checked;
             cb.dispatchEvent(new Event('change'));
+        });
+
+        li.addEventListener('keydown', (e) => {
+            if (e.key === ' ' || e.key === 'Spacebar' || e.key === 'Enter') {
+                e.preventDefault();
+                cb.checked = !cb.checked;
+                cb.dispatchEvent(new Event('change'));
+            }
         });
 
         const main = document.createElement('div');
