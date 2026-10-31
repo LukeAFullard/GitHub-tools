@@ -9,10 +9,13 @@ import { escapeXml } from './formatters.js';
 import { estimateTokens, estimateTokensAsync } from './tokenizer.js';
 import { scanForSecrets } from './secrets.js';
 import { switchTab } from './ui-tabs.js';
+import { buildBannerItems, renderBanner } from './ui-banner.js';
+import { copyLabel } from './ui-labels.js';
 
 let loadController = null;
 let buildController = null;
 let lastBuildSummaryOnly = false;
+let lastFetchRateLimited = false;
 let allIssues = [];
 let selectedIssueNumbers = new Set();
 let cachedCommentsByIssue = new Map();
@@ -123,6 +126,7 @@ const dom = {
     nextPartBtn: document.getElementById('nextPartBtn'),
     downloadBtn: document.getElementById('downloadBtn'),
     downloadAllBtn: document.getElementById('downloadAllBtn'),
+    warningBanner: document.getElementById('warningBanner'),
     buildSummaryCard: document.getElementById('buildSummaryCard'),
     summaryItemsCount: document.getElementById('summaryItemsCount'),
     summaryTokensCount: document.getElementById('summaryTokensCount'),
@@ -228,8 +232,8 @@ function setAppState(state) {
         dom.mobilePrimaryBtn.textContent = state === 'empty'
             ? 'Load issues'
             : state === 'loaded'
-                ? 'Fetch threads & build'
-                : 'Copy context';
+                ? 'Build context'
+                : copyLabel(activeChunkIndex, generatedChunks.length);
     }
 }
 
@@ -305,7 +309,7 @@ function updateRateLimitUI(meta) {
             dom.quotaRemainingText.innerHTML = `${meta.remaining} requests left, resets <span id="resetVal">${resetTimeStr}</span>`;
         }
         if (dom.rateBadge) {
-            dom.rateBadge.style.display = meta.remaining < 10 ? 'flex' : 'none';
+            dom.rateBadge.style.display = meta.remaining < 30 ? 'flex' : 'none';
         }
         if (meta.remaining < 10) {
             showTokenField('rate-limit quota under 10');
@@ -763,6 +767,8 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
     currentNlpRequestId++;
     renderNlpBanner();
 
+    if (dom.warningBanner) renderBanner(dom.warningBanner, []);
+
     dom.loadIssuesBtn.disabled = true;
     dom.abortBtn.style.display = 'inline-flex';
     dom.progressTrack.style.display = 'block';
@@ -834,6 +840,7 @@ async function buildSelectedContext(summaryOnly = false) {
     if (!currentRepoInfo || allIssues.length === 0) return;
 
     lastBuildSummaryOnly = summaryOnly;
+    lastFetchRateLimited = false;
     buildGeneration++;
     const thisBuildGen = buildGeneration;
 
@@ -880,7 +887,10 @@ async function buildSelectedContext(summaryOnly = false) {
                     }
                 });
                 if (thisBuildGen !== buildGeneration) return;
-                if (fetchStats) log(`[FETCH] ${fetchStats.strategy}: ~${fetchStats.requests} request(s) (per-issue estimate was ${fetchStats.perIssueRequestsEstimate}).`);
+                if (fetchStats) {
+                    if (fetchStats.rateLimited) lastFetchRateLimited = true;
+                    log(`[FETCH] ${fetchStats.strategy}: ~${fetchStats.requests} request(s) (per-issue estimate was ${fetchStats.perIssueRequestsEstimate}).`);
+                }
                 for (const [num, comms] of fetchedMap.entries()) {
                     cachedCommentsByIssue.set(num, comms);
                     fetchFailuresMap.delete(num);
@@ -892,6 +902,7 @@ async function buildSelectedContext(summaryOnly = false) {
                     log(`[WARN] ${failures.length} thread(s) failed to load comments.`);
                     showToast(`${failures.length} thread(s) failed to load comments. Rebuild to retry.`, 'warn');
                     const hasRateLimitFailure = failures.some(f => f.isRateLimit || (f.error && f.error.includes('rate limit')));
+                    if (hasRateLimitFailure) lastFetchRateLimited = true;
                     showPersistentWarning(
                         `${failures.length} comment thread(s) failed to load.${hasRateLimitFailure ? ' Rate limit reached.' : ''} Output context is incomplete.`,
                         {
@@ -1033,13 +1044,13 @@ async function buildSelectedContext(summaryOnly = false) {
         dom.chunkSelect.style.display = 'inline-block';
         dom.downloadAllBtn.style.display = 'inline-flex';
         dom.chunkSelect.innerHTML = generatedChunks.map((_, i) => `<option value="${i}">Part ${i + 1} of ${generatedChunks.length}</option>`).join('');
-        updateCopyBtnLabel(0);
+        dom.copyBtn.textContent = copyLabel(0, generatedChunks.length);
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'inline-flex';
     } else {
         dom.chunkSelectLabel.style.display = 'none';
         dom.chunkSelect.style.display = 'none';
         dom.downloadAllBtn.style.display = 'none';
-        updateCopyBtnLabel(0);
+        dom.copyBtn.textContent = copyLabel(0, generatedChunks.length);
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
     }
 
@@ -1078,6 +1089,20 @@ async function buildSelectedContext(summaryOnly = false) {
             }
         }
         dom.buildSummaryCard.style.display = 'flex';
+    }
+
+    const failedThreads = processedIssues.filter(i => i.commentsFetchFailed).length;
+    const resetTime = dom.resetVal ? dom.resetVal.textContent : '';
+    const isRedactionOff = dom.redactSecrets ? !dom.redactSecrets.checked : false;
+    const bannerItems = buildBannerItems({
+        failedThreads,
+        rateLimited: lastFetchRateLimited,
+        resetTime,
+        redactionOff: isRedactionOff,
+        secretCount: secretRows.length
+    });
+    if (dom.warningBanner) {
+        renderBanner(dom.warningBanner, bannerItems);
     }
 
     setAppState('built');
@@ -1261,7 +1286,7 @@ function updateActiveChunkView(index) {
     outputExt = chunk.ext;
     outputMime = chunk.mime;
 
-    updateCopyBtnLabel(activeChunkIndex);
+    if (dom.copyBtn) dom.copyBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
     if (generatedChunks.length > 1) {
         if (dom.nextPartBtn) {
             dom.nextPartBtn.style.display = activeChunkIndex < generatedChunks.length - 1 ? 'inline-flex' : 'none';
@@ -1277,6 +1302,7 @@ function updateActiveChunkView(index) {
 dom.chunkSelect.addEventListener('change', () => {
     const idx = parseInt(dom.chunkSelect.value, 10) || 0;
     updateActiveChunkView(idx);
+    dom.copyBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
 });
 
 if (dom.nextPartBtn) {
@@ -1317,12 +1343,15 @@ dom.copyBtn.addEventListener('click', async () => {
     try {
         await navigator.clipboard.writeText(packedOutputText);
         const numParts = generatedChunks.length;
-        const partInfo = numParts > 1 ? ` (part ${activeChunkIndex + 1} of ${numParts})` : '';
-        showToast(`Copied issues context to clipboard${partInfo}!`, 'info');
+        if (numParts > 1) {
+            showToast(`Copied part ${activeChunkIndex + 1} of ${numParts}. Pick the next part from the Part menu.`, 'info');
+        } else {
+            showToast('Copied issues context to clipboard!', 'info');
+        }
         const originalText = dom.copyBtn.textContent;
         dom.copyBtn.textContent = 'Copied!';
         setTimeout(() => {
-            updateCopyBtnLabel(activeChunkIndex);
+            dom.copyBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
         }, 2000);
     } catch (_) {
         showToast('Unable to copy automatically.', 'error');

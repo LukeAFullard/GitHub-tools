@@ -11,9 +11,11 @@ const registry = new Map();      // id -> El
 const listeners = new Map();     // id -> {type: [fn]}
 
 class El {
-  constructor(id) { this.id = id; this.value = ''; this.checked = false; this.disabled = false; this.textContent = ''; this.innerHTML = '';
+  constructor(id) { this.id = id; this.value = ''; this.checked = false; this.disabled = false; this.textContent = ''; this._innerHTML = '';
     this.style = {}; this.dataset = {}; this.children = []; this.className = ''; this.href = '#'; this.hidden = false;
     this.classList = { add(){}, remove(){}, toggle(){}, contains(){ return false; } }; }
+  get innerHTML() { return this._innerHTML; }
+  set innerHTML(v) { this._innerHTML = v; if (v === '') this.children = []; }
   addEventListener(type, fn) { const m = listeners.get(this.id) || {}; (m[type] ||= []).push(fn); listeners.set(this.id, m); }
   removeEventListener() {}
   async click() { for (const fn of (listeners.get(this.id)?.click || [])) await fn({ target: this, preventDefault(){}, stopPropagation(){} }); }
