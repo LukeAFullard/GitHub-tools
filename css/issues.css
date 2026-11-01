@@ -475,3 +475,17 @@ button.issue-label-pill[aria-pressed="true"] {
         padding: 0.6rem;
     }
 }
+
+/* Dependencies tab: license groups */
+.license-badge { border: 1px solid currentColor; white-space: nowrap; }
+.license-permissive { color: var(--fits); background: var(--fits-bg); }
+.license-weak-copyleft { color: var(--near); background: var(--near-bg); }
+.license-strong-copyleft { color: var(--over); background: var(--over-bg); }
+.license-restricted { color: var(--merged); background: var(--merged-bg); }
+.license-unknown { color: var(--ink-soft); background: var(--page); }
+.nlp-pill.license-pill { border-color: currentColor; }
+.nlp-pill.license-pill.active { color: #FFFFFF; background: var(--cobalt); border-color: var(--cobalt); }
+.nlp-pill.license-pill:disabled { opacity: 0.45; cursor: default; }
+.dep-item { cursor: default; }
+.dep-advisory { color: var(--over); border-color: var(--over); }
+#groupPills { margin-top: 0.5rem; }
