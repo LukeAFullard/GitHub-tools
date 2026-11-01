@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.github.com https://raw.githubusercontent.com https://api.deps.dev; worker-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="referrer" content="no-referrer">
     <title>GitHub Repo Context Packer</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/issues.css">
@@ -25,7 +27,7 @@
             <nav class="page-tabs" aria-label="Tools"><a id="tabCodeLink" href="index.html" class="active" aria-current="page">Code</a><a id="tabIssuesLink" href="issues.html">Issues</a><a id="tabDiscussionsLink" href="discussions.html">Discussions</a><a id="tabDepsLink" href="deps.html">Dependencies</a></nav>
             <nav class="mode-switcher" aria-label="Tool mode" style="display: none;">
                 <a href="index.html" class="mode-tab active" aria-current="page">Code Packer</a>
-                <a href="issues.html" id="switchToIssuesLink" class="mode-tab" onclick="const r=document.getElementById('repoUrl')?.value?.trim(); if(r){this.href='issues.html?repo='+encodeURIComponent(r);}">Issues Explorer</a>
+                <a href="issues.html" id="switchToIssuesLink" class="mode-tab">Issues Explorer</a>
             </nav>
         </div>
 
@@ -99,7 +101,7 @@
 
     <!-- Source Input Bar -->
     <section class="source-bar">
-        <form id="sourceForm" class="source-form" onsubmit="return false;">
+        <form id="sourceForm" class="source-form">
             <div class="repo-input-wrapper">
                 <label for="repoUrl" style="font-size: 0.8125rem; font-weight: 600; color: var(--ink);">GitHub repository</label>
                 <div class="input-row">
@@ -178,6 +180,7 @@
                 <option value="standard" selected>Standard</option>
                 <option value="strict">Strict</option>
             </select>
+            <p class="field-helper">Standard hides known token and key formats. Generic passwords and tokens in code are flagged in the output panel but only hidden with Strict.</p>
             <!-- Preserved hidden inputs for backward compatibility -->
             <input type="checkbox" id="redactSecrets" checked hidden style="display: none;">
             <input type="checkbox" id="aggressiveRedact" hidden style="display: none;">

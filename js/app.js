@@ -27,6 +27,7 @@ import { buildTabHref } from './nav.js';
 import { parseZipArchive } from './zip-loader.js';
 import {
     parseRepoInput,
+    isSafeBranchName,
     fetchRateLimit,
     resolveDefaultBranch,
     fetchRepoTree,
@@ -837,7 +838,7 @@ function applyUrlParams() {
     const validMinify = ['none', 'basic', 'aggressive'];
 
     if (repoParam && dom.repoUrl) dom.repoUrl.value = repoParam;
-    if (branchParam && dom.branch) dom.branch.value = branchParam;
+    if (branchParam && isSafeBranchName(branchParam) && dom.branch) dom.branch.value = branchParam;
     if (formatParam && validFormats.includes(formatParam) && dom.format) dom.format.value = formatParam;
     if (minifyParam && validMinify.includes(minifyParam) && dom.minifyMode) dom.minifyMode.value = minifyParam;
 
@@ -1390,12 +1391,22 @@ document.querySelectorAll('.preset-buttons button[data-instruction]').forEach(bt
 // --- Main Processing Pipeline ---
 dom.packBtn.addEventListener('click', () => loadSource(null));
 
+// The repo form never submits (Enter is handled by the buttons); kept out of HTML for the CSP.
+const sourceFormEl = document.getElementById('sourceForm');
+if (sourceFormEl) sourceFormEl.addEventListener('submit', (e) => e.preventDefault());
+
+
 /**
  * Loads a file list and waits for "Build context". The source is either the GitHub repo in the
  * input box (zipArchive = null) or a local .zip archive parsed by js/zip-loader.js.
  */
 async function loadSource(zipArchive = null) {
     showInlineError('');
+    const typedBranch = (dom.branch && !zipArchive) ? dom.branch.value.trim() : '';
+    if (typedBranch && !isSafeBranchName(typedBranch)) {
+        showInlineError('That branch or tag name is not valid.');
+        return;
+    }
     if (abortController) {
         abortController.abort();
     }
@@ -1702,10 +1713,10 @@ async function loadSource(zipArchive = null) {
         };
 
         setAppState('loaded');
-        if (!zipArchive) {
+        // Remember the repo for next time, but not a private one or one loaded with a token.
+        if (!zipArchive && !pat && !isPrivateRepo) {
             try {
-                const loadedRepoVal = `${repoInfo.owner}/${repoInfo.repo}`;
-                localStorage.setItem('cfg_lastRepo', loadedRepoVal);
+                localStorage.setItem('cfg_lastRepo', `${repoInfo.owner}/${repoInfo.repo}`);
             } catch (_) {}
         }
         showToast(`Loaded ${zipArchive ? zipArchive.fileName : 'manifest'}: ${processable.length} files.`, 'info');

@@ -827,11 +827,13 @@ function renderIssuesList() {
             kindParts.push(prTag);
         }
 
-        const numEl = document.createElement(iss.htmlUrl ? 'a' : 'span');
+        // Only ever link to github.com, whatever the data says (never javascript: or other schemes).
+        const safeUrl = /^https:\/\/github\.com\//.test(iss.htmlUrl || '') ? iss.htmlUrl : '';
+        const numEl = document.createElement(safeUrl ? 'a' : 'span');
         numEl.className = 'issue-number';
         numEl.textContent = `#${iss.number}`;
-        if (iss.htmlUrl) {
-            numEl.href = iss.htmlUrl;
+        if (safeUrl) {
+            numEl.href = safeUrl;
             numEl.target = '_blank';
             numEl.rel = 'noopener noreferrer';
             numEl.title = `Open #${iss.number} on GitHub`;
@@ -1127,9 +1129,9 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
         renderIssuesList();
         runNlpAnalysis(allIssues);
         setAppState('loaded');
+        // Remember the repo for next time, but not one loaded with a token: it may be private.
         try {
-            const loadedRepoVal = `${repoInfo.owner}/${repoInfo.repo}`;
-            localStorage.setItem('cfg_lastRepo', loadedRepoVal);
+            if (!pat) localStorage.setItem('cfg_lastRepo', `${repoInfo.owner}/${repoInfo.repo}`);
         } catch (_) {}
 
         if (manifest.stoppedEarly) {
@@ -1552,6 +1554,11 @@ function updateSecretsPanel(rows, flaggedNumbers) {
 }
 
 dom.buildContextBtn.addEventListener('click', () => buildSelectedContext(false));
+
+// The repo form never submits (Enter is handled by the buttons); kept out of HTML for the CSP.
+const sourceFormEl = document.getElementById('sourceForm');
+if (sourceFormEl) sourceFormEl.addEventListener('submit', (e) => e.preventDefault());
+
 dom.exportNlpOnlyBtn.addEventListener('click', () => buildSelectedContext(true));
 dom.abortBtn.addEventListener('click', () => {
     if (loadController) loadController.abort();

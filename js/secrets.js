@@ -5,9 +5,23 @@
 
 const SENSITIVE_FILENAME_EXACT = new Set([
     '.env',
+    '.envrc',
     'id_rsa',
-    'credentials.json'
+    'id_dsa',
+    'id_ecdsa',
+    'id_ed25519',
+    'credentials.json',
+    '.npmrc',
+    '.pypirc',
+    '.netrc',
+    '_netrc',
+    '.git-credentials',
+    '.htpasswd',
+    'kubeconfig'
 ]);
+
+// Key stores, certificates with private keys, Terraform variables and state.
+const SENSITIVE_FILENAME_SUFFIXES = ['.pem', '.key', '.p12', '.pfx', '.jks', '.keystore', '.tfvars', '.tfstate', '.tfstate.backup', '.env'];
 
 const SENSITIVE_FILENAME_EXCEPTIONS = new Set([
     '.env.example',
@@ -16,9 +30,15 @@ const SENSITIVE_FILENAME_EXCEPTIONS = new Set([
     '.env.dist'
 ]);
 
+// Files where unquoted `key=value` secrets are common (.json needs no entry: its values are quoted).
+const CONFIG_LIKE_EXACT = new Set(['.npmrc', '.pypirc', '.netrc', '_netrc', '.envrc', '.git-credentials']);
+
 function isConfigLikeFile(path) {
     if (!path) return false;
     const filename = path.split('/').pop().toLowerCase();
+    if (CONFIG_LIKE_EXACT.has(filename) || filename.endsWith('.tfvars') || filename.endsWith('.env')) {
+        return true;
+    }
     if (filename.startsWith('.env') || filename.endsWith('.ini') || filename.endsWith('.cfg') || filename.endsWith('.conf') || filename.endsWith('.properties') || filename.endsWith('.yml') || filename.endsWith('.yaml') || filename.endsWith('.toml') || filename.endsWith('.sh') || filename === 'dockerfile' || filename.startsWith('docker-compose')) {
         return true;
     }
@@ -41,7 +61,12 @@ function isSensitiveFilename(path) {
         return true;
     }
 
-    if (filename.endsWith('.pem') || filename.endsWith('.key')) {
+    if (SENSITIVE_FILENAME_SUFFIXES.some(suffix => filename.endsWith(suffix))) {
+        return true;
+    }
+
+    // Cloud service-account key files, e.g. service-account.json, service_account-prod.json.
+    if (/^service[-_]?account.*\.json$/.test(filename)) {
         return true;
     }
 
@@ -166,7 +191,7 @@ function findMatchesInternal(path, content, opts = {}) {
         },
         {
             type: 'aws-key',
-            regex: /(?:(?:["']?\b|\b["'])[A-Za-z0-9_]*(?:aws_secret_access_key|secret_access_key|aws_secret_key|aws_sec_key)[A-Za-z0-9_]*["']?)\s*[:=]\s*(["']?)([A-Za-z0-9/+=]{40})\1/gi,
+            regex: /(?:(?:["']?\b|\b["'])[A-Za-z0-9_]{0,40}(?:aws_secret_access_key|secret_access_key|aws_secret_key|aws_sec_key)[A-Za-z0-9_]{0,40}["']?)\s*[:=]\s*(["']?)([A-Za-z0-9/+=]{40})\1/gi,
             check: (m) => !isPlaceholder(m[2]),
             getValue: (m) => m[2],
             getIndex: (m) => m.index + m[0].lastIndexOf(m[2]),
@@ -224,6 +249,26 @@ function findMatchesInternal(path, content, opts = {}) {
             check: (m) => !isPlaceholder(m[0])
         },
         {
+            type: 'webhook-url',
+            regex: /https:\/\/hooks\.slack\.com\/(?:services|workflows|triggers)\/[A-Za-z0-9_\/-]{20,}|https:\/\/(?:ptb\.|canary\.)?discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-Za-z0-9_-]{50,}/g,
+            check: (m) => !isPlaceholder(m[0])
+        },
+        {
+            type: 'provider-token',
+            // Twilio API key, Shopify tokens, Stripe webhook secret, Mailgun API key.
+            regex: /(?<![A-Za-z0-9])(?:SK[0-9a-f]{32}|shp(?:at|ca|pa|ss)_[a-fA-F0-9]{32}|whsec_[A-Za-z0-9]{32,}|key-[0-9a-f]{32})(?![A-Za-z0-9_-])/g,
+            check: (m) => !isPlaceholder(m[0]) && !isRepeatedPattern(m[0].replace(/^(SK|shp\w\w_|whsec_|key-)/, ''))
+        },
+        {
+            type: 'azure-key',
+            // Storage / Service Bus connection strings and SAS tokens.
+            regex: /\b(?:AccountKey|SharedAccessKey)=([A-Za-z0-9+/]{30,}={0,2})|\bSharedAccessSignature=([^;\s"']{20,})/g,
+            check: (m) => !isPlaceholder(m[1] || m[2]),
+            getValue: (m) => m[1] || m[2],
+            getIndex: (m) => m.index + m[0].lastIndexOf(m[1] || m[2]),
+            getLength: (m) => (m[1] || m[2]).length
+        },
+        {
             type: 'url-credentials',
             regex: /\b[a-zA-Z][a-zA-Z0-9+.-]{0,15}:\/\/[^\s:@/]+:([^\s@/]{8,})@/gi,
             check: (m) => !isPlaceholder(m[1]),
@@ -241,7 +286,7 @@ function findMatchesInternal(path, content, opts = {}) {
         },
         {
             type: 'generic-secret',
-            regex: /(?:(?:["']?\b|\b["'])[A-Za-z0-9_]*(?:password|passwd|secret|token|api_key|apikey|auth_key|auth_token|authorization)[A-Za-z0-9_]*["']?)\s*[:=]\s*(["'])([^"'\r\n]{8,})\1/gi,
+            regex: /(?:(?:["']?\b|\b["'])[A-Za-z0-9_]{0,40}(?:password|passwd|secret|token|api_key|apikey|auth_key|auth_token|authorization)[A-Za-z0-9_]{0,40}["']?)\s*[:=]\s*(["'])([^"'\r\n]{8,})\1/gi,
             check: (m) => {
                 const val = m[2];
                 if (isPlaceholder(val)) return false;
@@ -275,7 +320,7 @@ function findMatchesInternal(path, content, opts = {}) {
         },
         {
             type: 'generic-secret',
-            regex: /(?:(?:["']?\b|\b["'])[A-Za-z0-9_]*(?:password|passwd|secret|token|api_key|apikey|auth_key|auth_token|authorization)[A-Za-z0-9_]*["']?)\s*[:=]\s*([^\s"'#;\r\n]{8,})/gi,
+            regex: /(?:(?:["']?\b|\b["'])[A-Za-z0-9_]{0,40}(?:password|passwd|secret|token|api_key|apikey|auth_key|auth_token|authorization)[A-Za-z0-9_]{0,40}["']?)\s*[:=]\s*([^\s"'#;\r\n]{8,})/gi,
             check: (m, p) => {
                 if (!opts.assumeConfig && !isConfigLikeFile(p)) return false;
                 const val = m[1];
