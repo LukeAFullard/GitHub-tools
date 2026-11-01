@@ -4,7 +4,7 @@
   "description": "Client-side web application to package GitHub source code into LLM context files",
   "type": "module",
   "scripts": {
-    "test": "node --test tests/test.js tests/ui.test.js tests/e2e/issues-flow.test.mjs tests/e2e/issues-ratelimit.test.mjs"
+    "test": "node --test tests/test.js tests/ui.test.js tests/zip-loader.test.js tests/e2e/issues-flow.test.mjs tests/e2e/issues-ratelimit.test.mjs"
   },
   "license": "MIT"
 }

@@ -88,6 +88,7 @@
     <section id="heroBlock" class="hero-block">
         <h2>Turn a GitHub repo into one file for your AI</h2>
         <p>Paste a repo, choose what to include, copy the result. Runs in your browser. Your token is never stored.</p>
+        <p class="hero-zip-hint">No token? Use <strong>Open .zip</strong> or drop a repo's .zip anywhere on this page. It is read locally and never uploaded.</p>
         <div id="exampleRepos" class="example-repos">
             <span>Try:</span>
             <button type="button" data-repo="anthropics/claude-code">anthropics/claude-code</button>
@@ -104,6 +105,8 @@
                 <div class="input-row">
                     <input type="text" id="repoUrl" placeholder="owner/repo or https://github.com/owner/repo" value="">
                     <button id="packBtn" type="button" class="primary">Load files</button>
+                    <button id="uploadZipBtn" type="button" class="secondary" title="Load a local .zip of a repository. It is read in your browser and never uploaded.">Open .zip</button>
+                    <input type="file" id="zipFileInput" accept=".zip,application/zip" hidden>
                     <button id="abortBtn" type="button" class="danger" style="display: none;">Cancel</button>
                     <button id="optionsToggleBtn" type="button" class="options-toggle-btn secondary-control" aria-expanded="false" aria-controls="optionsDrawer">
                         <span id="optionsToggleSummary">Settings: Claude XML · original code · secrets hidden</span>
@@ -117,6 +120,7 @@
                     <p class="field-helper">GitHub allows 60 requests per hour without a token. A token raises that to 5,000 and is needed for private repos. It is only sent to GitHub and is never stored.</p>
                 </div>
                 <div id="repoInputError" class="inline-error">Enter a repo as owner/name or a GitHub URL.</div>
+                <p id="zipSourceNote" class="field-helper zip-source-note" hidden></p>
                 <p class="field-helper secondary-control">Paste a GitHub URL or owner/repo.</p>
             </div>
 
@@ -319,7 +323,7 @@
                 </div>
 
                 <div style="display: flex; align-items: center; gap: 0.4rem;">
-                    <button id="wrapToggleBtn" class="secondary btn-sm" title="Toggle line wrapping">Wrap</button>
+                    <button id="wrapToggleBtn" class="primary btn-sm" aria-pressed="true" title="Toggle line wrapping">Wrap</button>
                     <button id="copyBtn" class="primary btn-sm">Copy</button>
                     <button id="nextPartBtn" class="secondary btn-sm" style="display:none;" title="Advance to next part">Next part</button>
                     <button id="downloadBtn" class="secondary btn-sm">Download</button>

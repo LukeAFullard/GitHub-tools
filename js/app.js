@@ -19,12 +19,12 @@ import { buildContextOutput, chunkContextOutput, escapeXml } from './formatters.
 import { minifyCode } from './minifier.js';
 import { scanForSecrets, redactSecrets } from './secrets.js';
 import { buildBannerItems, renderBanner } from './ui-banner.js';
-import { copyLabel } from './ui-labels.js';
 import { TARGETS, detectTarget } from './targets.js';
 import { buildSettingsSummary } from './settings-summary.js';
 import { defaultExcludedPaths, rankSuggestions } from './suggestions.js';
 import { buildSummaryLines } from './ui-summary.js';
 import { buildTabHref } from './nav.js';
+import { parseZipArchive } from './zip-loader.js';
 import {
     parseRepoInput,
     fetchRateLimit,
@@ -47,6 +47,7 @@ let activeTreeControls = null;
 
 let cachedSkippedPaths = new Set();
 let cachedRepoInfo = null;
+let activeZip = null; // parsed local .zip archive while one is loaded, else null
 let cachedBranch = "";
 let cachedFailedCount = 0;
 let isTreeTruncated = false;
@@ -107,6 +108,9 @@ const dom = {
     excludeAllSecretsBtn: document.getElementById('excludeAllSecretsBtn'),
     secretsTableBody: document.getElementById('secretsTableBody'),
     packBtn: document.getElementById('packBtn'),
+    uploadZipBtn: document.getElementById('uploadZipBtn'),
+    zipFileInput: document.getElementById('zipFileInput'),
+    zipSourceNote: document.getElementById('zipSourceNote'),
     shareUrlBtn: document.getElementById('shareUrlBtn'),
     persistentWarningBanner: document.getElementById('persistentWarningBanner'),
     warningBannerText: document.getElementById('warningBannerText'),
@@ -333,15 +337,22 @@ export function applyTarget(key) {
         localStorage.setItem('cfg_target', currentTargetKey);
     } catch (_) {}
 
-    updateBudgetMeterUI(totalTokensAllChunks, generatedChunks.length || 1, currentAppState !== 'built');
+    if (currentAppState === 'built') {
+        updateBudgetMeterUI(totalTokensAllChunks, generatedChunks.length || 1, false);
+    } else {
+        const preBuildTokens = activeTreeControls && activeTreeControls.getSelectedStats
+            ? activeTreeControls.getSelectedStats().estTokens
+            : 0;
+        updateBudgetMeterUI(preBuildTokens, 1, true);
+    }
     updateSettingsSummary();
-    updateCopyBtnLabel();
+    updateCopyBtnLabel(activeChunkIndex);
 }
 
 function updateCopyBtnLabel(activeIndex = 0) {
-    if (!dom.copyBtn) return;
-    const totalParts = generatedChunks.length;
-    dom.copyBtn.textContent = getCopyButtonLabel(currentTargetKey, activeIndex, totalParts);
+    const label = getCopyButtonLabel(currentTargetKey, activeIndex, generatedChunks.length);
+    if (dom.copyBtn) dom.copyBtn.textContent = label;
+    if (dom.mobilePrimaryBtn && currentAppState === 'built') dom.mobilePrimaryBtn.textContent = label;
 }
 
 function loadSavedSettings() {
@@ -471,7 +482,7 @@ function setAppState(state, note = '') {
         } else if (state === 'loaded') {
             dom.mobilePrimaryBtn.textContent = note ? note : 'Build context';
         } else if (state === 'built') {
-            dom.mobilePrimaryBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
+            dom.mobilePrimaryBtn.textContent = getCopyButtonLabel(currentTargetKey, activeChunkIndex, generatedChunks.length);
         }
     }
     if (dom.startDownloadBtn) {
@@ -546,10 +557,12 @@ if (dom.wrapToggleBtn && dom.previewArea) {
             dom.previewArea.classList.remove('wrap');
             dom.wrapToggleBtn.classList.remove('primary');
             dom.wrapToggleBtn.classList.add('secondary');
+            dom.wrapToggleBtn.setAttribute('aria-pressed', 'false');
         } else {
             dom.previewArea.classList.add('wrap');
             dom.wrapToggleBtn.classList.add('primary');
             dom.wrapToggleBtn.classList.remove('secondary');
+            dom.wrapToggleBtn.setAttribute('aria-pressed', 'true');
         }
     });
 }
@@ -575,6 +588,8 @@ function updateBudgetMeterUI(totalTokens, numChunks = 1, isPreBuild = false, max
     if (dom.targetBudgetDisplay) {
         dom.targetBudgetDisplay.textContent = `of ${currentBudgetWindow.toLocaleString()} estimated tokens${isPreBuild ? ' (pre-build estimate)' : ''}`;
     }
+    // Keep the big number in step with the bar before a build too.
+    if (isPreBuild && dom.statTokens && currentAppState !== 'built') dom.statTokens.textContent = totalTokens.toLocaleString();
 
     const chunkLimitVal = parseInt(dom.chunkLimit ? dom.chunkLimit.value : '0', 10) || 0;
 
@@ -893,6 +908,80 @@ if (exampleReposEl) {
     });
 }
 
+function outputRepoInfo() {
+    if (cachedRepoInfo && cachedRepoInfo.isZip) return cachedRepoInfo;
+    return parseRepoInput(dom.repoUrl.value) || { repo: 'bundle' };
+}
+
+function updateZipSourceNote() {
+    if (!dom.zipSourceNote) return;
+    if (activeZip) {
+        dom.zipSourceNote.hidden = false;
+        dom.zipSourceNote.textContent = `Showing files from ${activeZip.fileName}. It is read in your browser and nothing is uploaded.`;
+    } else {
+        dom.zipSourceNote.hidden = true;
+        dom.zipSourceNote.textContent = '';
+    }
+}
+
+async function openZipFile(file) {
+    if (!file) return;
+    if (!/\.zip$/i.test(file.name || '')) {
+        showInlineError('Choose a .zip file.');
+        return;
+    }
+    let archive;
+    try {
+        archive = await parseZipArchive(file);
+    } catch (err) {
+        showInlineError(err.message || 'Could not read that .zip file.');
+        showToast(err.message || 'Could not read that .zip file.', 'error');
+        return;
+    }
+    if (archive.treeNodes.length === 0) {
+        showInlineError('That .zip file has no files in it.');
+        return;
+    }
+    await loadSource(archive);
+}
+
+if (dom.uploadZipBtn && dom.zipFileInput) {
+    dom.uploadZipBtn.addEventListener('click', () => dom.zipFileInput.click());
+    dom.zipFileInput.addEventListener('change', () => {
+        const file = dom.zipFileInput.files && dom.zipFileInput.files[0];
+        dom.zipFileInput.value = ''; // allow picking the same file again
+        openZipFile(file);
+    });
+}
+
+// Drop a .zip anywhere on the page to load it.
+if (typeof document.addEventListener === 'function') {
+    const hasFiles = e => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+    let dragDepth = 0;
+    document.addEventListener('dragenter', (e) => {
+        if (!hasFiles(e)) return;
+        dragDepth++;
+        document.body.classList.add('zip-drag-over');
+    });
+    document.addEventListener('dragleave', (e) => {
+        if (!hasFiles(e)) return;
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) document.body.classList.remove('zip-drag-over');
+    });
+    document.addEventListener('dragover', (e) => {
+        if (hasFiles(e)) e.preventDefault();
+    });
+    document.addEventListener('drop', (e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        dragDepth = 0;
+        document.body.classList.remove('zip-drag-over');
+        const file = Array.from(e.dataTransfer.files || []).find(f => /\.zip$/i.test(f.name));
+        if (file) openZipFile(file);
+        else showToast('Drop a .zip file to load it.', 'warn');
+    });
+}
+
 function getDeepLinkUrl() {
     const repo = dom.repoUrl ? dom.repoUrl.value.trim() : '';
     const branch = dom.branch ? dom.branch.value.trim() : '';
@@ -1038,9 +1127,11 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
     const treeAscii = generateTree(paths);
     const chunkLimitVal = parseInt(dom.chunkLimit ? dom.chunkLimit.value : '0', 10) || 0;
 
-    const repoUrl = (cachedRepoInfo && cachedRepoInfo.owner && cachedRepoInfo.repo)
-        ? `https://github.com/${cachedRepoInfo.owner}/${cachedRepoInfo.repo}`
-        : getDeepLinkUrl();
+    const repoUrl = cachedRepoInfo.isZip
+        ? null
+        : (cachedRepoInfo.owner && cachedRepoInfo.repo)
+            ? `https://github.com/${cachedRepoInfo.owner}/${cachedRepoInfo.repo}`
+            : getDeepLinkUrl();
 
     const repoWithUrl = { ...cachedRepoInfo, url: repoUrl };
 
@@ -1103,14 +1194,14 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
         dom.chunkSelect.style.display = 'inline-block';
         dom.downloadAllBtn.style.display = 'inline-flex';
         dom.chunkSelect.innerHTML = generatedChunks.map((_, idx) => `<option value="${idx}">Part ${idx + 1} of ${generatedChunks.length}</option>`).join('');
-        dom.copyBtn.textContent = copyLabel(0, generatedChunks.length);
+        updateCopyBtnLabel(0);
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'inline-flex';
     } else {
         dom.chunkSelectLabel.style.display = 'none';
         dom.chunkSelect.style.display = 'none';
         dom.downloadAllBtn.style.display = 'none';
         dom.chunkSelect.innerHTML = '';
-        dom.copyBtn.textContent = copyLabel(0, generatedChunks.length);
+        updateCopyBtnLabel(0);
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
     }
 
@@ -1293,17 +1384,27 @@ document.querySelectorAll('.preset-buttons button[data-instruction]').forEach(bt
 });
 
 // --- Main Processing Pipeline ---
-dom.packBtn.addEventListener('click', async () => {
+dom.packBtn.addEventListener('click', () => loadSource(null));
+
+/**
+ * Loads a file list and waits for "Build context". The source is either the GitHub repo in the
+ * input box (zipArchive = null) or a local .zip archive parsed by js/zip-loader.js.
+ */
+async function loadSource(zipArchive = null) {
     showInlineError('');
     if (abortController) {
         abortController.abort();
     }
 
-    const repoInfo = parseRepoInput(dom.repoUrl.value);
+    const repoInfo = zipArchive
+        ? { owner: '', repo: zipArchive.label, branch: '', subpath: null, isZip: true, source: `local archive ${zipArchive.fileName}` }
+        : parseRepoInput(dom.repoUrl.value);
     if (!repoInfo) {
         showInlineError("Enter a repo as owner/name or a GitHub URL.");
         return;
     }
+    activeZip = zipArchive;
+    updateZipSourceNote();
 
     currentGeneration++;
     const thisGen = currentGeneration;
@@ -1321,9 +1422,9 @@ dom.packBtn.addEventListener('click', async () => {
     clearOutputState();
     if (dom.warningBanner) renderBanner(dom.warningBanner, []);
 
-    const userTypedBranch = dom.branch ? dom.branch.value.trim() : '';
+    const userTypedBranch = (dom.branch && !zipArchive) ? dom.branch.value.trim() : '';
 
-    if (dom.branch) {
+    if (dom.branch && !zipArchive) {
         const parsedWithOverride = parseRepoInput(dom.repoUrl.value, userTypedBranch);
         if (parsedWithOverride && parsedWithOverride.branch) {
             repoInfo.branch = parsedWithOverride.branch;
@@ -1336,7 +1437,8 @@ dom.packBtn.addEventListener('click', async () => {
 
     const pat = dom.pat.value.trim();
     const maxKb = parseInt(dom.maxKb.value, 10) || 150;
-    const throttleMs = parseInt(dom.throttleMs.value, 10) || 80;
+    // Local archives need no request throttling.
+    const throttleMs = zipArchive ? 0 : (parseInt(dom.throttleMs.value, 10) || 80);
     const customIgnoredExts = Array.from(new Set(
         dom.ignoreExt.value.split(',').map(s => s.trim().toLowerCase().replace(/^\./, '')).filter(Boolean)
     ));
@@ -1351,81 +1453,89 @@ dom.packBtn.addEventListener('click', async () => {
     if (dom.previewArea) dom.previewArea.style.display = 'none';
 
     try {
-        log(`[FETCH] Querying GitHub API for ${repoInfo.owner}/${repoInfo.repo}...`);
-
         let targetBranch = userTypedBranch || repoInfo.branch || '';
         let rawTree = null;
 
-        try {
-            const repoMeta = await resolveDefaultBranch(
-                repoInfo.owner,
-                repoInfo.repo,
-                pat,
-                abortController.signal,
-                updateRateLimitUI
-            );
-            if (!targetBranch) targetBranch = repoMeta.branch;
-            isPrivateRepo = repoMeta.isPrivate;
-            if (isPrivateRepo && !pat) {
-                showTokenPanel("If this is a private repo, add a token.");
+        if (zipArchive) {
+            log(`[ZIP] Reading ${zipArchive.fileName} in your browser (${zipArchive.treeNodes.length} files). Nothing is uploaded.`);
+            if (zipArchive.encryptedCount > 0) {
+                log(`[WARN] ${zipArchive.encryptedCount} password-protected file(s) in the archive will be skipped.`);
             }
-        } catch (err) {
-            if (err.name === 'AbortError') throw err;
-            if (err.isRateLimit || (err.message && (err.message.includes('rate limit') || err.message.includes('403') || err.message.includes('429')))) {
-                showTokenPanel('');
-            } else if (err.status === 404 || (err.message && err.message.includes('404'))) {
-                showTokenPanel("If this is a private repo, add a token.");
-            }
-            if (!targetBranch) {
-                if (err.status === 404 || (err.message && err.message.includes('404'))) {
-                    showToast("Can't find that repo or branch. For a private repo, add a token with read access to contents.", "error");
-                } else if (err.isRateLimit || (err.message && (err.message.includes('rate limit') || err.message.includes('403') || err.message.includes('429')))) {
-                    showToast("GitHub rate limit reached or access forbidden. Add a token to raise the limit.", "error");
-                } else {
-                    showToast(err.message, "error");
-                }
-                throw err;
-            }
-            log(`[WARN] Repository default branch lookup warning: ${err.message}`);
-        }
+            rawTree = zipArchive.treeNodes;
+        } else {
+            log(`[FETCH] Querying GitHub API for ${repoInfo.owner}/${repoInfo.repo}...`);
 
-        log(`[FETCH] Target branch: ${targetBranch}${isPrivateRepo ? ' (Private Repository)' : ''}`);
-
-        try {
-            rawTree = await fetchRepoTree(
-                repoInfo.owner,
-                repoInfo.repo,
-                targetBranch,
-                pat,
-                abortController.signal,
-                updateRateLimitUI
-            );
-        } catch (err) {
-            if (!userTypedBranch && repoInfo.treeTail && repoInfo.treeTail.includes('/')) {
-                const tailParts = repoInfo.treeTail.split('/');
-                for (let len = tailParts.length; len >= 1; len--) {
-                    const candidateBranch = tailParts.slice(0, len).join('/');
-                    if (candidateBranch === targetBranch) continue;
-                    const candidateSubpath = tailParts.slice(len).join('/') || null;
-                    try {
-                        rawTree = await fetchRepoTree(
-                            repoInfo.owner,
-                            repoInfo.repo,
-                            candidateBranch,
-                            pat,
-                            abortController.signal,
-                            updateRateLimitUI
-                        );
-                        targetBranch = candidateBranch;
-                        repoInfo.branch = candidateBranch;
-                        repoInfo.subpath = candidateSubpath;
-                        if (dom.branch) dom.branch.value = candidateBranch;
-                        log(`[FETCH] Resolved branch with slash: ${targetBranch}`);
-                        break;
-                    } catch (_) {}
+            try {
+                const repoMeta = await resolveDefaultBranch(
+                    repoInfo.owner,
+                    repoInfo.repo,
+                    pat,
+                    abortController.signal,
+                    updateRateLimitUI
+                );
+                if (!targetBranch) targetBranch = repoMeta.branch;
+                isPrivateRepo = repoMeta.isPrivate;
+                if (isPrivateRepo && !pat) {
+                    showTokenPanel("If this is a private repo, add a token.");
                 }
+            } catch (err) {
+                if (err.name === 'AbortError') throw err;
+                if (err.isRateLimit || (err.message && (err.message.includes('rate limit') || err.message.includes('403') || err.message.includes('429')))) {
+                    showTokenPanel('');
+                } else if (err.status === 404 || (err.message && err.message.includes('404'))) {
+                    showTokenPanel("If this is a private repo, add a token.");
+                }
+                if (!targetBranch) {
+                    if (err.status === 404 || (err.message && err.message.includes('404'))) {
+                        showToast("Can't find that repo or branch. For a private repo, add a token with read access to contents.", "error");
+                    } else if (err.isRateLimit || (err.message && (err.message.includes('rate limit') || err.message.includes('403') || err.message.includes('429')))) {
+                        showToast("GitHub rate limit reached or access forbidden. Add a token to raise the limit.", "error");
+                    } else {
+                        showToast(err.message, "error");
+                    }
+                    throw err;
+                }
+                log(`[WARN] Repository default branch lookup warning: ${err.message}`);
             }
-            if (!rawTree) throw err;
+
+            log(`[FETCH] Target branch: ${targetBranch}${isPrivateRepo ? ' (Private Repository)' : ''}`);
+
+            try {
+                rawTree = await fetchRepoTree(
+                    repoInfo.owner,
+                    repoInfo.repo,
+                    targetBranch,
+                    pat,
+                    abortController.signal,
+                    updateRateLimitUI
+                );
+            } catch (err) {
+                if (!userTypedBranch && repoInfo.treeTail && repoInfo.treeTail.includes('/')) {
+                    const tailParts = repoInfo.treeTail.split('/');
+                    for (let len = tailParts.length; len >= 1; len--) {
+                        const candidateBranch = tailParts.slice(0, len).join('/');
+                        if (candidateBranch === targetBranch) continue;
+                        const candidateSubpath = tailParts.slice(len).join('/') || null;
+                        try {
+                            rawTree = await fetchRepoTree(
+                                repoInfo.owner,
+                                repoInfo.repo,
+                                candidateBranch,
+                                pat,
+                                abortController.signal,
+                                updateRateLimitUI
+                            );
+                            targetBranch = candidateBranch;
+                            repoInfo.branch = candidateBranch;
+                            repoInfo.subpath = candidateSubpath;
+                            if (dom.branch) dom.branch.value = candidateBranch;
+                            log(`[FETCH] Resolved branch with slash: ${targetBranch}`);
+                            break;
+                        } catch (_) {}
+                    }
+                }
+                if (!rawTree) throw err;
+            }
         }
 
         isTreeTruncated = Boolean(rawTree.truncated);
@@ -1588,13 +1698,37 @@ dom.packBtn.addEventListener('click', async () => {
         };
 
         setAppState('loaded');
-        try {
-            const loadedRepoVal = `${repoInfo.owner}/${repoInfo.repo}`;
-            localStorage.setItem('cfg_lastRepo', loadedRepoVal);
-        } catch (_) {}
-        showToast(`Loaded manifest: ${processable.length} files.`, 'info');
+        if (!zipArchive) {
+            try {
+                const loadedRepoVal = `${repoInfo.owner}/${repoInfo.repo}`;
+                localStorage.setItem('cfg_lastRepo', loadedRepoVal);
+            } catch (_) {}
+        }
+        showToast(`Loaded ${zipArchive ? zipArchive.fileName : 'manifest'}: ${processable.length} files.`, 'info');
 
         let hasDownloaded = false;
+
+        // Reads one file's text from the zip archive or from GitHub, in fetchFileContent's result shape.
+        const readNodeContent = async (node, signal) => {
+            if (zipArchive) {
+                try {
+                    return { success: true, content: await zipArchive.readText(node.path) };
+                } catch (err) {
+                    // status 404 marks the path as skipped so it is not retried.
+                    return { success: false, error: err.message || String(err), status: 404 };
+                }
+            }
+            return fetchFileContent(
+                repoInfo.owner,
+                repoInfo.repo,
+                targetBranch,
+                node.path,
+                pat,
+                signal,
+                updateRateLimitUI,
+                isPrivateRepo
+            );
+        };
 
         let deltaFetchQueue = Promise.resolve();
         function fetchSelectedFilesDelta(selectionToFetch) {
@@ -1631,16 +1765,7 @@ dom.packBtn.addEventListener('click', async () => {
                             let retries = 0;
                             let result = null;
                             while (retries < 3) {
-                                result = await fetchFileContent(
-                                    repoInfo.owner,
-                                    repoInfo.repo,
-                                    targetBranch,
-                                    node.path,
-                                    pat,
-                                    signal,
-                                    updateRateLimitUI,
-                                    isPrivateRepo
-                                );
+                                result = await readNodeContent(node, signal);
                                 if (result && result.isPrivate) {
                                     isPrivateRepo = true;
                                 }
@@ -1771,16 +1896,7 @@ dom.packBtn.addEventListener('click', async () => {
                 let result = null;
 
                 while (retries < 3) {
-                    result = await fetchFileContent(
-                        repoInfo.owner,
-                        repoInfo.repo,
-                        targetBranch,
-                        node.path,
-                        pat,
-                        abortController.signal,
-                        updateRateLimitUI,
-                        isPrivateRepo
-                    );
+                    result = await readNodeContent(node, abortController.signal);
 
                     if (result && result.isPrivate) {
                         isPrivateRepo = true;
@@ -1865,7 +1981,8 @@ dom.packBtn.addEventListener('click', async () => {
     } catch (err) {
         if (err.name === 'AbortError') {
             log('[CANCEL] Process cancelled.');
-            showToast("Cancelled.", "info");
+            // A newer load (e.g. opening another .zip) aborts this one; only report a user cancel.
+            if (thisGen === currentGeneration) showToast("Cancelled.", "info");
         } else {
             log(`[ERROR] Error: ${err.message}`);
             showToast(`Error: ${err.message}`, "error");
@@ -1877,7 +1994,7 @@ dom.packBtn.addEventListener('click', async () => {
             dom.abortBtn.style.display = 'none';
         }
     }
-});
+}
 
 dom.abortBtn.addEventListener('click', () => {
     if (abortController) abortController.abort();
@@ -1899,7 +2016,7 @@ function updateActiveChunkView(index) {
         ? `${packedOutputText.length.toLocaleString()} (Part ${activeChunkIndex + 1}) / ${totalChars.toLocaleString()} total`
         : totalChars.toLocaleString();
 
-    if (dom.copyBtn) dom.copyBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
+    updateCopyBtnLabel(activeChunkIndex);
     if (generatedChunks.length > 1) {
         if (dom.nextPartBtn) {
             dom.nextPartBtn.style.display = activeChunkIndex < generatedChunks.length - 1 ? 'inline-flex' : 'none';
@@ -1917,7 +2034,6 @@ function updateActiveChunkView(index) {
 dom.chunkSelect.addEventListener('change', () => {
     const idx = parseInt(dom.chunkSelect.value, 10) || 0;
     updateActiveChunkView(idx);
-    dom.copyBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
 });
 
 if (dom.nextPartBtn) {
@@ -1942,7 +2058,7 @@ function triggerDownload(content, filename, mimeType) {
 }
 
 dom.downloadBtn.addEventListener('click', () => {
-    const repoInfo = parseRepoInput(dom.repoUrl.value) || { repo: 'bundle' };
+    const repoInfo = outputRepoInfo();
     const suffix = generatedChunks.length > 1 ? `-part${activeChunkIndex + 1}-of-${generatedChunks.length}` : '';
     const filename = `${repoInfo.repo}${suffix}-llm-context.${outputExt}`;
     triggerDownload(packedOutputText, filename, outputMime);
@@ -1950,7 +2066,7 @@ dom.downloadBtn.addEventListener('click', () => {
 });
 
 dom.downloadAllBtn.addEventListener('click', async () => {
-    const repoInfo = parseRepoInput(dom.repoUrl.value) || { repo: 'bundle' };
+    const repoInfo = outputRepoInfo();
     for (let i = 0; i < generatedChunks.length; i++) {
         const chunk = generatedChunks[i];
         const filename = `${repoInfo.repo}-part${i + 1}-of-${generatedChunks.length}-llm-context.${chunk.ext}`;
@@ -1969,11 +2085,8 @@ dom.copyBtn.addEventListener('click', async () => {
         } else {
             showToast('Copied context to clipboard!', "info");
         }
-        const originalText = dom.copyBtn.textContent;
         dom.copyBtn.textContent = 'Copied!';
-        setTimeout(() => {
-            dom.copyBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
-        }, 2000);
+        setTimeout(() => updateCopyBtnLabel(activeChunkIndex), 2000);
     } catch (_) {
         showToast('Unable to copy automatically. Please copy directly from preview.', 'error');
     }

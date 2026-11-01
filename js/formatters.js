@@ -34,6 +34,11 @@ export function getMarkdownFence(content) {
     return '`'.repeat(fenceLen);
 }
 
+// Local .zip archives have no owner, so they are named by the archive alone.
+function repoDisplayName(repoInfo) {
+    return repoInfo.owner ? `${repoInfo.owner}/${repoInfo.repo}` : repoInfo.repo;
+}
+
 export function formatClaudeXml(repoInfo, branch, treeText, files, options = {}) {
     const startIndex = (options && options.startIndex) || 1;
     let doc = `<documents>\n`;
@@ -45,8 +50,9 @@ export function formatClaudeXml(repoInfo, branch, treeText, files, options = {})
     if (options && options.failedFilesCount > 0) {
         doc += `    <warnings>${options.failedFilesCount} file(s) failed to download and were excluded.</warnings>\n`;
     }
-    doc += `    <repository>${escapeXml(`${repoInfo.owner}/${repoInfo.repo}`)}</repository>\n`;
-    doc += `    <branch>${escapeXml(branch)}</branch>\n`;
+    doc += `    <repository>${escapeXml(repoDisplayName(repoInfo))}</repository>\n`;
+    if (branch) doc += `    <branch>${escapeXml(branch)}</branch>\n`;
+    if (repoInfo.source) doc += `    <source>${escapeXml(repoInfo.source)}</source>\n`;
     if (repoInfo.url) {
         doc += `    <url>${escapeXml(repoInfo.url)}</url>\n`;
     }
@@ -93,7 +99,9 @@ export function formatMarkdown(repoInfo, branch, treeText, files, options = {}) 
     if (options && options.failedFilesCount > 0) {
         md += `> **Warning:** ${options.failedFilesCount} file(s) failed to download and were excluded.\n\n`;
     }
-    md += `# Repository: ${repoInfo.owner}/${repoInfo.repo}\nBranch: ${branch}\n`;
+    md += `# Repository: ${repoDisplayName(repoInfo)}\n`;
+    if (branch) md += `Branch: ${branch}\n`;
+    if (repoInfo.source) md += `Source: ${repoInfo.source}\n`;
     if (repoInfo.url) {
         md += `Source URL: ${repoInfo.url}\n`;
     }
@@ -122,7 +130,7 @@ export function formatMarkdown(repoInfo, branch, treeText, files, options = {}) 
 }
 
 export function formatGenericXml(repoInfo, branch, treeText, files, options = {}) {
-    let xml = `<repository name="${escapeXml(`${repoInfo.owner}/${repoInfo.repo}`)}" branch="${escapeXml(branch)}"${repoInfo.url ? ` url="${escapeXml(repoInfo.url)}"` : ''}>\n`;
+    let xml = `<repository name="${escapeXml(repoDisplayName(repoInfo))}"${branch ? ` branch="${escapeXml(branch)}"` : ''}${repoInfo.source ? ` source="${escapeXml(repoInfo.source)}"` : ''}${repoInfo.url ? ` url="${escapeXml(repoInfo.url)}"` : ''}>\n`;
     if (options && options.partNote) {
         xml += `<note>${escapeXml(options.partNote)}</note>\n`;
     }
@@ -158,8 +166,9 @@ export function formatGenericXml(repoInfo, branch, treeText, files, options = {}
 
 export function formatJson(repoInfo, branch, treeText, files, options = {}) {
     const jsonObj = {
-        repository: `${repoInfo.owner}/${repoInfo.repo}`,
-        branch,
+        repository: repoDisplayName(repoInfo),
+        ...(branch ? { branch } : {}),
+        ...(repoInfo.source ? { source: repoInfo.source } : {}),
         ...(options && options.partNote ? { note: options.partNote } : {}),
         ...(options && options.failedFilesCount > 0 ? { warnings: `${options.failedFilesCount} file(s) failed to download and were excluded.` } : {}),
         ...(repoInfo.url ? { url: repoInfo.url } : {}),

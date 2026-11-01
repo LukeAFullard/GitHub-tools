@@ -2291,3 +2291,43 @@ test('tree: filter counts matching leaf files instead of top-level folder count'
         globalThis.document = originalDoc;
     }
 });
+
+test('chunkIssuesOutput: instructions (sent in the last part) do not shrink part 1', () => {
+    const repoInfo = { owner: 'o', repo: 'r' };
+    const issues = Array.from({ length: 12 }, (_, i) => ({
+        number: i + 1,
+        title: `Issue ${i + 1}`,
+        state: 'open',
+        author: 'user',
+        authorAssociation: 'MEMBER',
+        createdAt: '2023-01-01',
+        cleanedBody: `Detailed description for issue ${i + 1} `.repeat(40),
+        cleanedComments: []
+    }));
+    const countIssues = text => new Set([...text.matchAll(/Detailed description for issue (\d+) /g)].map(m => m[1])).size;
+    const limit = 1500;
+    const plain = chunkIssuesOutput('claude-xml', repoInfo, issues, limit, estimateTokens, {});
+    const withInstr = chunkIssuesOutput('claude-xml', repoInfo, issues, limit, estimateTokens, { instructions: 'Instructions '.repeat(150) });
+    assert.ok(plain.length > 2);
+    assert.equal(countIssues(withInstr[0].text), countIssues(plain[0].text));
+    assert.ok(!withInstr[0].text.includes('Instructions Instructions'));
+    assert.ok(withInstr[withInstr.length - 1].text.includes('Instructions Instructions'));
+    for (const c of withInstr) assert.equal(c.exceedsLimit, false);
+});
+
+test('filterIncludedComments applies scope, bot and noise filters like processIssueThread', async () => {
+    const { filterIncludedComments } = await import('../js/issue-cleaner.js');
+    const issue = { number: 1, author: 'alice' };
+    const comments = [
+        { id: 1, author: 'alice', authorAssociation: 'NONE', body: 'Author follow-up with details.' },
+        { id: 2, author: 'bob', authorAssociation: 'OWNER', body: 'Maintainer analysis of the bug.' },
+        { id: 3, author: 'carol', authorAssociation: 'NONE', body: 'Drive-by note with details.' },
+        { id: 4, author: 'dependabot[bot]', authorType: 'Bot', authorAssociation: 'NONE', body: 'Bumps x.' },
+        { id: 5, author: 'dave', authorAssociation: 'NONE', body: '+1' }
+    ];
+    const ids = opts => filterIncludedComments(issue, comments, opts).kept.map(c => c.id);
+    assert.deepEqual(ids({ commentScope: 'all' }), [1, 2, 3]);
+    assert.deepEqual(ids({ commentScope: 'maintainers' }), [1, 2]);
+    assert.deepEqual(ids({ commentScope: 'none' }), []);
+    assert.deepEqual(ids({ commentScope: 'all', filterBots: false, filterNoise: false }), [1, 2, 3, 4, 5]);
+});

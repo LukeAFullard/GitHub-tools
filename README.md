@@ -5,6 +5,7 @@ A zero-install, 100% client-side web application that fetches, filters, cleans, 
 ## Features
 
 - **100% Client-Side Privacy:** Direct browser-to-GitHub API connection. Personal Access Tokens (PATs) and fine-grained PATs (`github_pat_`) remain strictly in memory.
+- **Local `.zip` Archives (no token needed):** Click **Open .zip** or drop a repository `.zip` (e.g. GitHub's "Download ZIP") anywhere on the Code page. The archive is read in your browser and never uploaded: only its file list is read up front, and each selected file is unzipped on demand. Supports Deflate and Store compression and ZIP64 (very large archives); password-protected archives are not supported.
 - **Dual Tool Modes:** Switch seamlessly between **Code Packer** (source tree packaging) and **Issues Explorer** (issue thread triage & context packaging).
 - **Interactive File Selection & Issue Filtering:**
   - **Code Packer:** Interactive directory tree to select or deselect files and folders before fetching contents.
@@ -77,7 +78,8 @@ Navigate to `http://localhost:8000` in your web browser.
     ├── secrets.js      # Client-side secret scanning and redaction engine
     ├── tokenizer.js    # BPE regex token estimator
     ├── tokenizer.worker.js # Web Worker background tokenization
-    └── tree.js         # File tree rendering & selection state management
+    ├── tree.js         # File tree rendering & selection state management
+    └── zip-loader.js   # Local .zip reader (central directory + on-demand Deflate)
 ```
 
 ## License

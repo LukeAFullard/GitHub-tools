@@ -273,7 +273,10 @@ export function chunkIssuesOutput(format, repoInfo, issues, chunkTokenLimit, est
         return Math.max(1, estimateTokensFn(single.text) - emptyBaseTokens);
     });
 
-    const firstChunkHeader = buildIssuesOutput(format, repoInfo, [], { ...options, instructions });
+    // Part 1 carries the NLP overview but never the instructions when the output splits
+    // (instructions go in the last part). The single-part case is re-checked below with
+    // the instructions included.
+    const firstChunkHeader = buildIssuesOutput(format, repoInfo, [], { ...options, instructions: '' });
     let runningTokens = estimateTokensFn(firstChunkHeader.text);
 
     const chunks = [];
