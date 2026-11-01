@@ -113,13 +113,33 @@ export function sanitizeIssueText(rawText, options = {}, contextPath = 'issue') 
 }
 
 /**
+ * Returns the raw comments that the comment-scope / bot / noise filters would keep for an
+ * issue, before any text sanitizing. Shared by processIssueThread and the secret scanner so
+ * both look at the same set of comments.
+ */
+export function filterIncludedComments(issue, rawComments = [], options = {}) {
+    const { commentScope = 'all', filterBots = true, filterNoise = true } = options;
+    const stats = { bots: 0, scope: 0, noise: 0 };
+    const kept = [];
+    if (commentScope === 'none' || !Array.isArray(rawComments)) return { kept, stats };
+    for (const c of rawComments) {
+        if (filterBots && isBotUser(c.author, c.authorType)) { stats.bots++; continue; }
+        if (commentScope === 'maintainers') {
+            const isAuthor = c.author === issue.author;
+            const isMaintainer = AUTHORITATIVE_ROLES.has(c.authorAssociation);
+            if (!isAuthor && !isMaintainer) { stats.scope++; continue; }
+        }
+        if (filterNoise && isLowSignalComment(c.body)) { stats.noise++; continue; }
+        kept.push(c);
+    }
+    return { kept, stats };
+}
+
+/**
  * Cleans and filters a full issue + its comments array.
  */
 export function processIssueThread(issue, rawComments = [], options = {}) {
     const {
-        commentScope = 'all', // 'all' | 'maintainers' | 'none'
-        filterBots = true,
-        filterNoise = true,
         isRedact = true,
         knownNumbers = null
     } = options;
@@ -134,34 +154,26 @@ export function processIssueThread(issue, rawComments = [], options = {}) {
 
     const keptComments = [];
     const commentStats = { raw: Array.isArray(rawComments) ? rawComments.length : 0, kept: 0, bots: 0, scope: 0, noise: 0, empty: 0 };
-    if (commentScope !== 'none' && Array.isArray(rawComments)) {
-        for (const c of rawComments) {
-            if (filterBots && isBotUser(c.author, c.authorType)) { commentStats.bots++; continue; }
+    const { kept: includedRaw, stats: filterStats } = filterIncludedComments(issue, rawComments, options);
+    commentStats.bots = filterStats.bots;
+    commentStats.scope = filterStats.scope;
+    commentStats.noise = filterStats.noise;
+    for (const c of includedRaw) {
+        const cleanedCommentBody = sanitizeIssueText(c.body, options, `issue-${issue.number}-comment-${c.id}`);
+        if (!cleanedCommentBody) { commentStats.empty++; continue; }
 
-            if (commentScope === 'maintainers') {
-                const isAuthor = c.author === issue.author;
-                const isMaintainer = AUTHORITATIVE_ROLES.has(c.authorAssociation);
-                if (!isAuthor && !isMaintainer) { commentStats.scope++; continue; }
-            }
-
-            if (filterNoise && isLowSignalComment(c.body)) { commentStats.noise++; continue; }
-
-            const cleanedCommentBody = sanitizeIssueText(c.body, options, `issue-${issue.number}-comment-${c.id}`);
-            if (!cleanedCommentBody) { commentStats.empty++; continue; }
-
-            for (const r of extractIssueReferences(c.body, issue.number)) {
-                allRefs.add(r);
-            }
-
-            commentStats.kept++;
-            keptComments.push({
-                author: c.author,
-                role: c.authorAssociation || 'NONE',
-                createdAt: c.createdAt,
-                reactionsPlusOne: c.reactionsPlusOne || 0,
-                body: cleanedCommentBody
-            });
+        for (const r of extractIssueReferences(c.body, issue.number)) {
+            allRefs.add(r);
         }
+
+        commentStats.kept++;
+        keptComments.push({
+            author: c.author,
+            role: c.authorAssociation || 'NONE',
+            createdAt: c.createdAt,
+            reactionsPlusOne: c.reactionsPlusOne || 0,
+            body: cleanedCommentBody
+        });
     }
 
     let relatedList = Array.from(allRefs).sort((a, b) => a - b);

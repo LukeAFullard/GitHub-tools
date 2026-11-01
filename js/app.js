@@ -19,7 +19,6 @@ import { buildContextOutput, chunkContextOutput, escapeXml } from './formatters.
 import { minifyCode } from './minifier.js';
 import { scanForSecrets, redactSecrets } from './secrets.js';
 import { buildBannerItems, renderBanner } from './ui-banner.js';
-import { copyLabel } from './ui-labels.js';
 import { TARGETS, detectTarget } from './targets.js';
 import { buildSettingsSummary } from './settings-summary.js';
 import { defaultExcludedPaths, rankSuggestions } from './suggestions.js';
@@ -335,13 +334,13 @@ export function applyTarget(key) {
 
     updateBudgetMeterUI(totalTokensAllChunks, generatedChunks.length || 1, currentAppState !== 'built');
     updateSettingsSummary();
-    updateCopyBtnLabel();
+    updateCopyBtnLabel(activeChunkIndex);
 }
 
 function updateCopyBtnLabel(activeIndex = 0) {
-    if (!dom.copyBtn) return;
-    const totalParts = generatedChunks.length;
-    dom.copyBtn.textContent = getCopyButtonLabel(currentTargetKey, activeIndex, totalParts);
+    const label = getCopyButtonLabel(currentTargetKey, activeIndex, generatedChunks.length);
+    if (dom.copyBtn) dom.copyBtn.textContent = label;
+    if (dom.mobilePrimaryBtn && currentAppState === 'built') dom.mobilePrimaryBtn.textContent = label;
 }
 
 function loadSavedSettings() {
@@ -471,7 +470,7 @@ function setAppState(state, note = '') {
         } else if (state === 'loaded') {
             dom.mobilePrimaryBtn.textContent = note ? note : 'Build context';
         } else if (state === 'built') {
-            dom.mobilePrimaryBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
+            dom.mobilePrimaryBtn.textContent = getCopyButtonLabel(currentTargetKey, activeChunkIndex, generatedChunks.length);
         }
     }
     if (dom.startDownloadBtn) {
@@ -546,10 +545,12 @@ if (dom.wrapToggleBtn && dom.previewArea) {
             dom.previewArea.classList.remove('wrap');
             dom.wrapToggleBtn.classList.remove('primary');
             dom.wrapToggleBtn.classList.add('secondary');
+            dom.wrapToggleBtn.setAttribute('aria-pressed', 'false');
         } else {
             dom.previewArea.classList.add('wrap');
             dom.wrapToggleBtn.classList.add('primary');
             dom.wrapToggleBtn.classList.remove('secondary');
+            dom.wrapToggleBtn.setAttribute('aria-pressed', 'true');
         }
     });
 }
@@ -1103,14 +1104,14 @@ async function repackBundleInMemory(activeSelectionNodes = currentActiveSelectio
         dom.chunkSelect.style.display = 'inline-block';
         dom.downloadAllBtn.style.display = 'inline-flex';
         dom.chunkSelect.innerHTML = generatedChunks.map((_, idx) => `<option value="${idx}">Part ${idx + 1} of ${generatedChunks.length}</option>`).join('');
-        dom.copyBtn.textContent = copyLabel(0, generatedChunks.length);
+        updateCopyBtnLabel(0);
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'inline-flex';
     } else {
         dom.chunkSelectLabel.style.display = 'none';
         dom.chunkSelect.style.display = 'none';
         dom.downloadAllBtn.style.display = 'none';
         dom.chunkSelect.innerHTML = '';
-        dom.copyBtn.textContent = copyLabel(0, generatedChunks.length);
+        updateCopyBtnLabel(0);
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
     }
 
@@ -1899,7 +1900,7 @@ function updateActiveChunkView(index) {
         ? `${packedOutputText.length.toLocaleString()} (Part ${activeChunkIndex + 1}) / ${totalChars.toLocaleString()} total`
         : totalChars.toLocaleString();
 
-    if (dom.copyBtn) dom.copyBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
+    updateCopyBtnLabel(activeChunkIndex);
     if (generatedChunks.length > 1) {
         if (dom.nextPartBtn) {
             dom.nextPartBtn.style.display = activeChunkIndex < generatedChunks.length - 1 ? 'inline-flex' : 'none';
@@ -1917,7 +1918,6 @@ function updateActiveChunkView(index) {
 dom.chunkSelect.addEventListener('change', () => {
     const idx = parseInt(dom.chunkSelect.value, 10) || 0;
     updateActiveChunkView(idx);
-    dom.copyBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
 });
 
 if (dom.nextPartBtn) {
@@ -1969,11 +1969,8 @@ dom.copyBtn.addEventListener('click', async () => {
         } else {
             showToast('Copied context to clipboard!', "info");
         }
-        const originalText = dom.copyBtn.textContent;
         dom.copyBtn.textContent = 'Copied!';
-        setTimeout(() => {
-            dom.copyBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
-        }, 2000);
+        setTimeout(() => updateCopyBtnLabel(activeChunkIndex), 2000);
     } catch (_) {
         showToast('Unable to copy automatically. Please copy directly from preview.', 'error');
     }

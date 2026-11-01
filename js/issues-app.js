@@ -3,14 +3,13 @@
  */
 import { parseRepoInput, fetchRateLimit, sleep } from './github-api.js';
 import { fetchIssuesManifest, fetchCommentsForIssues } from './github-issues-api.js';
-import { processIssueThread, extractIssueReferences } from './issue-cleaner.js';
+import { processIssueThread, extractIssueReferences, filterIncludedComments } from './issue-cleaner.js';
 import { buildIssuesOutput, chunkIssuesOutput } from './issue-formatters.js';
 import { escapeXml } from './formatters.js';
 import { estimateTokens, estimateTokensAsync } from './tokenizer.js';
 import { scanForSecrets } from './secrets.js';
 import { switchTab } from './ui-tabs.js';
 import { buildBannerItems, renderBanner } from './ui-banner.js';
-import { copyLabel } from './ui-labels.js';
 import { TARGETS, detectTarget } from './targets.js';
 import { buildSettingsSummary } from './settings-summary.js';
 import { commentCostHint } from './comment-cost.js';
@@ -230,7 +229,7 @@ function setAppState(state) {
             ? 'Load issues'
             : state === 'loaded'
                 ? 'Build context'
-                : copyLabel(activeChunkIndex, generatedChunks.length);
+                : getCopyButtonLabel(currentTargetKey, activeChunkIndex, generatedChunks.length);
     }
 }
 
@@ -352,6 +351,47 @@ if (dom.warningBannerTokenBtn) {
     });
 }
 
+const VALID_FORMATS = ['claude-xml', 'markdown', 'generic-xml', 'json'];
+const VALID_COMMENT_SCOPES = ['all', 'maintainers', 'none'];
+const VALID_ITEM_TYPES = ['issues', 'prs', 'both'];
+
+// cfg_target / cfg_format / cfg_chunkLimit / cfg_budgetWindow are shared with the Code Explorer
+// so the chosen target carries across tabs. Redaction defaults differ between the two pages
+// (aggressive is on here), so those and the issue-specific options use their own keys.
+function loadSavedSettings() {
+    try {
+        const get = k => localStorage.getItem(k);
+        if (dom.format && VALID_FORMATS.includes(get('cfg_format'))) dom.format.value = get('cfg_format');
+        if (dom.chunkLimit && get('cfg_chunkLimit') !== null) dom.chunkLimit.value = get('cfg_chunkLimit');
+        if (get('cfg_budgetWindow')) currentBudgetWindow = parseInt(get('cfg_budgetWindow'), 10) || 200000;
+        if (dom.redactSecrets && get('cfg_issues_redactSecrets') !== null) {
+            dom.redactSecrets.checked = get('cfg_issues_redactSecrets') !== 'false';
+        }
+        if (dom.aggressiveRedact && get('cfg_issues_aggressiveRedact') !== null) {
+            dom.aggressiveRedact.checked = get('cfg_issues_aggressiveRedact') !== 'false';
+        }
+        if (dom.commentScope && VALID_COMMENT_SCOPES.includes(get('cfg_issues_commentScope'))) {
+            dom.commentScope.value = get('cfg_issues_commentScope');
+        }
+        if (dom.aiInstructions && get('cfg_issues_aiInstructions') !== null) {
+            dom.aiInstructions.value = get('cfg_issues_aiInstructions');
+            if (dom.instructionsCharCount) dom.instructionsCharCount.textContent = `${dom.aiInstructions.value.length} chars`;
+        }
+    } catch (_) {}
+}
+
+function saveSettings() {
+    try {
+        if (dom.format) localStorage.setItem('cfg_format', dom.format.value);
+        if (dom.chunkLimit) localStorage.setItem('cfg_chunkLimit', dom.chunkLimit.value);
+        localStorage.setItem('cfg_budgetWindow', String(currentBudgetWindow));
+        if (dom.redactSecrets) localStorage.setItem('cfg_issues_redactSecrets', dom.redactSecrets.checked ? 'true' : 'false');
+        if (dom.aggressiveRedact) localStorage.setItem('cfg_issues_aggressiveRedact', dom.aggressiveRedact.checked ? 'true' : 'false');
+        if (dom.commentScope) localStorage.setItem('cfg_issues_commentScope', dom.commentScope.value);
+        if (dom.aiInstructions) localStorage.setItem('cfg_issues_aiInstructions', dom.aiInstructions.value);
+    } catch (_) {}
+}
+
 const urlParams = new URLSearchParams(window.location.search);
 if (urlParams.get('repo') && dom.repoUrl) {
     dom.repoUrl.value = urlParams.get('repo');
@@ -451,8 +491,9 @@ export function applyTarget(key) {
         localStorage.setItem('cfg_target', currentTargetKey);
     } catch (_) {}
 
+    if (currentAppState !== 'built') updateSelectionTelemetry();
     updateSettingsSummary();
-    updateCopyBtnLabel();
+    updateCopyBtnLabel(activeChunkIndex);
 }
 
 export function getCopyButtonLabel(target, activeIndex = 0, totalParts = 1) {
@@ -468,9 +509,9 @@ export function getCopyButtonLabel(target, activeIndex = 0, totalParts = 1) {
 }
 
 function updateCopyBtnLabel(activeIndex = 0) {
-    if (!dom.copyBtn) return;
-    const totalParts = generatedChunks.length;
-    dom.copyBtn.textContent = getCopyButtonLabel(currentTargetKey, activeIndex, totalParts);
+    const label = getCopyButtonLabel(currentTargetKey, activeIndex, generatedChunks.length);
+    if (dom.copyBtn) dom.copyBtn.textContent = label;
+    if (dom.mobilePrimaryBtn && currentAppState === 'built') dom.mobilePrimaryBtn.textContent = label;
 }
 
 dom.optionsToggleBtn.addEventListener('click', () => {
@@ -499,6 +540,18 @@ dom.toggleNlpCollapseBtn.addEventListener('click', () => {
     dom.toggleNlpCollapseBtn.textContent = hidden ? 'Hide topics' : 'Show topics';
 });
 
+/**
+ * Converts an ISO-8601 timestamp to the viewer's local YYYY-MM-DD, matching what
+ * <input type="date"> returns. Returns '' when the timestamp is missing or invalid.
+ */
+export function localDateString(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 function getFilteredIssues() {
     const q = (dom.issueSearchInput.value || '').trim().toLowerCase();
     const stateVal = dom.stateFilter.value;
@@ -517,8 +570,9 @@ function getFilteredIssues() {
         if (stateVal === 'not_planned' && (iss.state !== 'closed' || iss.stateReason !== 'not_planned')) return false;
 
         if (labelVal && !iss.labels.includes(labelVal)) return false;
-        if (dateFrom && iss.createdAt < dateFrom) return false;
-        if (dateTo && iss.createdAt > dateTo) return false;
+        const createdLocal = localDateString(iss.createdAtIso) || iss.createdAt;
+        if (dateFrom && createdLocal < dateFrom) return false;
+        if (dateTo && createdLocal > dateTo) return false;
         if (iss.commentsCount < minComments) return false;
 
         if (q) {
@@ -535,6 +589,8 @@ function getFilteredIssues() {
         if (sortVal === 'oldest') return a.number - b.number;
         if (sortVal === 'comments') return b.commentsCount - a.commentsCount;
         if (sortVal === 'reactions') return b.reactionsTotal - a.reactionsTotal;
+        if (sortVal === 'updated') return (b.updatedAtIso || '').localeCompare(a.updatedAtIso || '') || b.number - a.number;
+        // Issue numbers are assigned in creation order, so they sort the same as created_at.
         return b.number - a.number;
     });
 
@@ -548,6 +604,65 @@ function updateCommentScopeBarUI() {
     buttons.forEach(btn => {
         btn.setAttribute('aria-pressed', btn.dataset.scope === currentScope ? 'true' : 'false');
     });
+}
+
+/**
+ * Updates the budget meter. When the output is split into several parts, each part is judged
+ * against the target window (the largest part), not the sum of all parts.
+ */
+function updateBudgetMeterUI(totalTokens, numChunks = 1, isPreBuild = false, maxChunkTokens = 0, hasOversizedChunk = false) {
+    if (dom.targetBudgetDisplay) {
+        dom.targetBudgetDisplay.textContent = `of ${currentBudgetWindow.toLocaleString()} estimated tokens${isPreBuild ? ' (pre-build estimate)' : ''}`;
+    }
+    if (dom.statTokens) dom.statTokens.textContent = totalTokens.toLocaleString();
+
+    const chunkLimitVal = parseInt(dom.chunkLimit ? dom.chunkLimit.value : '0', 10) || 0;
+    const isSplit = numChunks > 1 || (chunkLimitVal > 0 && totalTokens > chunkLimitVal);
+    const evaluatedTokens = isSplit
+        ? (maxChunkTokens || (chunkLimitVal > 0 ? Math.min(totalTokens, chunkLimitVal) : Math.round(totalTokens / numChunks)))
+        : totalTokens;
+    const ratio = currentBudgetWindow > 0 ? evaluatedTokens / currentBudgetWindow : 0;
+    const pct = currentBudgetWindow > 0 ? Math.min(100, Math.round((totalTokens / currentBudgetWindow) * 100)) : 0;
+    const isOver = hasOversizedChunk || ratio > 1.0;
+    const level = isOver ? 'over' : ratio <= 0.85 ? 'fits' : 'near';
+
+    if (dom.budgetFill) {
+        dom.budgetFill.style.width = `${pct}%`;
+        dom.budgetFill.className = 'budget-fill ' + level;
+    }
+    if (!dom.budgetStatusText) return;
+
+    let text;
+    let status = level;
+    if (isPreBuild && totalTokens === 0) {
+        text = 'Select issues to estimate size';
+        status = 'fits';
+    } else if (isPreBuild && isSplit && chunkLimitVal > 0) {
+        text = `About ${totalTokens.toLocaleString()} tokens (bodies only), will split into about ${Math.ceil(totalTokens / chunkLimitVal)} parts`;
+    } else if (isPreBuild) {
+        text = `About ${totalTokens.toLocaleString()} tokens (bodies only, before comments)`;
+    } else if (isSplit && numChunks > 1) {
+        const largest = (maxChunkTokens || Math.round(totalTokens / numChunks)).toLocaleString();
+        text = hasOversizedChunk
+            ? `Split into ${numChunks} parts (largest: ${largest} tok) - 1+ part exceeds split limit`
+            : `Split into ${numChunks} parts (largest: ${largest} tok) - fits target window`;
+        status = hasOversizedChunk ? 'over' : 'fits';
+    } else if (ratio <= 0.85) {
+        text = 'Fits target budget';
+    } else if (ratio <= 1.0) {
+        text = 'Near target budget';
+    } else {
+        text = `Over budget by ${(totalTokens - currentBudgetWindow).toLocaleString()} tokens. Split into parts or deselect issues.`;
+    }
+    dom.budgetStatusText.textContent = text;
+    dom.budgetStatusText.className = `budget-status-text status-${status}`;
+}
+
+function estimateIssueTokens(iss) {
+    let chars = iss.title.length + iss.body.length;
+    const comms = cachedCommentsByIssue.get(iss.number);
+    if (comms) for (const c of comms) chars += (c.body || '').length;
+    return Math.round(chars / 3.8);
 }
 
 function updateSelectionTelemetry() {
@@ -567,13 +682,29 @@ function updateSelectionTelemetry() {
         dom.selectionSummary.textContent = `${n} selected · ~${tokens} tokens (estimated)`;
     }
 
+    if (currentAppState !== 'built') {
+        updateBudgetMeterUI(estBodyTokens, 1, true);
+    }
+
     const filtered = getFilteredIssues();
     const visibleNums = new Set(filtered.map(i => i.number));
-    const hidden = selectedList.filter(i => !visibleNums.has(i.number)).length;
+    const hiddenNums = selectedList.filter(i => !visibleNums.has(i.number)).map(i => i.number);
     if (dom.hiddenSelectedNote) {
-        dom.hiddenSelectedNote.textContent = hidden > 0
-            ? `${hidden} selected issue(s) are hidden by the current filters.`
+        dom.hiddenSelectedNote.textContent = hiddenNums.length > 0
+            ? `${hiddenNums.length} selected issue(s) are hidden by the current filters.`
             : '';
+        if (hiddenNums.length > 0) {
+            const clearBtn = document.createElement('button');
+            clearBtn.type = 'button';
+            clearBtn.className = 'secondary btn-xs';
+            clearBtn.style.marginLeft = '0.5rem';
+            clearBtn.textContent = 'Deselect hidden';
+            clearBtn.addEventListener('click', () => {
+                for (const n of hiddenNums) selectedIssueNumbers.delete(n);
+                renderIssuesList();
+            });
+            dom.hiddenSelectedNote.appendChild(clearBtn);
+        }
     }
 
     if (dom.commentCostHint) {
@@ -625,11 +756,13 @@ function renderIssuesList() {
 
         li.addEventListener('click', (e) => {
             if (e.target === cb || e.target.classList.contains('issue-sim-badge')) return;
+            if (e.target.closest && e.target.closest('a, .issue-label-pill')) return;
             cb.checked = !cb.checked;
             cb.dispatchEvent(new Event('change'));
         });
 
         li.addEventListener('keydown', (e) => {
+            if (e.target !== li) return;
             if (e.key === ' ' || e.key === 'Spacebar' || e.key === 'Enter') {
                 e.preventDefault();
                 cb.checked = !cb.checked;
@@ -644,31 +777,68 @@ function renderIssuesList() {
         titleRow.className = 'issue-title-row';
 
         const badge = document.createElement('span');
-        const isNotPlanned = iss.state === 'closed' && iss.stateReason === 'not_planned';
-        badge.className = `issue-state-badge ${iss.state === 'open' ? 'issue-state-open' : isNotPlanned ? 'issue-state-not-planned' : 'issue-state-closed'}`;
-        badge.textContent = isNotPlanned ? 'not planned' : iss.state;
+        const isMerged = Boolean(iss.isPullRequest && iss.mergedAt);
+        const isNotPlanned = !isMerged && iss.state === 'closed' && iss.stateReason === 'not_planned';
+        const stateClass = iss.state === 'open' ? 'issue-state-open'
+            : isMerged ? 'issue-state-merged'
+                : isNotPlanned ? 'issue-state-not-planned' : 'issue-state-closed';
+        badge.className = `issue-state-badge ${stateClass}`;
+        badge.textContent = isMerged ? 'merged' : isNotPlanned ? 'not planned' : iss.state;
 
-        const numSpan = document.createElement('span');
-        numSpan.className = 'issue-number';
-        numSpan.textContent = `#${iss.number}`;
+        const kindParts = [];
+        if (iss.isPullRequest) {
+            const prTag = document.createElement('span');
+            prTag.className = 'issue-kind-pr';
+            prTag.textContent = 'PR';
+            prTag.title = 'Pull request';
+            kindParts.push(prTag);
+        }
+
+        const numEl = document.createElement(iss.htmlUrl ? 'a' : 'span');
+        numEl.className = 'issue-number';
+        numEl.textContent = `#${iss.number}`;
+        if (iss.htmlUrl) {
+            numEl.href = iss.htmlUrl;
+            numEl.target = '_blank';
+            numEl.rel = 'noopener noreferrer';
+            numEl.title = `Open #${iss.number} on GitHub`;
+            numEl.addEventListener('click', (e) => e.stopPropagation());
+        }
 
         const titleSpan = document.createElement('span');
         titleSpan.className = 'issue-title';
         titleSpan.textContent = iss.title;
 
-        titleRow.append(badge, numSpan, titleSpan);
+        const tokSpan = document.createElement('span');
+        tokSpan.className = 'issue-token-weight';
+        const issTokens = estimateIssueTokens(iss);
+        tokSpan.textContent = issTokens >= 1000 ? `~${(issTokens / 1000).toFixed(1)}k tok` : `~${issTokens} tok`;
+        tokSpan.title = cachedCommentsByIssue.has(iss.number) || iss.commentsCount === 0
+            ? 'Estimated tokens (title, body and fetched comments, before cleaning)'
+            : `Estimated tokens for title and body; ${iss.commentsCount} comment(s) not fetched yet`;
+
+        titleRow.append(badge, ...kindParts, numEl, titleSpan, tokSpan);
 
         const metaRow = document.createElement('div');
         metaRow.className = 'issue-meta-row';
-        metaRow.innerHTML = `<span>@${escapeXml(iss.author)}</span><span>• ${escapeXml(iss.createdAt)}</span><span>• 💬 ${iss.commentsCount}</span>`;
+        metaRow.innerHTML = `<span>@${escapeXml(iss.author)}</span><span>• ${escapeXml(localDateString(iss.createdAtIso) || iss.createdAt)}</span><span>• 💬 ${iss.commentsCount}</span>`;
         if (iss.reactionsTotal > 0) {
             metaRow.innerHTML += `<span>• 👍 ${iss.reactionsTotal}</span>`;
         }
 
         for (const lbl of iss.labels.slice(0, 4)) {
-            const pill = document.createElement('span');
+            const pill = document.createElement('button');
+            pill.type = 'button';
             pill.className = 'issue-label-pill';
             pill.textContent = lbl;
+            const isActiveLabel = dom.labelFilter.value === lbl;
+            pill.title = isActiveLabel ? 'Clear label filter' : `Filter by label "${lbl}"`;
+            pill.setAttribute('aria-pressed', isActiveLabel ? 'true' : 'false');
+            pill.addEventListener('click', (e) => {
+                e.stopPropagation();
+                dom.labelFilter.value = isActiveLabel ? '' : lbl;
+                renderIssuesList();
+            });
             metaRow.appendChild(pill);
         }
 
@@ -701,6 +871,17 @@ function renderIssuesList() {
 
 [dom.issueSearchInput, dom.stateFilter, dom.labelFilter, dom.sortFilter, dom.dateFromFilter, dom.dateToFilter, dom.minCommentsFilter].forEach(el => {
     if (el) el.addEventListener('input', renderIssuesList);
+});
+
+// Press "/" anywhere (outside a text field) to jump to the issue search box, as in the Code Explorer.
+document.addEventListener('keydown', (e) => {
+    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+    const active = document.activeElement;
+    const tag = active && active.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (active && active.isContentEditable)) return;
+    if (!dom.issueSearchInput || allIssues.length === 0) return;
+    e.preventDefault();
+    dom.issueSearchInput.focus();
 });
 
 let currentNlpRequestId = 0;
@@ -803,7 +984,10 @@ dom.selectLinkedBtn.addEventListener('click', () => {
     let added = 0;
     for (const iss of allIssues) {
         if (!selectedIssueNumbers.has(iss.number)) continue;
-        const refs = extractIssueReferences(iss.body, iss.number);
+        const refs = new Set(extractIssueReferences(iss.body, iss.number));
+        for (const c of cachedCommentsByIssue.get(iss.number) || []) {
+            for (const r of extractIssueReferences(c.body, iss.number)) refs.add(r);
+        }
         for (const r of refs) {
             if (knownNumbers.has(r) && !selectedIssueNumbers.has(r)) {
                 selectedIssueNumbers.add(r);
@@ -818,15 +1002,6 @@ dom.selectLinkedBtn.addEventListener('click', () => {
 dom.loadIssuesBtn.addEventListener('click', async () => {
     dom.repoInputError.style.display = 'none';
     hidePersistentWarning();
-    if (dom.summaryCard) {
-        dom.summaryCard.hidden = true;
-        dom.summaryCard.innerHTML = '';
-    }
-    if (dom.togglePreviewBtn) {
-        dom.togglePreviewBtn.style.display = 'none';
-        dom.togglePreviewBtn.setAttribute('aria-expanded', 'false');
-        dom.togglePreviewBtn.textContent = 'Show preview';
-    }
     const repoInfo = parseRepoInput(dom.repoUrl.value);
     if (!repoInfo) {
         dom.repoInputError.style.display = 'block';
@@ -849,8 +1024,9 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
     nlpResults = { clusters: [], ngrams: [], similarMap: {} };
     currentNlpRequestId++;
     renderNlpBanner();
-
-    if (dom.warningBanner) renderBanner(dom.warningBanner, []);
+    // Drop the previous repo's output so Copy/Download cannot hand it out for this repo.
+    if (currentAppState === 'built') setAppState('loaded');
+    clearOutputState();
 
     dom.loadIssuesBtn.disabled = true;
     dom.abortBtn.style.display = 'inline-flex';
@@ -922,6 +1098,44 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
         dom.abortBtn.style.display = 'none';
     }
 });
+
+function clearOutputState() {
+    generatedChunks = [];
+    activeChunkIndex = 0;
+    packedOutputText = '';
+    lastBuildSummaryOnly = false;
+    if (dom.summaryCard) {
+        dom.summaryCard.hidden = true;
+        dom.summaryCard.innerHTML = '';
+    }
+    if (dom.togglePreviewBtn) {
+        dom.togglePreviewBtn.style.display = 'none';
+        dom.togglePreviewBtn.setAttribute('aria-expanded', 'false');
+        dom.togglePreviewBtn.textContent = 'Show preview';
+    }
+    if (dom.previewArea) {
+        dom.previewArea.value = '';
+        dom.previewArea.style.display = 'none';
+    }
+    if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'flex';
+    if (dom.previewNotice) dom.previewNotice.style.display = 'none';
+    if (dom.secretsWarningPanel) dom.secretsWarningPanel.style.display = 'none';
+    if (dom.warningBanner) renderBanner(dom.warningBanner, []);
+    for (const k of ['statChunks', 'statIssues', 'statComments', 'statChars']) {
+        if (dom[k]) dom[k].textContent = '0';
+    }
+    if (dom.chunkSelectLabel) dom.chunkSelectLabel.style.display = 'none';
+    if (dom.chunkSelect) {
+        dom.chunkSelect.style.display = 'none';
+        dom.chunkSelect.innerHTML = '';
+    }
+    if (dom.downloadAllBtn) dom.downloadAllBtn.style.display = 'none';
+    if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
+    if (dom.downloadBtn) dom.downloadBtn.disabled = true;
+    if (dom.copyBtn) dom.copyBtn.disabled = true;
+    updateCopyBtnLabel(0);
+    updateBudgetMeterUI(0, 1, true);
+}
 
 async function buildSelectedContext(summaryOnly = false) {
     if (!currentRepoInfo || allIssues.length === 0) return;
@@ -1031,16 +1245,32 @@ async function buildSelectedContext(summaryOnly = false) {
         knownNumbers: new Set(allIssues.map(i => i.number))
     };
 
+    // Scan only what this build includes: titles, labels, bodies and the comments that the
+    // scope / bot / noise filters keep. A summary-only export includes none of these.
     const secretRows = [];
     const flaggedNumbers = new Set();
-    for (const iss of targetIssues) {
-        const rawComms = cachedCommentsByIssue.get(iss.number) || [];
-        const combinedRaw = `${iss.body}\n` + rawComms.map(c => c.body).join('\n');
-        const findings = scanForSecrets(`issue-${iss.number}`, combinedRaw, { assumeConfig: true });
-        if (findings.length > 0) {
-            flaggedNumbers.add(iss.number);
-            for (const f of findings) {
-                secretRows.push({ number: iss.number, type: f.type, line: f.line, preview: f.preview });
+    if (!summaryOnly) {
+        for (const iss of targetIssues) {
+            const parts = [
+                { where: 'title', text: iss.title },
+                { where: 'labels', text: (iss.labels || []).join('\n') },
+                { where: 'body', text: iss.body }
+            ];
+            const rawComms = cachedCommentsByIssue.get(iss.number) || [];
+            const { kept } = filterIncludedComments(iss, rawComms, cleanOptions);
+            kept.forEach(c => {
+                const idx = rawComms.indexOf(c) + 1;
+                parts.push({ where: `comment ${idx}`, text: c.body });
+            });
+            for (const part of parts) {
+                if (!part.text) continue;
+                const findings = scanForSecrets(`issue-${iss.number}-${part.where}`, part.text, { assumeConfig: true });
+                for (const f of findings) {
+                    flaggedNumbers.add(iss.number);
+                    const isSingleLine = part.where === 'title' || part.where === 'labels';
+                    const location = isSingleLine ? part.where : `${part.where} L${f.line}`;
+                    secretRows.push({ number: iss.number, type: f.type, line: location, preview: f.preview });
+                }
             }
         }
     }
@@ -1112,32 +1342,26 @@ async function buildSelectedContext(summaryOnly = false) {
         showToast('Warning: 1 or more parts exceed the split token limit.', 'warn');
     }
 
-    dom.statTokens.textContent = totalTokens.toLocaleString();
     dom.statChunks.textContent = generatedChunks.length;
     dom.statIssues.textContent = targetIssues.length;
     dom.statComments.textContent = totalCommentsIncluded.toLocaleString();
     dom.statChars.textContent = totalChars.toLocaleString();
 
-    const pct = Math.min(100, Math.round((totalTokens / currentBudgetWindow) * 100));
-    const ratio = totalTokens / currentBudgetWindow;
-    dom.budgetFill.style.width = `${pct}%`;
-    dom.budgetFill.className = 'budget-fill ' + (ratio <= 0.85 ? 'fits' : ratio <= 1.0 ? 'near' : 'over');
-    dom.budgetStatusText.textContent = ratio <= 1.0
-        ? `Fits target budget (${generatedChunks.length} part${generatedChunks.length === 1 ? '' : 's'})`
-        : `Over budget by ${(totalTokens - currentBudgetWindow).toLocaleString()} tokens`;
+    const maxChunkTokens = chunkTokenList.length ? Math.max(...chunkTokenList) : 0;
+    updateBudgetMeterUI(totalTokens, generatedChunks.length, false, maxChunkTokens, hasOversizedChunk);
 
     if (generatedChunks.length > 1) {
         dom.chunkSelectLabel.style.display = 'inline-block';
         dom.chunkSelect.style.display = 'inline-block';
         dom.downloadAllBtn.style.display = 'inline-flex';
         dom.chunkSelect.innerHTML = generatedChunks.map((_, i) => `<option value="${i}">Part ${i + 1} of ${generatedChunks.length}</option>`).join('');
-        dom.copyBtn.textContent = copyLabel(0, generatedChunks.length);
+        updateCopyBtnLabel(0);
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'inline-flex';
     } else {
         dom.chunkSelectLabel.style.display = 'none';
         dom.chunkSelect.style.display = 'none';
         dom.downloadAllBtn.style.display = 'none';
-        dom.copyBtn.textContent = copyLabel(0, generatedChunks.length);
+        updateCopyBtnLabel(0);
         if (dom.nextPartBtn) dom.nextPartBtn.style.display = 'none';
     }
 
@@ -1233,7 +1457,7 @@ function updateSecretsPanel(rows, flaggedNumbers) {
         <tr>
             <td>#${r.number}</td>
             <td>${escapeXml(r.type)}</td>
-            <td>${r.line}</td>
+            <td>${escapeXml(String(r.line))}</td>
             <td>${escapeXml(r.preview)}</td>
             <td>${r.isRedacted ? '<span class="status-fits" style="font-weight:600;">Redacted</span>' : '<span class="status-over" style="font-weight:600;">Present in output</span>'}</td>
             <td><button type="button" class="secondary btn-xs deselect-secret-issue" data-num="${r.number}">Deselect #${r.number}</button></td>
@@ -1276,6 +1500,7 @@ if (dom.redactLevel) {
     dom.redactLevel.addEventListener('change', () => {
         syncCheckboxesFromRedactLevel();
         updateSettingsSummary();
+        saveSettings();
         if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
     });
 }
@@ -1285,6 +1510,7 @@ if (dom.secretsControl) {
         if (dom.redactLevel) dom.redactLevel.value = dom.secretsControl.value;
         syncCheckboxesFromRedactLevel();
         updateSettingsSummary();
+        saveSettings();
         if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
     });
 }
@@ -1304,8 +1530,9 @@ if (dom.secretsControl) {
                 });
             }
         }
-        updateCopyBtnLabel();
+        updateCopyBtnLabel(activeChunkIndex);
         updateSettingsSummary();
+        saveSettings();
         if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
     });
 });
@@ -1320,6 +1547,7 @@ if (dom.secretsControl) {
             updateSelectionTelemetry();
         }
         updateSettingsSummary();
+        saveSettings();
         if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
     });
 });
@@ -1338,10 +1566,11 @@ if (dom.commentScopeBar) {
 
 dom.aiInstructions.addEventListener('input', () => {
     dom.instructionsCharCount.textContent = `${dom.aiInstructions.value.length} chars`;
+    saveSettings();
     if (currentAppState === 'built') {
         if (inputDebounceTimer) clearTimeout(inputDebounceTimer);
         inputDebounceTimer = setTimeout(() => {
-            buildSelectedContext(false);
+            buildSelectedContext(lastBuildSummaryOnly);
         }, 300);
     }
 });
@@ -1384,14 +1613,16 @@ if (dom.mobilePrimaryBtn) {
 dom.clearInstructionsBtn.addEventListener('click', () => {
     dom.aiInstructions.value = '';
     dom.instructionsCharCount.textContent = '0 chars';
-    if (currentAppState === 'built') buildSelectedContext(false);
+    saveSettings();
+    if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
 });
 
 document.querySelectorAll('.preset-buttons button[data-instruction]').forEach(btn => {
     btn.addEventListener('click', () => {
         dom.aiInstructions.value = btn.getAttribute('data-instruction');
         dom.instructionsCharCount.textContent = `${dom.aiInstructions.value.length} chars`;
-        if (currentAppState === 'built') buildSelectedContext(false);
+        saveSettings();
+        if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
     });
 });
 
@@ -1407,7 +1638,8 @@ document.querySelectorAll('.budget-presets .preset-btn').forEach(btn => {
             }
             const detected = detectTarget(dom.format ? dom.format.value : '', val);
             applyTarget(detected);
-            if (currentAppState === 'built') buildSelectedContext(false);
+            saveSettings();
+            if (currentAppState === 'built') buildSelectedContext(lastBuildSummaryOnly);
         }
     });
 });
@@ -1422,7 +1654,7 @@ function updateActiveChunkView(index) {
     outputExt = chunk.ext;
     outputMime = chunk.mime;
 
-    if (dom.copyBtn) dom.copyBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
+    updateCopyBtnLabel(activeChunkIndex);
     if (generatedChunks.length > 1) {
         if (dom.nextPartBtn) {
             dom.nextPartBtn.style.display = activeChunkIndex < generatedChunks.length - 1 ? 'inline-flex' : 'none';
@@ -1440,7 +1672,6 @@ function updateActiveChunkView(index) {
 dom.chunkSelect.addEventListener('change', () => {
     const idx = parseInt(dom.chunkSelect.value, 10) || 0;
     updateActiveChunkView(idx);
-    dom.copyBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
 });
 
 if (dom.nextPartBtn) {
@@ -1486,11 +1717,8 @@ dom.copyBtn.addEventListener('click', async () => {
         } else {
             showToast('Copied issues context to clipboard!', 'info');
         }
-        const originalText = dom.copyBtn.textContent;
         dom.copyBtn.textContent = 'Copied!';
-        setTimeout(() => {
-            dom.copyBtn.textContent = copyLabel(activeChunkIndex, generatedChunks.length);
-        }, 2000);
+        setTimeout(() => updateCopyBtnLabel(activeChunkIndex), 2000);
     } catch (_) {
         showToast('Unable to copy automatically.', 'error');
     }
@@ -1514,25 +1742,37 @@ if (dom.togglePreviewBtn && dom.previewArea) {
 }
 
 dom.wrapToggleBtn.addEventListener('click', () => {
-    dom.previewArea.classList.toggle('wrap');
+    const isWrapped = dom.previewArea.classList.toggle('wrap');
+    dom.wrapToggleBtn.classList.toggle('primary', isWrapped);
+    dom.wrapToggleBtn.classList.toggle('secondary', !isWrapped);
+    dom.wrapToggleBtn.setAttribute('aria-pressed', isWrapped ? 'true' : 'false');
 });
 
 dom.shareUrlBtn.addEventListener('click', async () => {
     const url = new URL(window.location.href.split('?')[0]);
     const repoVal = dom.repoUrl.value.trim();
     if (repoVal) url.searchParams.set('repo', repoVal);
+    // Only non-default options go in the link; a format makes the recipient land on "Custom".
+    if (currentTargetKey === 'custom' && dom.format) url.searchParams.set('format', dom.format.value);
+    if (dom.commentScope && dom.commentScope.value !== 'all') url.searchParams.set('commentScope', dom.commentScope.value);
+    if (dom.includePrs && dom.includePrs.value !== 'issues') url.searchParams.set('includePrs', dom.includePrs.value);
     try {
         await navigator.clipboard.writeText(url.toString());
         showToast('Deep-link URL copied!', 'info');
     } catch (_) {}
 });
 
+loadSavedSettings();
+// URL parameters win over saved settings.
+if (dom.format && VALID_FORMATS.includes(urlParams.get('format'))) dom.format.value = urlParams.get('format');
+if (dom.commentScope && VALID_COMMENT_SCOPES.includes(urlParams.get('commentScope'))) dom.commentScope.value = urlParams.get('commentScope');
+if (dom.includePrs && VALID_ITEM_TYPES.includes(urlParams.get('includePrs'))) dom.includePrs.value = urlParams.get('includePrs');
 syncRedactLevelFromCheckboxes();
 updateCommentScopeBarUI();
 
 // Startup target resolution:
 // ?format= in URL -> 'custom'; else saved cfg_target; else 'claude'
-if (urlParams.has('format')) {
+if (VALID_FORMATS.includes(urlParams.get('format'))) {
     applyTarget('custom');
 } else {
     let savedTarget = null;

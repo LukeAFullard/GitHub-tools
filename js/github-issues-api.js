@@ -104,6 +104,8 @@ export async function fetchIssuesManifest(owner, repo, options = {}) {
                 authorType: raw.user ? raw.user.type : 'User',
                 authorAssociation: raw.author_association || 'NONE',
                 createdAt: raw.created_at ? raw.created_at.slice(0, 10) : '',
+                createdAtIso: raw.created_at || '',
+                updatedAtIso: raw.updated_at || raw.created_at || '',
                 closedAt: raw.closed_at ? raw.closed_at.slice(0, 10) : null,
                 commentsCount: raw.comments || 0,
                 reactionsTotal: (raw.reactions && raw.reactions.total_count) || 0,

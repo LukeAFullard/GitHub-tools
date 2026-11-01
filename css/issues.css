@@ -358,6 +358,58 @@
     color: var(--ink-soft);
 }
 
+.issue-state-merged {
+    background: var(--merged-bg);
+    color: var(--merged);
+}
+
+:root {
+    --merged: #7B3FC4;
+    --merged-bg: rgba(123, 63, 196, 0.10);
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --merged: #B392F0;
+        --merged-bg: rgba(179, 146, 240, 0.14);
+    }
+}
+[data-theme="dark"] {
+    --merged: #B392F0;
+    --merged-bg: rgba(179, 146, 240, 0.14);
+}
+[data-theme="light"] {
+    --merged: #7B3FC4;
+    --merged-bg: rgba(123, 63, 196, 0.10);
+}
+
+.issue-kind-pr {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    font-weight: 700;
+    padding: 0.04rem 0.3rem;
+    border-radius: 3px;
+    border: 1px solid var(--line);
+    color: var(--ink-soft);
+}
+
+a.issue-number {
+    text-decoration: none;
+}
+
+a.issue-number:hover,
+a.issue-number:focus-visible {
+    color: var(--cobalt);
+    text-decoration: underline;
+}
+
+.issue-token-weight {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--ink-soft);
+    white-space: nowrap;
+}
+
 .issue-meta-row {
     display: flex;
     align-items: center;
@@ -377,6 +429,17 @@
     background: var(--page);
     border: 1px solid var(--line);
     color: var(--ink);
+}
+
+button.issue-label-pill {
+    cursor: pointer;
+    line-height: inherit;
+}
+
+button.issue-label-pill:hover,
+button.issue-label-pill[aria-pressed="true"] {
+    border-color: var(--cobalt);
+    color: var(--cobalt);
 }
 
 .issue-sim-badge {

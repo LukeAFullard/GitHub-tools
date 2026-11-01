@@ -344,6 +344,7 @@
                             <select id="sortFilter" aria-label="Sort issues">
                                 <option value="newest">Sort: Newest first</option>
                                 <option value="oldest">Sort: Oldest first</option>
+                                <option value="updated">Sort: Recently updated</option>
                                 <option value="comments">Sort: Most comments</option>
                                 <option value="reactions">Sort: Most reactions (👍)</option>
                             </select>
@@ -406,7 +407,7 @@
                 </div>
 
                 <div style="display: flex; align-items: center; gap: 0.4rem;">
-                    <button id="wrapToggleBtn" class="secondary btn-sm" title="Toggle line wrapping">Wrap</button>
+                    <button id="wrapToggleBtn" class="primary btn-sm" aria-pressed="true" title="Toggle line wrapping">Wrap</button>
                     <button id="copyBtn" class="primary btn-sm" disabled>Copy</button>
                     <button id="nextPartBtn" class="secondary btn-sm" style="display:none;" title="Advance to next part">Next part</button>
                     <button id="downloadBtn" class="secondary btn-sm" disabled>Download</button>
@@ -437,7 +438,7 @@
                                 <tr>
                                     <th>Issue</th>
                                     <th>Type</th>
-                                    <th>Line</th>
+                                    <th>Location</th>
                                     <th>Preview</th>
                                     <th>Status</th>
                                     <th>Action</th>

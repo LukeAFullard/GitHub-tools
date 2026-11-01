@@ -107,3 +107,58 @@ test('exampleRepos chip click sets repoUrl and triggers issues load', async () =
     const madeCalls = fake.calls.slice(beforeCalls);
     assert.ok(madeCalls.some(c => c.includes('/issues')), 'fake GitHub received an /issues request');
 });
+
+test('after a build the copy button keeps its target-specific label', async () => {
+    await el('buildContextBtn').click();
+    await wait(300);
+    assert.equal(el('statChunks').textContent, 1);
+    assert.equal(el('copyBtn').textContent, 'Copy for ChatGPT');
+});
+
+test('budget meter judges a multi-part build by its largest part, not the total', async () => {
+    // Custom target with a tiny split size: the build splits into several parts that each fit.
+    el('chunkLimit').value = '1500';
+    await fire('chunkLimit', 'change');
+    await wait(300);
+    assert.ok(Number(el('statChunks').textContent) > 1, 'expected a split build');
+    assert.match(el('budgetStatusText').textContent, /^Split into \d+ parts .* fits target window$/);
+    assert.match(el('copyBtn').textContent, /^Copy part 1 of \d+$/);
+    el('chunkLimit').value = '128000';
+    await fire('chunkLimit', 'change');
+    await wait(300);
+});
+
+test('editing instructions after "Export NLP overview" stays in summary-only mode', async () => {
+    const before = fake.calls.length;
+    await el('exportNlpOnlyBtn').click();
+    await wait(200);
+    assert.doesNotMatch(el('previewArea').value, /Body of issue/);
+    el('aiInstructions').value = 'Summarise the main themes.';
+    await fire('aiInstructions', 'input');
+    await wait(500);
+    assert.doesNotMatch(el('previewArea').value, /Body of issue/, 'should not switch to full issue export');
+    assert.match(el('previewArea').value, /Summarise the main themes\./);
+    assert.equal(fake.calls.length, before, 'summary-only rebuild must not fetch comments');
+    el('aiInstructions').value = '';
+    await fire('aiInstructions', 'input');
+    await wait(400);
+});
+
+test('loading a repo again clears the previous output', async () => {
+    await el('buildContextBtn').click();
+    await wait(200);
+    assert.ok(el('previewArea').value.length > 0);
+    await el('loadIssuesBtn').click();
+    await wait(50);
+    assert.equal(el('previewArea').value, '');
+    assert.equal(el('copyBtn').disabled, true);
+    assert.equal(el('downloadBtn').disabled, true);
+});
+
+test('localDateString converts ISO timestamps to the local calendar date', async () => {
+    const { localDateString } = await import('../../js/issues-app.js');
+    const d = new Date(2026, 9, 5, 0, 30); // 5 Oct 2026, 00:30 local time
+    assert.equal(localDateString(d.toISOString()), '2026-10-05');
+    assert.equal(localDateString(''), '');
+    assert.equal(localDateString('not a date'), '');
+});
