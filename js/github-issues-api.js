@@ -14,14 +14,19 @@ function getAuthHeader(pat) {
     return { 'Authorization': `token ${token}` };
 }
 
-async function fetchWithRetry(url, pat, signal, onHeaders) {
+/**
+ * GET (or, with `init`, any request) against the GitHub API with rate-limit waits and retries.
+ * Errors carry `status` (HTTP status) and `isRateLimit` where relevant.
+ */
+export async function fetchWithRetry(url, pat, signal, onHeaders, init = {}) {
     const headers = {
         'Accept': 'application/vnd.github.v3+json',
-        ...getAuthHeader(pat)
+        ...getAuthHeader(pat),
+        ...(init.headers || {})
     };
     let retries = 0;
     while (retries < 3) {
-        const res = await fetch(url, { headers, signal });
+        const res = await fetch(url, { ...init, headers, signal });
         const meta = extractRateLimitHeaders(res);
         if (onHeaders) onHeaders(meta);
 
@@ -48,7 +53,9 @@ async function fetchWithRetry(url, pat, signal, onHeaders) {
         if (!apiMessage) {
             try { apiMessage = (await res.clone().json()).message || ''; } catch (_) {}
         }
-        throw new Error(`GitHub API error (${res.status}): ${apiMessage || res.statusText || 'request failed'}`);
+        const apiErr = new Error(`GitHub API error (${res.status}): ${apiMessage || res.statusText || 'request failed'}`);
+        apiErr.status = res.status;
+        throw apiErr;
     }
 }
 

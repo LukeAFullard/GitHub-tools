@@ -6,7 +6,8 @@
  */
 import fs from 'fs';
 const ROOT = new URL('../../../', import.meta.url).pathname.replace(/\/$/, '');
-const html = fs.readFileSync(ROOT + '/issues.html', 'utf8');
+// Page to parse; set DOM_STUB_PAGE (e.g. via helpers/discussions-mode.mjs) before importing.
+const html = fs.readFileSync(ROOT + '/' + (process.env.DOM_STUB_PAGE || 'issues.html'), 'utf8');
 const registry = new Map();      // id -> El
 const listeners = new Map();     // id -> {type: [fn]}
 

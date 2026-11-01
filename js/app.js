@@ -72,6 +72,7 @@ const dom = {
     drawerTokenLink: document.getElementById('drawerTokenLink'),
     tabCodeLink: document.getElementById('tabCodeLink'),
     tabIssuesLink: document.getElementById('tabIssuesLink'),
+    tabDiscussionsLink: document.getElementById('tabDiscussionsLink'),
     branchTokenGroup: document.getElementById('branchTokenGroup'),
     repoUrl: document.getElementById('repoUrl'),
     branch: document.getElementById('branch'),
@@ -851,12 +852,13 @@ clearOutputState();
 loadSavedSettings();
 
 // Navigation tab click listeners
-[dom.tabCodeLink, dom.tabIssuesLink].forEach(link => {
+[dom.tabCodeLink, dom.tabIssuesLink, dom.tabDiscussionsLink].forEach(link => {
     if (link) {
         link.addEventListener('click', () => {
             const repoVal = dom.repoUrl ? dom.repoUrl.value : '';
             if (dom.tabCodeLink) dom.tabCodeLink.href = buildTabHref('code', repoVal);
             if (dom.tabIssuesLink) dom.tabIssuesLink.href = buildTabHref('issues', repoVal);
+            if (dom.tabDiscussionsLink) dom.tabDiscussionsLink.href = buildTabHref('discussions', repoVal);
         });
     }
 });

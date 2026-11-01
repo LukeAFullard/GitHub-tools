@@ -358,6 +358,12 @@
     color: var(--ink-soft);
 }
 
+.issue-state-answered {
+    background: var(--fits-bg);
+    color: var(--fits);
+    border: 1px solid var(--fits);
+}
+
 .issue-state-merged {
     background: var(--merged-bg);
     color: var(--merged);
