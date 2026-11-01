@@ -1617,3 +1617,31 @@ button:disabled {
     line-height: 1.4;
     max-width: 580px;
 }
+
+/* Local .zip loading */
+.zip-source-note {
+    color: var(--cobalt);
+    font-weight: 600;
+}
+
+.hero-zip-hint {
+    font-size: 0.8125rem;
+    color: var(--ink-soft);
+}
+
+body.zip-drag-over::after {
+    content: 'Drop the .zip to load it';
+    position: fixed;
+    inset: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px dashed var(--cobalt);
+    border-radius: var(--radius-control);
+    background: var(--cobalt-subtle);
+    color: var(--cobalt);
+    font-weight: 700;
+    font-size: 1.125rem;
+    pointer-events: none;
+    z-index: 1000;
+}
