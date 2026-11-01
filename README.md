@@ -59,6 +59,20 @@ Navigate to `http://localhost:8000` in your web browser.
 2. Go to **Settings** -> **Pages**.
 3. Set source to **Deploy from a branch** and select `main` (root).
 
+## Security & Privacy
+
+- **Repository content is untrusted input to your AI.** Code, issues, discussions and package metadata can contain text written to steer an AI (prompt injection). Review the output before sending it, especially for private or sensitive work.
+- **Secrets:** known token and key formats are hidden by default; generic passwords and tokens in code are flagged, and hidden only with "Strict". Files such as `.env`, private keys, key stores, `.npmrc`/`.netrc` and Terraform state are replaced entirely.
+- **Tokens** stay in memory and are only sent to `api.github.com`. Repository names loaded with a token are not remembered between visits.
+- **Dependencies tab:** package names and versions (including a private repo's internal packages) are sent to deps.dev to look up licenses.
+- **Content-Security-Policy:** every page sets a CSP that allows scripts only from the site itself and network requests only to GitHub and deps.dev. A `<meta>` tag cannot set everything, so if your host supports response headers, also send:
+
+  ```
+  Content-Security-Policy: frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  ```
+
 ## Repository Structure
 
 ```

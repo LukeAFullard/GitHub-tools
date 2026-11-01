@@ -22,6 +22,20 @@ export function sleep(ms, signal) {
     });
 }
 
+/**
+ * True for a branch/tag name that is safe to put in a GitHub URL path. Follows git's ref-name
+ * rules closely enough to rule out path tricks: no "." or ".." segments (which fetch() would
+ * resolve, e.g. "../../other/repo/main" escaping to another repository), no empty segments,
+ * backslashes, URL metacharacters (? # %), whitespace or control characters.
+ */
+export function isSafeBranchName(name) {
+    if (typeof name !== 'string' || !name || name.length > 255) return false;
+    if (/[\x00-\x20\x7f\\?#%~^:*\[]/.test(name) || name.includes('@{')) return false;
+    const segments = name.split('/');
+    return segments.every(seg => seg && seg !== '.' && seg !== '..' && !seg.startsWith('.') && !seg.endsWith('.lock'))
+        && !name.endsWith('.');
+}
+
 export function parseRepoInput(input, overrideBranch = null) {
     if (!input || typeof input !== 'string') return null;
     let urlStr = input.trim();
@@ -48,8 +62,11 @@ export function parseRepoInput(input, overrideBranch = null) {
     let subpath = null;
     let treeTail = null;
 
+    if (overrideBranch && overrideBranch.trim() && !isSafeBranchName(overrideBranch.trim())) return null;
+
     if (parts.length >= 4 && (parts[2] === 'tree' || parts[2] === 'blob')) {
         const tail = parts.slice(3);
+        if (tail.some(seg => !seg || seg === '.' || seg === '..')) return null;
         const tailStr = tail.join('/');
         treeTail = tailStr;
         const cleanBranch = overrideBranch ? overrideBranch.trim() : null;
@@ -64,6 +81,7 @@ export function parseRepoInput(input, overrideBranch = null) {
             }
         } else {
             branch = parts[3];
+            if (!isSafeBranchName(branch)) return null;
             if (parts.length > 4) {
                 subpath = parts.slice(4).join('/');
             }
@@ -154,6 +172,7 @@ export async function resolveDefaultBranch(owner, repo, pat, signal, onHeaders) 
 }
 
 export async function fetchRepoTree(owner, repo, branch, pat, signal, onHeaders) {
+    if (!isSafeBranchName(branch)) throw new Error(`Invalid branch name: ${JSON.stringify(String(branch)).slice(0, 80)}`);
     const headers = { 'Accept': 'application/vnd.github.v3+json', ...getAuthHeader(pat) };
     const branchEncoded = branch.split('/').map(encodeURIComponent).join('/');
     const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${branchEncoded}?recursive=1`;
@@ -193,6 +212,9 @@ export async function fetchRepoTree(owner, repo, branch, pat, signal, onHeaders)
 
 
 export async function fetchFileContent(owner, repo, branch, path, pat, signal, onHeaders, isPrivate = false) {
+    if (!isSafeBranchName(branch)) {
+        return { success: false, error: 'Invalid branch name', status: 400, isPrivate };
+    }
     const pathEncoded = path.split('/').map(encodeURIComponent).join('/');
     const branchPath = branch.split('/').map(encodeURIComponent).join('/');
     const rawUrl = `${GITHUB_RAW_BASE}/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${branchPath}/${pathEncoded}`;

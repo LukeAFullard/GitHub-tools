@@ -325,7 +325,7 @@ function renderAll() {
 function fillEcosystemFilter() {
     const ecos = [...new Set(state.packages.map(p => p.ecosystem))].sort();
     dom.ecosystemFilter.innerHTML = '<option value="">Ecosystem: All</option>'
-        + ecos.map(e => `<option value="${e}">${e} (${state.packages.filter(p => p.ecosystem === e).length})</option>`).join('');
+        + ecos.map(e => `<option value="${escapeXml(e)}">${escapeXml(e)} (${state.packages.filter(p => p.ecosystem === e).length})</option>`).join('');
 }
 
 function resetView() {
@@ -395,7 +395,11 @@ async function load(source) {
             state.repoLicense = info.license ? classifyLicense(info.license) : null;
             state.sourceText += ` (branch ${info.branch})`;
             manifestResult = await fetchRepoManifests(source.owner, source.repo, { pat, branch: info.branch, isPrivate: info.isPrivate, skipExamples: dom.skipExamples.checked, signal });
-            try { localStorage.setItem('cfg_lastRepo', state.repoName); } catch (_) {}
+            // Remember the repo, but not a private one or one loaded with a token.
+            if (!pat && !info.isPrivate) store.set('cfg_lastRepo', state.repoName);
+            if (info.isPrivate) {
+                state.warnings.push('Private repository: its package names and versions, including any internal packages, are sent to deps.dev (Google) to look up licenses.');
+            }
         }
         if (myGen !== generation) return;
         progress(15);
@@ -488,6 +492,11 @@ dom.loadBtn.addEventListener('click', () => {
     load({ kind: 'github', owner: info.owner, repo: info.repo });
 });
 dom.repoUrl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); dom.loadBtn.click(); } });
+
+// The repo form never submits (Enter is handled by the buttons); kept out of HTML for the CSP.
+const sourceFormEl = document.getElementById('sourceForm');
+if (sourceFormEl) sourceFormEl.addEventListener('submit', (e) => e.preventDefault());
+
 dom.abortBtn.addEventListener('click', () => { if (controller) controller.abort(); });
 dom.uploadZipBtn.addEventListener('click', () => dom.zipFileInput.click());
 dom.zipFileInput.addEventListener('change', () => {
