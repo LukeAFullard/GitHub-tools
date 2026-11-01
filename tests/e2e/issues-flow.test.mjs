@@ -5,7 +5,7 @@ import { installFakeGithub } from './helpers/fake-github.mjs';
 
 // The app is a module singleton, so these tests run in order against one loaded instance.
 const fake = installFakeGithub();
-await import('../../js/issues-app.js');
+const app = await import('../../js/issues-app.js');
 
 const commentsIn = () => ((el('previewArea').value || '').match(/Real comment/g) || []).length;
 const logText = () => String(el('log').textContent || '');
@@ -161,4 +161,16 @@ test('localDateString converts ISO timestamps to the local calendar date', async
     assert.equal(localDateString(d.toISOString()), '2026-10-05');
     assert.equal(localDateString(''), '');
     assert.equal(localDateString('not a date'), '');
+});
+
+test('your own topic filters the list to matching and related issues', async () => {
+    const r = app.applyCustomTopic('"thing 3 breaks"');
+    // The fake repo titles issue n "Issue n: thing (n % 9) breaks".
+    const expected = [...Array(121).keys()].filter(n => n > 0 && n % 9 === 3);
+    assert.ok(r.matches.length > 0 && r.matches.every(n => expected.includes(n)), `matches: ${r.matches}`);
+    const shown = Number(el('searchMatchCount').textContent.split(' / ')[0]);
+    assert.equal(shown, r.matches.length + r.related.length);
+    assert.match(el('customTopicHint').textContent, /^\d+ mentions? "thing 3 breaks"/);
+    assert.equal(app.applyCustomTopic('   '), null);
+    await fire('clearNlpFilterBtn', 'click');
 });

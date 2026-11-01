@@ -430,10 +430,10 @@ test('ui-summary: buildSummaryLines includes secrets and warnings lines when pre
 });
 
 test('nav: buildTabHref returns base URL when repoText is empty or whitespace', () => {
-    assert.equal(buildTabHref('code', ''), 'index.html');
-    assert.equal(buildTabHref('code', '   '), 'index.html');
-    assert.equal(buildTabHref('code', undefined), 'index.html');
-    assert.equal(buildTabHref('code', null), 'index.html');
+    assert.equal(buildTabHref('code', ''), 'code.html');
+    assert.equal(buildTabHref('code', '   '), 'code.html');
+    assert.equal(buildTabHref('code', undefined), 'code.html');
+    assert.equal(buildTabHref('code', null), 'code.html');
 
     assert.equal(buildTabHref('issues', ''), 'issues.html');
     assert.equal(buildTabHref('issues', '   '), 'issues.html');
@@ -442,9 +442,9 @@ test('nav: buildTabHref returns base URL when repoText is empty or whitespace', 
 });
 
 test('nav: buildTabHref handles simple repo input', () => {
-    assert.equal(buildTabHref('code', 'owner/repo'), 'index.html?repo=owner%2Frepo');
+    assert.equal(buildTabHref('code', 'owner/repo'), 'code.html?repo=owner%2Frepo');
     assert.equal(buildTabHref('issues', 'owner/repo'), 'issues.html?repo=owner%2Frepo');
-    assert.equal(buildTabHref('code', '  facebook/react  '), 'index.html?repo=facebook%2Freact');
+    assert.equal(buildTabHref('code', '  facebook/react  '), 'code.html?repo=facebook%2Freact');
 });
 
 test('nav: buildTabHref encodes URLs and special characters without including tokens', () => {
@@ -453,6 +453,6 @@ test('nav: buildTabHref encodes URLs and special characters without including to
 
     const specialRepo = 'owner/repo with spaces & symbols#tag';
     const target = buildTabHref('code', specialRepo);
-    assert.equal(target, `index.html?repo=${encodeURIComponent(specialRepo)}`);
+    assert.equal(target, `code.html?repo=${encodeURIComponent(specialRepo)}`);
     assert.ok(!target.includes('token') && !target.includes('ghp_'));
 });

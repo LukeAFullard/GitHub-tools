@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="referrer" content="no-referrer">
     <title>GitHub Issues Context Packer &amp; Explorer</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/issues.css">
 </head>
@@ -15,18 +16,14 @@
     <!-- Top Header Bar -->
     <header class="header-bar">
         <div class="brand-With-Switcher">
-            <div class="brand-group">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="12" y1="8" x2="12" y2="12"></line>
-                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                </svg>
-                <span class="brand-title">GitHub Context Tools</span>
-            </div>
+            <a class="brand-group brand-home" href="index.html" title="GitDoco home">
+                <img src="favicon.svg" width="24" height="24" alt="">
+                <span class="brand-title">Git<span class="brand-accent">Doco</span></span>
+            </a>
 
-            <nav class="page-tabs" aria-label="Tools"><a id="tabCodeLink" href="index.html">Code</a><a id="tabIssuesLink" href="issues.html" class="active" aria-current="page">Issues</a><a id="tabDiscussionsLink" href="discussions.html">Discussions</a><a id="tabDepsLink" href="deps.html">Dependencies</a></nav>
+            <nav class="page-tabs" aria-label="Tools"><a id="tabCodeLink" href="code.html">Code</a><a id="tabIssuesLink" href="issues.html" class="active" aria-current="page">Issues</a><a id="tabDiscussionsLink" href="discussions.html">Discussions</a><a id="tabDepsLink" href="deps.html">Dependencies</a></nav>
             <nav class="mode-switcher" aria-label="Tool mode" style="display: none;">
-                <a href="index.html" id="switchToCodeLink" class="mode-tab">Code Packer</a>
+                <a href="code.html" id="switchToCodeLink" class="mode-tab">Code Packer</a>
                 <a href="issues.html" class="mode-tab active" aria-current="page">Issues Explorer</a>
             </nav>
         </div>
@@ -251,6 +248,13 @@
                 <button type="button" id="toggleNlpCollapseBtn" class="secondary btn-xs">Hide topics</button>
             </div>
         </div>
+
+        <form id="customTopicForm" class="custom-topic-form" role="search">
+            <label for="customTopicInput" class="nlp-section-label">Your own topic</label>
+            <input type="search" id="customTopicInput" placeholder='e.g. memory leak, or an exact "phrase"' autocomplete="off">
+            <button type="submit" class="secondary btn-xs">Find</button>
+            <span id="customTopicHint" class="field-helper custom-topic-hint">Finds issues that mention every word, plus related ones that discuss the same thing in other words.</span>
+        </form>
 
         <div id="nlpBody" class="nlp-body">
             <div class="nlp-column">
