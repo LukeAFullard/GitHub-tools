@@ -489,3 +489,47 @@ button.issue-label-pill[aria-pressed="true"] {
 .dep-item { cursor: default; }
 .dep-advisory { color: var(--over); border-color: var(--over); }
 #groupPills { margin-top: 0.5rem; }
+
+/* Outbound links (GitHub threads and files, registries, deps.dev, advisories) */
+.ext-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    color: inherit;
+    text-decoration: none;
+}
+.ext-link svg { opacity: 0.55; flex-shrink: 0; }
+.ext-link:hover, .ext-link:focus-visible { color: var(--cobalt); text-decoration: underline; }
+.ext-link:hover svg, .ext-link:focus-visible svg { opacity: 1; }
+a.issue-link { color: var(--ink-soft); }
+.dep-source-link { font-family: var(--font-mono); font-size: 0.6875rem; color: var(--ink-soft); }
+.tree-file-link { color: var(--ink-soft); padding: 0 0.25rem; opacity: 0; }
+.tree-row:hover .tree-file-link, .tree-row:focus-within .tree-file-link { opacity: 1; }
+@media (hover: none) { .tree-file-link { opacity: 0.7; } }
+
+/* Your own topic */
+.custom-topic-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+}
+.custom-topic-form .nlp-section-label { margin: 0; }
+.custom-topic-form input[type="search"] {
+    flex: 1 1 14rem;
+    min-width: 0;
+    max-width: 26rem;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.8125rem;
+}
+.custom-topic-hint { flex-basis: 100%; margin: 0; }
+.issue-related-tag {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 0.04rem 0.3rem;
+    border-radius: 3px;
+    border: 1px dashed var(--cobalt);
+    color: var(--cobalt);
+}

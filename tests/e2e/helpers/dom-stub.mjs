@@ -21,7 +21,7 @@ class El {
   removeEventListener() {}
   async click() { for (const fn of (listeners.get(this.id)?.click || [])) await fn({ target: this, preventDefault(){}, stopPropagation(){} }); }
   dispatchEvent() { return true; } setAttribute(){} getAttribute(){ return null; } removeAttribute(){}
-  appendChild(c){ this.children.push(c); return c; } append(){} prepend(){} remove(){} focus(){} blur(){} select(){} scrollIntoView(){}
+  appendChild(c){ this.children.push(c); return c; } append(){} prepend(){} insertAdjacentHTML(){} remove(){} focus(){} blur(){} select(){} scrollIntoView(){}
   querySelector(){ return null; } querySelectorAll(){ return []; } closest(){ return null; } getBoundingClientRect(){ return {}; }
   set onclick(fn){ this.addEventListener('click', fn); } get options(){ return []; }
 }

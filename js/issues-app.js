@@ -18,6 +18,8 @@ import { buildSettingsSummary } from './settings-summary.js';
 import { commentCostHint } from './comment-cost.js';
 import { buildSummaryLines } from './ui-summary.js';
 import { buildTabHref } from './nav.js';
+import { externalLink, isGithubUrl } from './links.js';
+import { searchTopic } from './topic-search.js';
 
 export const KIND = globalThis.__THREAD_EXPLORER_KIND__ === 'discussions' ? 'discussions' : 'issues';
 const IS_DISCUSSIONS = KIND === 'discussions';
@@ -120,6 +122,9 @@ const dom = {
     clearNlpFilterBtn: document.getElementById('clearNlpFilterBtn'),
     selectActiveTopicBtn: document.getElementById('selectActiveTopicBtn'),
     toggleNlpCollapseBtn: document.getElementById('toggleNlpCollapseBtn'),
+    customTopicForm: document.getElementById('customTopicForm'),
+    customTopicInput: document.getElementById('customTopicInput'),
+    customTopicHint: document.getElementById('customTopicHint'),
 
     statTokens: document.getElementById('statTokens'),
     targetBudgetDisplay: document.getElementById('targetBudgetDisplay'),
@@ -269,7 +274,7 @@ if (dom.switchToCodeLink) {
     dom.switchToCodeLink.addEventListener('click', () => {
         const repoVal = dom.repoUrl ? dom.repoUrl.value.trim() : '';
         if (repoVal) {
-            dom.switchToCodeLink.href = `index.html?repo=${encodeURIComponent(repoVal)}`;
+            dom.switchToCodeLink.href = `code.html?repo=${encodeURIComponent(repoVal)}`;
         }
     });
 }
@@ -827,17 +832,14 @@ function renderIssuesList() {
             kindParts.push(prTag);
         }
 
-        // Only ever link to github.com, whatever the data says (never javascript: or other schemes).
-        const safeUrl = /^https:\/\/github\.com\//.test(iss.htmlUrl || '') ? iss.htmlUrl : '';
-        const numEl = document.createElement(safeUrl ? 'a' : 'span');
-        numEl.className = 'issue-number';
-        numEl.textContent = `#${iss.number}`;
-        if (safeUrl) {
-            numEl.href = safeUrl;
-            numEl.target = '_blank';
-            numEl.rel = 'noopener noreferrer';
-            numEl.title = `Open #${iss.number} on GitHub`;
-            numEl.addEventListener('click', (e) => e.stopPropagation());
+        // "#123 ↗" opens the thread on GitHub. Only ever github.com URLs, whatever the data says.
+        let numEl;
+        if (isGithubUrl(iss.htmlUrl)) {
+            numEl = externalLink(iss.htmlUrl, `#${iss.number}`, { title: `Open #${iss.number} on GitHub`, className: 'issue-number ext-link issue-link' });
+        } else {
+            numEl = document.createElement('span');
+            numEl.className = 'issue-number';
+            numEl.textContent = `#${iss.number}`;
         }
 
         const titleSpan = document.createElement('span');
@@ -852,7 +854,16 @@ function renderIssuesList() {
             ? 'Estimated tokens (title, body and fetched comments, before cleaning)'
             : `Estimated tokens for title and body; ${iss.commentsCount} comment(s) not fetched yet`;
 
-        titleRow.append(badge, ...kindParts, numEl, titleSpan, tokSpan);
+        const relatedTag = [];
+        if (activeTopicFilter && activeTopicFilter.type === 'custom' && activeTopicFilter.related.has(iss.number)) {
+            const tag = document.createElement('span');
+            tag.className = 'issue-related-tag';
+            tag.textContent = 'related';
+            tag.title = `Does not use the words of ${activeTopicFilter.label}, but discusses similar things`;
+            relatedTag.push(tag);
+        }
+
+        titleRow.append(badge, ...kindParts, numEl, titleSpan, ...relatedTag, tokSpan);
 
         const metaRow = document.createElement('div');
         metaRow.className = 'issue-meta-row';
@@ -967,6 +978,16 @@ function renderNlpBanner() {
     dom.nlpMetaBadge.textContent = `${nlpResults.clusters.length} clusters, ${nlpResults.ngrams.length} key phrases across ${allIssues.length} ${W.noun}`;
 
     dom.topicClustersContainer.innerHTML = '';
+    if (activeTopicFilter && activeTopicFilter.type === 'custom') {
+        const f = activeTopicFilter;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'nlp-pill active custom-topic-pill';
+        btn.title = 'Click to clear this topic';
+        btn.innerHTML = `<span>${escapeXml(f.label)}</span><span class="nlp-pill-count">${f.matchCount}${f.related.size ? ` + ${f.related.size} related` : ''}</span>`;
+        btn.addEventListener('click', clearTopicFilter);
+        dom.topicClustersContainer.appendChild(btn);
+    }
     for (const c of nlpResults.clusters) {
         const btn = document.createElement('button');
         btn.type = 'button';
@@ -1003,13 +1024,50 @@ function toggleTopicFilter(type, label, issueNumbers) {
     renderIssuesList();
 }
 
-dom.clearNlpFilterBtn.addEventListener('click', () => {
+function clearTopicFilter() {
     activeTopicFilter = null;
     dom.clearNlpFilterBtn.style.display = 'none';
     dom.selectActiveTopicBtn.style.display = 'none';
     renderNlpBanner();
     renderIssuesList();
-});
+}
+dom.clearNlpFilterBtn.addEventListener('click', clearTopicFilter);
+
+/** Filters the list to a topic the user types: direct matches plus related threads. */
+export function applyCustomTopic(query) {
+    const result = searchTopic(allIssues, query);
+    if (!result) {
+        if (dom.customTopicHint) dom.customTopicHint.textContent = 'Type at least one word.';
+        return null;
+    }
+    const total = result.matches.length + result.related.length;
+    if (dom.customTopicHint) {
+        dom.customTopicHint.textContent = total === 0
+            ? `No ${W.noun} mention ${result.terms.join(' + ')}.`
+            : `${result.matches.length} mention${result.matches.length === 1 ? 's' : ''} ${result.terms.join(' + ')}${result.related.length ? `; ${result.related.length} more look${result.related.length === 1 ? 's' : ''} related` : ''}. Related ones are marked in the list.`;
+    }
+    if (total === 0) return result;
+    activeTopicFilter = {
+        type: 'custom',
+        label: /^".*"$/.test(result.query) ? result.query : `"${result.query}"`,
+        numbers: new Set([...result.matches, ...result.related]),
+        related: new Set(result.related),
+        matchCount: result.matches.length
+    };
+    dom.clearNlpFilterBtn.style.display = 'inline-flex';
+    dom.selectActiveTopicBtn.style.display = 'inline-flex';
+    renderNlpBanner();
+    renderIssuesList();
+    return result;
+}
+
+if (dom.customTopicForm) {
+    dom.customTopicForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (allIssues.length === 0) return;
+        applyCustomTopic(dom.customTopicInput.value);
+    });
+}
 
 dom.selectActiveTopicBtn.addEventListener('click', () => {
     if (!activeTopicFilter) return;
@@ -1074,6 +1132,7 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
     fetchFailuresMap.clear();
     activeTopicFilter = null;
     nlpResults = { clusters: [], ngrams: [], similarMap: {} };
+    if (dom.customTopicInput) dom.customTopicInput.value = '';
     currentNlpRequestId++;
     renderNlpBanner();
     // Drop the previous repo's output so Copy/Download cannot hand it out for this repo.

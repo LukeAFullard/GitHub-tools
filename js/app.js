@@ -25,6 +25,7 @@ import { defaultExcludedPaths, rankSuggestions } from './suggestions.js';
 import { buildSummaryLines } from './ui-summary.js';
 import { buildTabHref } from './nav.js';
 import { parseZipArchive } from './zip-loader.js';
+import { githubFileUrl } from './links.js';
 import {
     parseRepoInput,
     isSafeBranchName,
@@ -1628,7 +1629,9 @@ async function loadSource(zipArchive = null) {
                     repackBundleInMemory(currentActiveSelection);
                 }
             },
-            parseInt(dom.largeFileThresholdKb ? dom.largeFileThresholdKb.value : '50', 10) || 50
+            parseInt(dom.largeFileThresholdKb ? dom.largeFileThresholdKb.value : '50', 10) || 50,
+            // Local .zip files have no GitHub page to link to.
+            { fileUrl: zipArchive ? null : (path) => githubFileUrl(repoInfo.owner, repoInfo.repo, targetBranch, path) }
         );
         activeTreeControls = treeControls;
         currentActiveSelection = activeSelection;

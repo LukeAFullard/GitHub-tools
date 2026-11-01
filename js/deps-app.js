@@ -13,6 +13,7 @@ import { TARGETS, detectTarget } from './targets.js';
 import { switchTab } from './ui-tabs.js';
 import { renderBanner } from './ui-banner.js';
 import { buildTabHref } from './nav.js';
+import { externalLink, registryUrl, depsDevUrl, advisoryUrl } from './links.js';
 
 const $ = id => document.getElementById(id);
 const dom = {
@@ -223,13 +224,22 @@ function renderList() {
         badge.className = `issue-state-badge license-badge license-${p.license.group}`;
         badge.textContent = GROUP_LABELS[p.license.group];
         badge.title = GROUP_HINTS[p.license.group];
-        const name = document.createElement('span');
-        name.className = 'issue-title';
-        name.textContent = `${p.name}@${p.version || '?'}`;
+        const label = `${p.name}@${p.version || '?'}`;
+        const regHref = registryUrl(p.ecosystem, p.name, p.version);
+        let name;
+        if (regHref) {
+            name = externalLink(regHref, label, { title: `Open ${p.name} on its package registry`, className: 'issue-title ext-link dep-name-link' });
+        } else {
+            name = document.createElement('span');
+            name.className = 'issue-title';
+            name.textContent = label;
+        }
         const lic = document.createElement('span');
         lic.className = 'issue-number';
         lic.textContent = p.license.expression || (p.status === 'not-found' ? 'not on deps.dev' : 'no license data');
         title.append(badge, name, lic);
+        const ddHref = p.status !== 'not-found' ? depsDevUrl(p.ecosystem, p.name, p.version) : null;
+        if (ddHref) title.appendChild(externalLink(ddHref, 'deps.dev', { title: `${p.name} on deps.dev: license, dependencies and advisories`, className: 'ext-link dep-source-link' }));
         const meta = document.createElement('div');
         meta.className = 'issue-meta-row';
         const bits = [p.ecosystem, p.relation + (p.dev ? ' (dev)' : '')];
@@ -238,10 +248,12 @@ function renderList() {
         if (p.versionKind === 'latest') bits.push('latest release');
         meta.innerHTML = bits.map(b => `<span>${escapeXml(b)}</span>`).join('<span>•</span>');
         if (p.advisories && p.advisories.length) {
-            const adv = document.createElement('span');
-            adv.className = 'issue-label-pill dep-advisory';
-            adv.textContent = `${p.advisories.length} advisor${p.advisories.length === 1 ? 'y' : 'ies'}`;
-            adv.title = p.advisories.slice(0, 10).join(', ');
+            // One advisory opens directly; several open the deps.dev page, which lists them all.
+            const advText = `${p.advisories.length} advisor${p.advisories.length === 1 ? 'y' : 'ies'}`;
+            const advHref = p.advisories.length === 1 ? advisoryUrl(p.advisories[0]) : depsDevUrl(p.ecosystem, p.name, p.version);
+            const adv = advHref
+                ? externalLink(advHref, advText, { title: p.advisories.slice(0, 10).join(', '), className: 'issue-label-pill dep-advisory ext-link' })
+                : Object.assign(document.createElement('span'), { className: 'issue-label-pill dep-advisory', textContent: advText, title: p.advisories.slice(0, 10).join(', ') });
             meta.appendChild(adv);
         }
         for (const note of p.license.notes || []) {

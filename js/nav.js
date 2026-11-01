@@ -10,7 +10,7 @@
  * @returns {string} The relative URL to the destination page, including the ?repo= parameter if repoText is present.
  */
 export function buildTabHref(page, repoText) {
-    const pages = { code: 'index.html', issues: 'issues.html', discussions: 'discussions.html', deps: 'deps.html' };
+    const pages = { code: 'code.html', issues: 'issues.html', discussions: 'discussions.html', deps: 'deps.html' };
     const base = pages[page] || 'issues.html';
     const trimmed = (repoText || '').trim();
     if (!trimmed) {

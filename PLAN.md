@@ -138,3 +138,46 @@ Possible follow-ups:
 
 - [ ] Lockfiles (`package-lock.json`, `poetry.lock`, `Cargo.lock`) for exact installed versions.
 - [ ] More ecosystems deps.dev supports (Maven, NuGet, RubyGems).
+
+---
+
+## Phase 5: Links, your own topic, landing page (done)
+
+- [x] Links out: issue and discussion rows ("#123 ↗"), files in the code tree (GitHub blob URL;
+      none for local .zip), packages (registry page, deps.dev, advisories on GitHub or OSV). Built
+      in `js/links.js`: fixed https hosts, every data-derived path segment encoded, branch names
+      validated; links open in a new tab with `noopener noreferrer`.
+- [x] Your own topic (`js/topic-search.js`): every word must appear (word variants count, matched
+      at word starts), "quoted phrases" exactly; plus related threads by TF-IDF cosine similarity to
+      the centroid of the direct matches (threshold 0.18, at most 50), marked "related" in the list.
+- [x] Landing page `index.html` in TimeDoco's palette and type; the Code tool moved to
+      `code.html` and old `index.html?repo=` links are forwarded. Screenshots in `assets/` use a
+      fictional `example/webapp` repo. `_headers`, `robots.txt`, `sitemap.xml`, `favicon.svg`, and
+      `scripts/build-site.mjs` (copies the site into `dist/`).
+
+### Hosting recommendation: `gitdoco.timedoco.com`
+
+A subdomain, deployed as its own Cloudflare Pages project from this repository, rather than
+`timedoco.com/gitdoco`:
+
+- **Isolation.** A path on timedoco.com shares the origin with TimeDoco's app, so GitDoco (which
+  renders third-party repository content) would share localStorage/IndexedDB with users'
+  timesheets. A subdomain is a separate origin.
+- **Headers.** TimeDoco's `_headers` CSP (`connect-src 'self' https://cloudflareinsights.com`)
+  would block GitHub and deps.dev; a path would need per-path overrides in TimeDoco's repo.
+- **Deploys.** The two sites ship independently, with no changes to TimeDoco's Vite build.
+
+Steps: Cloudflare Pages → Create project → connect this repo → build command
+`node scripts/build-site.mjs`, output `dist` → Custom domains → `gitdoco.timedoco.com` (Cloudflare
+adds the CNAME when timedoco.com is on Cloudflare DNS). Optionally link to it from TimeDoco's
+footer or nav.
+
+### Open decisions
+
+- [ ] Name and address: "GitDoco" at `gitdoco.timedoco.com` are used in the page, canonical URL,
+      sitemap and social image; change them in `index.html`, `robots.txt` and `sitemap.xml` if
+      different.
+- [ ] Add a `LICENSE` file: `package.json` and the README say MIT but the repo has no license file.
+- [ ] Analytics: TimeDoco's marketing pages use Cloudflare Web Analytics; none is added here (the
+      CSP would need `static.cloudflareinsights.com`).
+

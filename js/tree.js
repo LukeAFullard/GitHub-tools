@@ -1,3 +1,4 @@
+import { externalLink } from './links.js';
 /**
  * Generates an ASCII directory topology from a list of relative file paths.
  */
@@ -78,7 +79,11 @@ const SVG_FILE = `<svg class="svg-icon" width="14" height="14" viewBox="0 0 24 2
 const SVG_CHEVRON_DOWN = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
 const SVG_CHEVRON_RIGHT = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
 
-export function renderInteractiveTree(nodes, container, onSelectionChange, largeThresholdKb = 50) {
+/**
+ * @param {object} [options]
+ * @param {(path: string) => (string|null)} [options.fileUrl] link for each file row (e.g. the file on GitHub)
+ */
+export function renderInteractiveTree(nodes, container, onSelectionChange, largeThresholdKb = 50, options = {}) {
     container.innerHTML = '';
 
     const root = { name: '', isDir: true, children: Object.create(null), path: '' };
@@ -170,6 +175,10 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
         label.appendChild(iconSpan);
         label.appendChild(nameSpan);
 
+        // Files link to their page on GitHub. Not a tab stop: the tree is navigated by rows.
+        const fileHref = !item.isDir && options.fileUrl ? options.fileUrl(item.path) : null;
+        const fileLink = fileHref ? externalLink(fileHref, '', { title: `Open ${item.path} on GitHub`, className: 'ext-link tree-file-link', focusable: false }) : null;
+
         const bytes = item.isDir ? calculateDirSize(item) : (item.size || 0);
         const pct = Math.max(4, Math.round((bytes / Math.max(1, maxSiblingBytes)) * 100));
 
@@ -200,6 +209,7 @@ export function renderInteractiveTree(nodes, container, onSelectionChange, large
 
         row.appendChild(checkbox);
         row.appendChild(label);
+        if (fileLink) row.appendChild(fileLink);
         row.appendChild(weightBg);
         row.appendChild(sizeBadge);
         li.appendChild(row);
