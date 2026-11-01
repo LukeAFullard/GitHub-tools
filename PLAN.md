@@ -8,8 +8,8 @@ went into this plan. Corrections to the original proposal are noted inline.
 | --- | --- | --- |
 | 1 | Bug fixes and polish (Code + Issues explorers) | Done |
 | 2 | Local `.zip` archives in the Code Explorer | Done |
-| 3 | Discussions Explorer tab (`discussions.html`) | Next |
-| 4 | Dependencies & licences tab (`deps.html`), slimmed down | Later |
+| 3 | Discussions Explorer tab (`discussions.html`) | Done |
+| 4 | Dependencies & licences tab (`deps.html`), slimmed down | Next |
 
 Phases 3 and 4 are swapped from the original proposal: Discussions reuses most of the Issues
 Explorer and fits the app's purpose (packing content for an AI); the licence auditor is larger,
@@ -63,24 +63,35 @@ riskier and further from that purpose.
 - [x] Tests: `tests/zip-loader.test.js` builds zips in memory and covers parsing, root stripping,
       symlinks, `__MACOSX`, errors, the expansion cap, redaction and formatter output.
 
-## Phase 3: Discussions Explorer (`discussions.html`, `js/discussions-app.js`)
+## Phase 3: Discussions Explorer (done)
 
-Checked: GitHub has a REST endpoint for repository discussions (a request for a repo with
-Discussions off returns `410 Discussions are disabled for this repo` and links to
-"List discussions for repository"). GitHub's GraphQL API always needs a token.
+Checked against GitHub's published API description and GraphQL schema: there is **no
+documented REST API** for repository discussions (the REST paths respond but are absent from
+GitHub's API description). GraphQL is the official route and always needs a token.
 
-- [ ] `js/github-discussions-api.js`
-  - REST (no token): list discussions and per-discussion comments, with the same paging,
-    rate-limit and `Retry-After` handling as `js/github-issues-api.js`.
-  - GraphQL (token only): discussions with category, upvotes, `isAnswered`, the accepted answer
-    and first comments in one query. Fall back to REST on any GraphQL error.
-  - Handle `410` (Discussions disabled) with a clear message.
-- [ ] `js/nav.js` and the `.page-tabs` header in every page: add `'discussions'`.
-- [ ] UI reusing the Issues Explorer: category filter, answered / unanswered filter, comment
-      scope (`All`, `Accepted answer only`, `Accepted answer + maintainers`, `Question only`).
-- [ ] Reuse `js/nlp.worker.js`, `js/issue-cleaner.js` and `js/secrets.js`; add discussion
-      formatters (accepted answer marked) in the four output formats.
-- [ ] Tests: fake-GitHub E2E flow like `tests/e2e/issues-flow.test.mjs`.
+- [x] `js/github-discussions-api.js`
+  - With a token: GraphQL. Lists 100 discussions per request; fetches comment threads (replies,
+    accepted answer, hidden comments dropped) for 10 discussions per request, paging long
+    threads. Queries validated against GitHub's published schema.
+  - Without a token: the undocumented REST endpoints, read using the `discussion` schema GitHub
+    publishes for webhooks; replies grouped by `parent_id`, the answer matched from
+    `answer_html_url`. The page says so and recommends a token.
+  - Clear errors for Discussions turned off (410 / `hasDiscussionsEnabled: false`), not found,
+    rate limits and a missing token.
+- [x] `discussions.html` + `js/discussions-app.js`: the Issues Explorer controller runs in a
+      discussions mode instead of a second copy of it. Category filter and clickable category
+      pills, answered / unanswered filter, upvotes, "answered" badge, comment scopes
+      `Question only` / `Answer` / `Answer + maintainers` / `Full thread`, settings saved under
+      `cfg_discussions_*`.
+- [x] Formatters: `kind: 'discussions'` gives discussion wording plus category, answered,
+      upvotes, `accepted_answer` and `reply_to` markers in all four formats. Issue output is
+      unchanged.
+- [x] "Discussions" tab on every page (`js/nav.js`).
+- [x] Tests: `tests/discussions.test.js` (API client, scopes, formatters) and
+      `tests/e2e/discussions-flow.test.mjs` (GraphQL and REST flows) against a fake GitHub.
+- [ ] Not verified against live GitHub data: this environment could not call the GitHub API
+      for other repositories. Try it on a public repo with Discussions (e.g. `whitphx/stlite`),
+      with and without a token.
 
 ## Phase 4: Dependencies & licences (`deps.html`), slimmed down
 

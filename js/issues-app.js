@@ -1,8 +1,11 @@
 /**
- * Controller for GitHub Issues Explorer & Context Packer (issues.html)
+ * Controller for the GitHub Issues Explorer (issues.html) and, in discussions mode, the
+ * Discussions Explorer (discussions.html). discussions.html loads js/discussions-app.js, which
+ * sets globalThis.__THREAD_EXPLORER_KIND__ = 'discussions' before importing this module.
  */
 import { parseRepoInput, fetchRateLimit, sleep } from './github-api.js';
 import { fetchIssuesManifest, fetchCommentsForIssues } from './github-issues-api.js';
+import { fetchDiscussionsManifest, fetchCommentsForDiscussions, estimateDiscussionCommentCost } from './github-discussions-api.js';
 import { processIssueThread, extractIssueReferences, filterIncludedComments } from './issue-cleaner.js';
 import { buildIssuesOutput, chunkIssuesOutput } from './issue-formatters.js';
 import { escapeXml } from './formatters.js';
@@ -15,6 +18,12 @@ import { buildSettingsSummary } from './settings-summary.js';
 import { commentCostHint } from './comment-cost.js';
 import { buildSummaryLines } from './ui-summary.js';
 import { buildTabHref } from './nav.js';
+
+export const KIND = globalThis.__THREAD_EXPLORER_KIND__ === 'discussions' ? 'discussions' : 'issues';
+const IS_DISCUSSIONS = KIND === 'discussions';
+const W = IS_DISCUSSIONS
+    ? { noun: 'discussions', Noun: 'Discussions', one: 'discussion', One: 'Discussion' }
+    : { noun: 'issues', Noun: 'Issues', one: 'issue', One: 'Issue' };
 
 let loadController = null;
 let buildController = null;
@@ -47,6 +56,8 @@ const dom = {
     drawerTokenLink: document.getElementById('drawerTokenLink'),
     tabCodeLink: document.getElementById('tabCodeLink'),
     tabIssuesLink: document.getElementById('tabIssuesLink'),
+    tabDiscussionsLink: document.getElementById('tabDiscussionsLink'),
+    categoryFilter: document.getElementById('categoryFilter'),
     branchTokenGroup: document.getElementById('branchTokenGroup'),
     repoUrl: document.getElementById('repoUrl'),
     switchToCodeLink: document.getElementById('switchToCodeLink'),
@@ -226,7 +237,7 @@ function setAppState(state) {
 
     if (dom.mobilePrimaryBtn) {
         dom.mobilePrimaryBtn.textContent = state === 'empty'
-            ? 'Load issues'
+            ? `Load ${W.noun}`
             : state === 'loaded'
                 ? 'Build context'
                 : getCopyButtonLabel(currentTargetKey, activeChunkIndex, generatedChunks.length);
@@ -263,12 +274,13 @@ if (dom.switchToCodeLink) {
 }
 
 // Navigation tab click listeners
-[dom.tabCodeLink, dom.tabIssuesLink].forEach(link => {
+[dom.tabCodeLink, dom.tabIssuesLink, dom.tabDiscussionsLink].forEach(link => {
     if (link) {
         link.addEventListener('click', () => {
             const repoVal = dom.repoUrl ? dom.repoUrl.value : '';
             if (dom.tabCodeLink) dom.tabCodeLink.href = buildTabHref('code', repoVal);
             if (dom.tabIssuesLink) dom.tabIssuesLink.href = buildTabHref('issues', repoVal);
+            if (dom.tabDiscussionsLink) dom.tabDiscussionsLink.href = buildTabHref('discussions', repoVal);
         });
     }
 });
@@ -352,7 +364,9 @@ if (dom.warningBannerTokenBtn) {
 }
 
 const VALID_FORMATS = ['claude-xml', 'markdown', 'generic-xml', 'json'];
-const VALID_COMMENT_SCOPES = ['all', 'maintainers', 'none'];
+const VALID_COMMENT_SCOPES = IS_DISCUSSIONS
+    ? ['all', 'answer-maintainers', 'answer', 'none']
+    : ['all', 'maintainers', 'none'];
 const VALID_ITEM_TYPES = ['issues', 'prs', 'both'];
 
 // cfg_target / cfg_format / cfg_chunkLimit / cfg_budgetWindow are shared with the Code Explorer
@@ -364,17 +378,17 @@ function loadSavedSettings() {
         if (dom.format && VALID_FORMATS.includes(get('cfg_format'))) dom.format.value = get('cfg_format');
         if (dom.chunkLimit && get('cfg_chunkLimit') !== null) dom.chunkLimit.value = get('cfg_chunkLimit');
         if (get('cfg_budgetWindow')) currentBudgetWindow = parseInt(get('cfg_budgetWindow'), 10) || 200000;
-        if (dom.redactSecrets && get('cfg_issues_redactSecrets') !== null) {
-            dom.redactSecrets.checked = get('cfg_issues_redactSecrets') !== 'false';
+        if (dom.redactSecrets && get(`cfg_${KIND}_redactSecrets`) !== null) {
+            dom.redactSecrets.checked = get(`cfg_${KIND}_redactSecrets`) !== 'false';
         }
-        if (dom.aggressiveRedact && get('cfg_issues_aggressiveRedact') !== null) {
-            dom.aggressiveRedact.checked = get('cfg_issues_aggressiveRedact') !== 'false';
+        if (dom.aggressiveRedact && get(`cfg_${KIND}_aggressiveRedact`) !== null) {
+            dom.aggressiveRedact.checked = get(`cfg_${KIND}_aggressiveRedact`) !== 'false';
         }
-        if (dom.commentScope && VALID_COMMENT_SCOPES.includes(get('cfg_issues_commentScope'))) {
-            dom.commentScope.value = get('cfg_issues_commentScope');
+        if (dom.commentScope && VALID_COMMENT_SCOPES.includes(get(`cfg_${KIND}_commentScope`))) {
+            dom.commentScope.value = get(`cfg_${KIND}_commentScope`);
         }
-        if (dom.aiInstructions && get('cfg_issues_aiInstructions') !== null) {
-            dom.aiInstructions.value = get('cfg_issues_aiInstructions');
+        if (dom.aiInstructions && get(`cfg_${KIND}_aiInstructions`) !== null) {
+            dom.aiInstructions.value = get(`cfg_${KIND}_aiInstructions`);
             if (dom.instructionsCharCount) dom.instructionsCharCount.textContent = `${dom.aiInstructions.value.length} chars`;
         }
     } catch (_) {}
@@ -385,10 +399,10 @@ function saveSettings() {
         if (dom.format) localStorage.setItem('cfg_format', dom.format.value);
         if (dom.chunkLimit) localStorage.setItem('cfg_chunkLimit', dom.chunkLimit.value);
         localStorage.setItem('cfg_budgetWindow', String(currentBudgetWindow));
-        if (dom.redactSecrets) localStorage.setItem('cfg_issues_redactSecrets', dom.redactSecrets.checked ? 'true' : 'false');
-        if (dom.aggressiveRedact) localStorage.setItem('cfg_issues_aggressiveRedact', dom.aggressiveRedact.checked ? 'true' : 'false');
-        if (dom.commentScope) localStorage.setItem('cfg_issues_commentScope', dom.commentScope.value);
-        if (dom.aiInstructions) localStorage.setItem('cfg_issues_aiInstructions', dom.aiInstructions.value);
+        if (dom.redactSecrets) localStorage.setItem(`cfg_${KIND}_redactSecrets`, dom.redactSecrets.checked ? 'true' : 'false');
+        if (dom.aggressiveRedact) localStorage.setItem(`cfg_${KIND}_aggressiveRedact`, dom.aggressiveRedact.checked ? 'true' : 'false');
+        if (dom.commentScope) localStorage.setItem(`cfg_${KIND}_commentScope`, dom.commentScope.value);
+        if (dom.aiInstructions) localStorage.setItem(`cfg_${KIND}_aiInstructions`, dom.aiInstructions.value);
     } catch (_) {}
 }
 
@@ -556,6 +570,7 @@ function getFilteredIssues() {
     const q = (dom.issueSearchInput.value || '').trim().toLowerCase();
     const stateVal = dom.stateFilter.value;
     const labelVal = dom.labelFilter.value;
+    const categoryVal = dom.categoryFilter ? dom.categoryFilter.value : '';
     const sortVal = dom.sortFilter.value;
     const dateFrom = dom.dateFromFilter.value;
     const dateTo = dom.dateToFilter.value;
@@ -568,6 +583,9 @@ function getFilteredIssues() {
         if (stateVal === 'closed' && iss.state !== 'closed') return false;
         if (stateVal === 'completed' && (iss.state !== 'closed' || iss.stateReason !== 'completed')) return false;
         if (stateVal === 'not_planned' && (iss.state !== 'closed' || iss.stateReason !== 'not_planned')) return false;
+        if (stateVal === 'answered' && !iss.isAnswered) return false;
+        if (stateVal === 'unanswered' && (!iss.isAnswerable || iss.isAnswered)) return false;
+        if (categoryVal && iss.category !== categoryVal) return false;
 
         if (labelVal && !iss.labels.includes(labelVal)) return false;
         const createdLocal = localDateString(iss.createdAtIso) || iss.createdAt;
@@ -635,7 +653,7 @@ function updateBudgetMeterUI(totalTokens, numChunks = 1, isPreBuild = false, max
     let text;
     let status = level;
     if (isPreBuild && totalTokens === 0) {
-        text = 'Select issues to estimate size';
+        text = `Select ${W.noun} to estimate size`;
         status = 'fits';
     } else if (isPreBuild && isSplit && chunkLimitVal > 0) {
         text = `About ${totalTokens.toLocaleString()} tokens (bodies only), will split into about ${Math.ceil(totalTokens / chunkLimitVal)} parts`;
@@ -652,7 +670,7 @@ function updateBudgetMeterUI(totalTokens, numChunks = 1, isPreBuild = false, max
     } else if (ratio <= 1.0) {
         text = 'Near target budget';
     } else {
-        text = `Over budget by ${(totalTokens - currentBudgetWindow).toLocaleString()} tokens. Split into parts or deselect issues.`;
+        text = `Over budget by ${(totalTokens - currentBudgetWindow).toLocaleString()} tokens. Split into parts or deselect ${W.noun}.`;
     }
     dom.budgetStatusText.textContent = text;
     dom.budgetStatusText.className = `budget-status-text status-${status}`;
@@ -691,7 +709,7 @@ function updateSelectionTelemetry() {
     const hiddenNums = selectedList.filter(i => !visibleNums.has(i.number)).map(i => i.number);
     if (dom.hiddenSelectedNote) {
         dom.hiddenSelectedNote.textContent = hiddenNums.length > 0
-            ? `${hiddenNums.length} selected issue(s) are hidden by the current filters.`
+            ? `${hiddenNums.length} selected ${W.one}(s) are hidden by the current filters.`
             : '';
         if (hiddenNums.length > 0) {
             const clearBtn = document.createElement('button');
@@ -710,8 +728,16 @@ function updateSelectionTelemetry() {
     if (dom.commentCostHint) {
         const cachedNumbers = new Set(cachedCommentsByIssue.keys());
         const scope = dom.commentScope ? dom.commentScope.value : 'all';
-        const cost = commentCostHint(selectedList, allIssues, cachedNumbers, scope);
-        dom.commentCostHint.textContent = cost.text;
+        if (IS_DISCUSSIONS) {
+            const needs = scope === 'none' ? [] : selectedList.filter(i => i.commentsCount > 0 && !cachedNumbers.has(i.number));
+            const n = estimateDiscussionCommentCost(needs, Boolean(dom.pat.value.trim()));
+            dom.commentCostHint.textContent = scope === 'none' ? 'No extra requests.'
+                : needs.length === 0 ? 'Comments already loaded.'
+                    : `About ${n} GitHub request${n === 1 ? '' : 's'}.`;
+        } else {
+            const cost = commentCostHint(selectedList, allIssues, cachedNumbers, scope);
+            dom.commentCostHint.textContent = cost.text;
+        }
     }
 }
 
@@ -737,13 +763,13 @@ function renderIssuesList() {
         li.tabIndex = 0;
         li.setAttribute('role', 'checkbox');
         li.setAttribute('aria-checked', selectedIssueNumbers.has(iss.number) ? 'true' : 'false');
-        li.setAttribute('aria-label', `Issue #${iss.number}: ${iss.title}`);
+        li.setAttribute('aria-label', `${W.One} #${iss.number}: ${iss.title}`);
 
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.className = 'issue-checkbox';
         cb.checked = selectedIssueNumbers.has(iss.number);
-        cb.setAttribute('aria-label', `Select issue #${iss.number}`);
+        cb.setAttribute('aria-label', `Select ${W.one} #${iss.number}`);
         cb.tabIndex = -1; // row is focused for keyboard navigation
 
         cb.addEventListener('change', (e) => {
@@ -784,6 +810,11 @@ function renderIssuesList() {
                 : isNotPlanned ? 'issue-state-not-planned' : 'issue-state-closed';
         badge.className = `issue-state-badge ${stateClass}`;
         badge.textContent = isMerged ? 'merged' : isNotPlanned ? 'not planned' : iss.state;
+        if (IS_DISCUSSIONS && iss.isAnswered) {
+            badge.className = 'issue-state-badge issue-state-answered';
+            badge.textContent = 'answered';
+            badge.title = iss.state === 'closed' ? 'Answered (closed)' : 'Answered';
+        }
 
         const kindParts = [];
         if (iss.isPullRequest) {
@@ -823,7 +854,24 @@ function renderIssuesList() {
         metaRow.className = 'issue-meta-row';
         metaRow.innerHTML = `<span>@${escapeXml(iss.author)}</span><span>• ${escapeXml(localDateString(iss.createdAtIso) || iss.createdAt)}</span><span>• 💬 ${iss.commentsCount}</span>`;
         if (iss.reactionsTotal > 0) {
-            metaRow.innerHTML += `<span>• 👍 ${iss.reactionsTotal}</span>`;
+            metaRow.innerHTML += IS_DISCUSSIONS
+                ? `<span title="Upvotes">• ▲ ${iss.reactionsTotal}</span>`
+                : `<span>• 👍 ${iss.reactionsTotal}</span>`;
+        }
+        if (IS_DISCUSSIONS && iss.category) {
+            const catBtn = document.createElement('button');
+            catBtn.type = 'button';
+            catBtn.className = 'issue-label-pill issue-category-pill';
+            catBtn.textContent = iss.category;
+            const isActiveCat = dom.categoryFilter && dom.categoryFilter.value === iss.category;
+            catBtn.title = isActiveCat ? 'Clear category filter' : `Filter by category "${iss.category}"`;
+            catBtn.setAttribute('aria-pressed', isActiveCat ? 'true' : 'false');
+            catBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (dom.categoryFilter) dom.categoryFilter.value = isActiveCat ? '' : iss.category;
+                renderIssuesList();
+            });
+            metaRow.appendChild(catBtn);
         }
 
         for (const lbl of iss.labels.slice(0, 4)) {
@@ -847,7 +895,7 @@ function renderIssuesList() {
             const simBtn = document.createElement('button');
             simBtn.type = 'button';
             simBtn.className = 'issue-sim-badge';
-            simBtn.title = `Click to also select similar issue(s): ${simList.map(n => '#' + n).join(', ')}`;
+            simBtn.title = `Click to also select similar ${W.one}(s): ${simList.map(n => '#' + n).join(', ')}`;
             simBtn.textContent = `~${simList.length} similar (${simList.slice(0, 2).map(n => '#' + n).join(', ')})`;
             simBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -855,7 +903,7 @@ function renderIssuesList() {
                 simList.forEach(n => selectedIssueNumbers.add(n));
                 renderIssuesList();
                 updateSelectionTelemetry();
-                showToast(`Selected #${iss.number} and ${simList.length} similar issue(s).`, 'info');
+                showToast(`Selected #${iss.number} and ${simList.length} similar ${W.one}(s).`, 'info');
             });
             metaRow.appendChild(simBtn);
         }
@@ -869,7 +917,7 @@ function renderIssuesList() {
     updateSelectionTelemetry();
 }
 
-[dom.issueSearchInput, dom.stateFilter, dom.labelFilter, dom.sortFilter, dom.dateFromFilter, dom.dateToFilter, dom.minCommentsFilter].forEach(el => {
+[dom.issueSearchInput, dom.stateFilter, dom.labelFilter, dom.categoryFilter, dom.sortFilter, dom.dateFromFilter, dom.dateToFilter, dom.minCommentsFilter].forEach(el => {
     if (el) el.addEventListener('input', renderIssuesList);
 });
 
@@ -912,7 +960,7 @@ function renderNlpBanner() {
         return;
     }
     dom.nlpBanner.style.display = 'flex';
-    dom.nlpMetaBadge.textContent = `${nlpResults.clusters.length} clusters, ${nlpResults.ngrams.length} key phrases across ${allIssues.length} issues`;
+    dom.nlpMetaBadge.textContent = `${nlpResults.clusters.length} clusters, ${nlpResults.ngrams.length} key phrases across ${allIssues.length} ${W.noun}`;
 
     dom.topicClustersContainer.innerHTML = '';
     for (const c of nlpResults.clusters) {
@@ -965,7 +1013,7 @@ dom.selectActiveTopicBtn.addEventListener('click', () => {
         selectedIssueNumbers.add(num);
     }
     renderIssuesList();
-    showToast(`Selected ${activeTopicFilter.numbers.size} issues in "${activeTopicFilter.label}".`, 'info');
+    showToast(`Selected ${activeTopicFilter.numbers.size} ${W.noun} in "${activeTopicFilter.label}".`, 'info');
 });
 
 dom.selectAllVisibleBtn.addEventListener('click', () => {
@@ -996,7 +1044,7 @@ dom.selectLinkedBtn.addEventListener('click', () => {
         }
     }
     renderIssuesList();
-    showToast(added > 0 ? `Added ${added} cross-referenced issue(s).` : 'No new linked issues found in current selection.', 'info');
+    showToast(added > 0 ? `Added ${added} cross-referenced ${W.one}(s).` : `No new linked ${W.noun} found in current selection.`, 'info');
 });
 
 dom.loadIssuesBtn.addEventListener('click', async () => {
@@ -1034,12 +1082,13 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
     updateProgressBar(5);
 
     const maxItems = parseInt(dom.maxIssuesLimit.value, 10) || 300;
-    const itemType = dom.includePrs.value;
+    const itemType = IS_DISCUSSIONS ? 'discussions' : dom.includePrs.value;
     const pat = dom.pat.value.trim();
 
     try {
         log(`[FETCH] Loading up to ${maxItems} ${itemType} from ${repoInfo.owner}/${repoInfo.repo}...`);
-        const manifest = await fetchIssuesManifest(repoInfo.owner, repoInfo.repo, {
+        const fetchManifest = IS_DISCUSSIONS ? fetchDiscussionsManifest : fetchIssuesManifest;
+        const manifest = await fetchManifest(repoInfo.owner, repoInfo.repo, {
             maxItems,
             itemType,
             pat,
@@ -1047,6 +1096,11 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
             onHeaders: updateRateLimitUI,
             onProgress: (loaded, total) => updateProgressBar((loaded / total) * 100)
         });
+        if (IS_DISCUSSIONS) {
+            log(manifest.source === 'graphql'
+                ? '[FETCH] Using GitHub GraphQL API (token).'
+                : "[WARN] No token: using GitHub's undocumented token-free discussions endpoint. Add a token for the official API, accepted answers and fewer requests.");
+        }
 
         allIssues = manifest;
         const openOnes = allIssues.filter(i => i.state === 'open');
@@ -1058,6 +1112,13 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
             for (const l of iss.labels) labelCounts.set(l, (labelCounts.get(l) || 0) + 1);
         }
         const sortedLabels = Array.from(labelCounts.entries()).sort((a, b) => b[1] - a[1]);
+        if (dom.categoryFilter) {
+            const catCounts = new Map();
+            for (const iss of allIssues) if (iss.category) catCounts.set(iss.category, (catCounts.get(iss.category) || 0) + 1);
+            const cats = Array.from(catCounts.entries()).sort((a, b) => b[1] - a[1]);
+            dom.categoryFilter.innerHTML = `<option value="">Category: All (${cats.length})</option>` +
+                cats.map(([c, cnt]) => `<option value="${escapeXml(c)}">${escapeXml(c)} (${cnt})</option>`).join('');
+        }
         dom.labelFilter.innerHTML = `<option value="">Label: All labels (${sortedLabels.length})</option>` +
             sortedLabels.map(([l, cnt]) => `<option value="${escapeXml(l)}">${escapeXml(l)} (${cnt})</option>`).join('');
 
@@ -1071,7 +1132,9 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
 
         if (manifest.stoppedEarly) {
             log(`[WARN] Reached scan limit (30 pages). Found ${allIssues.length} items.`);
-            showToast(`Scanned 30 pages, found ${allIssues.length} items. Raise limit or select 'Issues & PRs'.`, 'warn');
+            showToast(IS_DISCUSSIONS
+                ? `Scanned 30 pages, found ${allIssues.length} discussions. Raise the limit to scan more.`
+                : `Scanned 30 pages, found ${allIssues.length} items. Raise limit or select 'Issues & PRs'.`, 'warn');
             showPersistentWarning(`Reached scan limit (30 pages). Scanned ${allIssues.length} items. Output may be incomplete.`, {
                 showTokenBtn: !dom.pat.value.trim(),
                 showRetryBtn: true,
@@ -1086,6 +1149,10 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
             log('[CANCEL] Manifest load cancelled.');
         } else {
             log(`[ERROR] ${err.message}`);
+            if (err.disabled) {
+                showToast(err.message, 'error');
+                return;
+            }
             if (err.isRateLimit || (err.message && (err.message.includes('rate limit') || err.message.includes('403') || err.message.includes('429')))) {
                 showTokenPanel('');
             } else if (err.status === 404 || (err.message && err.message.includes('404'))) {
@@ -1150,7 +1217,7 @@ async function buildSelectedContext(summaryOnly = false) {
         : allIssues.filter(i => selectedIssueNumbers.has(i.number));
 
     if (targetIssues.length === 0) {
-        showToast('Select at least one issue first.', 'warn');
+        showToast(`Select at least one ${W.one} first.`, 'warn');
         return;
     }
 
@@ -1174,8 +1241,9 @@ async function buildSelectedContext(summaryOnly = false) {
             updateProgressBar(0);
 
             try {
-                log(`[FETCH] Fetching comment threads for ${missingComments.length} issue(s)...`);
-                const { commentsByIssue: fetchedMap, failures, stats: fetchStats } = await fetchCommentsForIssues(currentRepoInfo.owner, currentRepoInfo.repo, missingComments, {
+                log(`[FETCH] Fetching comment threads for ${missingComments.length} ${W.one}(s)...`);
+                const fetchComments = IS_DISCUSSIONS ? fetchCommentsForDiscussions : fetchCommentsForIssues;
+                const { commentsByIssue: fetchedMap, failures, stats: fetchStats } = await fetchComments(currentRepoInfo.owner, currentRepoInfo.repo, missingComments, {
                     pat,
                     signal: buildController.signal,
                     universe: allIssues,
@@ -1190,7 +1258,7 @@ async function buildSelectedContext(summaryOnly = false) {
                 if (thisBuildGen !== buildGeneration) return;
                 if (fetchStats) {
                     if (fetchStats.rateLimited) lastFetchRateLimited = true;
-                    log(`[FETCH] ${fetchStats.strategy}: ~${fetchStats.requests} request(s) (per-issue estimate was ${fetchStats.perIssueRequestsEstimate}).`);
+                    log(`[FETCH] ${fetchStats.strategy}: ~${fetchStats.requests} request(s) (per-${W.one} estimate was ${fetchStats.perIssueRequestsEstimate}).`);
                 }
                 for (const [num, comms] of fetchedMap.entries()) {
                     cachedCommentsByIssue.set(num, comms);
@@ -1307,7 +1375,8 @@ async function buildSelectedContext(summaryOnly = false) {
         instructions: dom.aiInstructions.value,
         includeNlpSummary: summaryOnly ? true : dom.includeNlpSummary.checked,
         nlpData: nlpResults,
-        nlpScope: targetIssues.map(i => i.number)
+        nlpScope: targetIssues.map(i => i.number),
+        kind: KIND
     };
 
     generatedChunks = chunkIssuesOutput(
@@ -1400,7 +1469,7 @@ async function buildSelectedContext(summaryOnly = false) {
         });
 
         const summaryLines = buildSummaryLines({
-            kind: 'issues',
+            kind: KIND,
             items: targetIssues.length,
             comments: totalCommentsIncluded,
             tokens: totalTokens,
@@ -1418,7 +1487,7 @@ async function buildSelectedContext(summaryOnly = false) {
     }
 
     setAppState('built');
-    log(`[SUCCESS] Packed ${targetIssues.length} issues & ${totalCommentsIncluded} comments (~${totalTokens.toLocaleString()} tokens).`);
+    log(`[SUCCESS] Packed ${targetIssues.length} ${W.noun} & ${totalCommentsIncluded} comments (~${totalTokens.toLocaleString()} tokens).`);
 }
 
 function updateSecretsPanel(rows, flaggedNumbers) {
@@ -1446,11 +1515,11 @@ function updateSecretsPanel(rows, flaggedNumbers) {
 
     if (presentCount > 0) {
         const hint = (!isAggressiveOn && isRedactOn)
-            ? ' (enable Aggressive redaction or deselect issue)'
-            : ' (enable Redact secrets or deselect issue)';
-        dom.secretsWarningSummary.textContent = `${rows.length} secret(s) in ${flaggedNumbers.size} issue(s): ${redactedCount} redacted, ${presentCount} still present${hint}.`;
+            ? ` (enable Aggressive redaction or deselect ${W.one})`
+            : ` (enable Redact secrets or deselect ${W.one})`;
+        dom.secretsWarningSummary.textContent = `${rows.length} secret(s) in ${flaggedNumbers.size} ${W.one}(s): ${redactedCount} redacted, ${presentCount} still present${hint}.`;
     } else {
-        dom.secretsWarningSummary.textContent = `${rows.length} secret(s) in ${flaggedNumbers.size} issue(s) (all redacted).`;
+        dom.secretsWarningSummary.textContent = `${rows.length} secret(s) in ${flaggedNumbers.size} ${W.one}(s) (all redacted).`;
     }
 
     dom.secretsTableBody.innerHTML = rowData.map(r => `
@@ -1695,15 +1764,15 @@ function triggerDownload(content, filename, mimeType) {
 }
 
 dom.downloadBtn.addEventListener('click', () => {
-    const repoName = currentRepoInfo ? currentRepoInfo.repo : 'issues';
+    const repoName = currentRepoInfo ? currentRepoInfo.repo : W.noun;
     const suffix = generatedChunks.length > 1 ? `-part${activeChunkIndex + 1}-of-${generatedChunks.length}` : '';
-    triggerDownload(packedOutputText, `${repoName}-issues${suffix}.${outputExt}`, outputMime);
+    triggerDownload(packedOutputText, `${repoName}-${W.noun}${suffix}.${outputExt}`, outputMime);
 });
 
 dom.downloadAllBtn.addEventListener('click', async () => {
-    const repoName = currentRepoInfo ? currentRepoInfo.repo : 'issues';
+    const repoName = currentRepoInfo ? currentRepoInfo.repo : W.noun;
     for (let i = 0; i < generatedChunks.length; i++) {
-        triggerDownload(generatedChunks[i].text, `${repoName}-issues-part${i + 1}-of-${generatedChunks.length}.${generatedChunks[i].ext}`, generatedChunks[i].mime);
+        triggerDownload(generatedChunks[i].text, `${repoName}-${W.noun}-part${i + 1}-of-${generatedChunks.length}.${generatedChunks[i].ext}`, generatedChunks[i].mime);
         await sleep(150);
     }
 });
@@ -1715,7 +1784,7 @@ dom.copyBtn.addEventListener('click', async () => {
         if (numParts > 1) {
             showToast(`Copied part ${activeChunkIndex + 1} of ${numParts}. Pick the next part from the Part menu.`, 'info');
         } else {
-            showToast('Copied issues context to clipboard!', 'info');
+            showToast(`Copied ${W.noun} context to clipboard!`, 'info');
         }
         dom.copyBtn.textContent = 'Copied!';
         setTimeout(() => updateCopyBtnLabel(activeChunkIndex), 2000);
@@ -1792,6 +1861,8 @@ if (VALID_FORMATS.includes(urlParams.get('format'))) {
 updateSettingsSummary();
 updateCopyBtnLabel(0);
 setAppState('empty');
+// The token field starts open on the Discussions page; its help text explains why (official API).
+if (IS_DISCUSSIONS) showTokenPanel('');
 
 // Settings drawer token link
 if (dom.drawerTokenLink) {

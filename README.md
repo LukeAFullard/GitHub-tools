@@ -1,4 +1,4 @@
-# GitHub Repo Context Packer & Issues Explorer
+# GitHub Repo Context Packer, Issues & Discussions Explorer
 
 A zero-install, 100% client-side web application that fetches, filters, cleans, and formats source code and issue threads from any public or private GitHub repository into an LLM-ready context file (Claude XML, Markdown, Generic XML, or JSON).
 
@@ -6,7 +6,10 @@ A zero-install, 100% client-side web application that fetches, filters, cleans, 
 
 - **100% Client-Side Privacy:** Direct browser-to-GitHub API connection. Personal Access Tokens (PATs) and fine-grained PATs (`github_pat_`) remain strictly in memory.
 - **Local `.zip` Archives (no token needed):** Click **Open .zip** or drop a repository `.zip` (e.g. GitHub's "Download ZIP") anywhere on the Code page. The archive is read in your browser and never uploaded: only its file list is read up front, and each selected file is unzipped on demand. Supports Deflate and Store compression and ZIP64 (very large archives); password-protected archives are not supported.
-- **Dual Tool Modes:** Switch seamlessly between **Code Packer** (source tree packaging) and **Issues Explorer** (issue thread triage & context packaging).
+- **Three Tools:** Switch between **Code Packer** (source tree packaging), **Issues Explorer** (issue thread triage & context packaging) and **Discussions Explorer** (GitHub Discussions Q&A and ideas).
+- **Discussions Explorer:** Filter by category and by answered / unanswered questions, then pack the question only, the accepted answer only, the answer plus the author's and maintainers' replies, or the full thread. Accepted answers and threaded replies are marked in every output format.
+  - **With a token** it uses GitHub's official GraphQL API (about 10 discussion threads per request). For public repos a token with no permissions is enough.
+  - **Without a token** it falls back to GitHub's REST discussions endpoints. These are not in GitHub's published API documentation, so they may change without notice.
 - **Interactive File Selection & Issue Filtering:**
   - **Code Packer:** Interactive directory tree to select or deselect files and folders before fetching contents.
   - **Issues Explorer:** Multi-dimensional filters (state, labels, dates, comment counts, search, and cross-referenced `#refs`).
@@ -61,6 +64,7 @@ Navigate to `http://localhost:8000` in your web browser.
 .
 ├── index.html          # Code Packer Web interface
 ├── issues.html         # GitHub Issues Explorer Web interface
+├── discussions.html    # GitHub Discussions Explorer Web interface
 ├── css/
 │   ├── issues.css      # Issues explorer & mode switcher UI styling
 │   └── style.css       # Clean, modern UI styling
@@ -69,10 +73,12 @@ Navigate to `http://localhost:8000` in your web browser.
     ├── config.js       # Global constants, default ignore lists, API endpoints
     ├── formatters.js   # Code LLM context output formatters (XML, MD, JSON)
     ├── github-api.js   # GitHub API fetch logic & rate-limit handling
+    ├── discussions-app.js # Entry for discussions.html (runs issues-app.js in discussions mode)
+    ├── github-discussions-api.js # Discussions client: GraphQL with a token, REST fallback without
     ├── github-issues-api.js # GitHub Issues & comments API client
     ├── issue-cleaner.js # Issue sanitization, bot filtering, log truncation engine
     ├── issue-formatters.js # Issue LLM context output formatters & chunking
-    ├── issues-app.js   # Controller for issues.html UI
+    ├── issues-app.js   # Controller for issues.html and discussions.html
     ├── minifier.js     # Code minification & comment stripping engine
     ├── nlp.worker.js   # Web Worker for N-grams & TF-IDF Cosine K-Means clustering
     ├── secrets.js      # Client-side secret scanning and redaction engine

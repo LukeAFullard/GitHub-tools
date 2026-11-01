@@ -2,9 +2,9 @@
  * Builds summary lines for the build summary card.
  *
  * @param {Object} options
- * @param {string} options.kind - 'issues' or 'files'
+ * @param {string} options.kind - 'issues', 'discussions' or 'files'
  * @param {number} options.items - Number of items included
- * @param {number} [options.comments] - Number of comments included (when kind === 'issues')
+ * @param {number} [options.comments] - Number of comments included (issues and discussions)
  * @param {number} options.tokens - Estimated tokens
  * @param {number} [options.parts] - Number of output parts
  * @param {number} [options.secretsHidden] - Number of hidden secrets
@@ -22,8 +22,9 @@ export function buildSummaryLines({
 } = {}) {
     const lines = [];
 
-    let line1 = `${items} ${kind === 'issues' ? 'issues' : 'files'} included`;
-    if (kind === 'issues') {
+    const hasComments = kind === 'issues' || kind === 'discussions';
+    let line1 = `${items} ${hasComments ? kind : 'files'} included`;
+    if (hasComments) {
         line1 += ` · ${comments} comments`;
     }
     lines.push(line1);

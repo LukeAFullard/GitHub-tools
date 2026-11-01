@@ -118,13 +118,21 @@ export function sanitizeIssueText(rawText, options = {}, contextPath = 'issue') 
  * both look at the same set of comments.
  */
 export function filterIncludedComments(issue, rawComments = [], options = {}) {
+    // Scopes: 'all' | 'maintainers' | 'none', plus for discussions 'answer' (accepted answer only)
+    // and 'answer-maintainers' (accepted answer, the author and maintainers).
     const { commentScope = 'all', filterBots = true, filterNoise = true } = options;
     const stats = { bots: 0, scope: 0, noise: 0 };
     const kept = [];
     if (commentScope === 'none' || !Array.isArray(rawComments)) return { kept, stats };
     for (const c of rawComments) {
+        if (commentScope === 'answer') {
+            if (c.isAnswer) kept.push(c); else stats.scope++;
+            continue;
+        }
+        // The accepted answer is always kept: it is the most useful comment in the thread.
+        if (c.isAnswer) { kept.push(c); continue; }
         if (filterBots && isBotUser(c.author, c.authorType)) { stats.bots++; continue; }
-        if (commentScope === 'maintainers') {
+        if (commentScope === 'maintainers' || commentScope === 'answer-maintainers') {
             const isAuthor = c.author === issue.author;
             const isMaintainer = AUTHORITATIVE_ROLES.has(c.authorAssociation);
             if (!isAuthor && !isMaintainer) { stats.scope++; continue; }
@@ -172,7 +180,10 @@ export function processIssueThread(issue, rawComments = [], options = {}) {
             role: c.authorAssociation || 'NONE',
             createdAt: c.createdAt,
             reactionsPlusOne: c.reactionsPlusOne || 0,
-            body: cleanedCommentBody
+            body: cleanedCommentBody,
+            // Discussion-only fields, added only when set so issue output is unchanged.
+            ...(c.isAnswer ? { isAnswer: true } : {}),
+            ...(c.replyToId ? { replyTo: c.replyToAuthor || 'ghost' } : {})
         });
     }
 

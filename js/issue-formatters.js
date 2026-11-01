@@ -3,7 +3,28 @@
  */
 import { escapeXml, escapeCdata, stripXmlInvalidChars, getMarkdownFence } from './formatters.js';
 
-function formatNlpOverviewText(nlpData, selectedIssues, scopeNumbers = null) {
+/**
+ * Wording for the two thread kinds. options.kind === 'discussions' switches every formatter to
+ * discussion wording and adds category / answered / accepted-answer / reply markers; issue
+ * output is unchanged.
+ */
+function kindOf(options) {
+    const isDiscussions = options && options.kind === 'discussions';
+    return {
+        isDiscussions,
+        noun: isDiscussions ? 'discussions' : 'issues',
+        Noun: isDiscussions ? 'Discussions' : 'Issues',
+        One: isDiscussions ? 'Discussion' : 'Issue',
+        one: isDiscussions ? 'discussion' : 'issue'
+    };
+}
+
+function answeredText(iss) {
+    if (!iss.isAnswerable) return '';
+    return iss.isAnswered ? 'yes' : 'no';
+}
+
+function formatNlpOverviewText(nlpData, selectedIssues, scopeNumbers = null, noun = 'issues') {
     if (!nlpData || (!nlpData.clusters?.length && !nlpData.ngrams?.length)) return '';
     const selectedSet = new Set(scopeNumbers || selectedIssues.map(i => i.number));
     let lines = [];
@@ -15,7 +36,7 @@ function formatNlpOverviewText(nlpData, selectedIssues, scopeNumbers = null) {
             if (inSel.length > 0) {
                 if (!headerAdded) { lines.push('Topic Clusters (in selection / total scanned):'); headerAdded = true; }
                 const sampleRefs = inSel.slice(0, 8).map(n => `#${n}`).join(', ');
-                lines.push(`  - [${c.label}] (${inSel.length}/${c.count} issues): ${sampleRefs}${inSel.length > 8 ? '...' : ''}`);
+                lines.push(`  - [${c.label}] (${inSel.length}/${c.count} ${noun}): ${sampleRefs}${inSel.length > 8 ? '...' : ''}`);
             }
         }
     }
@@ -33,15 +54,20 @@ function formatNlpOverviewText(nlpData, selectedIssues, scopeNumbers = null) {
     return lines.join('\n');
 }
 
+function commentAttrs(c) {
+    return `${c.isAnswer ? ' accepted_answer="true"' : ''}${c.replyTo ? ` reply_to="${escapeXml(c.replyTo)}"` : ''}`;
+}
+
 export function formatIssuesClaudeXml(repoInfo, issues, options = {}) {
     const startIndex = options.startIndex || 1;
-    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues, options.nlpScope) : '';
+    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues, options.nlpScope, kindOf(options).noun) : '';
 
     const failedCount = issues.filter(i => i.commentsFetchFailed).length;
     const truncatedCount = issues.filter(i => i.commentsTruncated).length;
 
+    const k = kindOf(options);
     let doc = `<documents>\n`;
-    doc += `  <!-- Global Repository Issues Context -->\n`;
+    doc += `  <!-- Global Repository ${k.Noun} Context -->\n`;
     doc += `  <context>\n`;
     if (options.partNote) {
         doc += `    <note>${escapeXml(options.partNote)}</note>\n`;
@@ -50,24 +76,28 @@ export function formatIssuesClaudeXml(repoInfo, issues, options = {}) {
         doc += `    <warnings>${failedCount > 0 ? `${failedCount} thread(s) failed to fetch comments. ` : ''}${truncatedCount > 0 ? `${truncatedCount} thread(s) truncated at API page limit.` : ''}</warnings>\n`;
     }
     doc += `    <repository>${escapeXml(`${repoInfo.owner}/${repoInfo.repo}`)}</repository>\n`;
-    doc += `    <issue_count>${issues.length}</issue_count>\n`;
+    doc += `    <${k.one}_count>${issues.length}</${k.one}_count>\n`;
     if (nlpOverview) {
         doc += `    <nlp_overview>\n${escapeXml(nlpOverview)}\n    </nlp_overview>\n`;
     }
     doc += `  </context>\n\n`;
 
     issues.forEach((iss, idx) => {
-        doc += `  <document index="${startIndex + idx}" issue_number="${iss.number}">\n`;
-        doc += `    <source>Issue #${iss.number}: ${escapeXml(iss.title)}</source>\n`;
+        doc += `  <document index="${startIndex + idx}" ${k.one}_number="${iss.number}">\n`;
+        doc += `    <source>${k.One} #${iss.number}: ${escapeXml(iss.title)}</source>\n`;
         doc += `    <metadata>\n`;
         doc += `      <state>${escapeXml(iss.state)}${iss.stateReason ? ` (${escapeXml(iss.stateReason)})` : ''}</state>\n`;
         doc += `      <author role="${escapeXml(iss.authorAssociation)}">${escapeXml(iss.author)}</author>\n`;
         doc += `      <created_at>${escapeXml(iss.createdAt)}</created_at>\n`;
         if (iss.closedAt) doc += `      <closed_at>${escapeXml(iss.closedAt)}</closed_at>\n`;
+        if (k.isDiscussions && iss.category) doc += `      <category>${escapeXml(iss.category)}</category>\n`;
+        if (k.isDiscussions && answeredText(iss)) doc += `      <answered>${answeredText(iss)}</answered>\n`;
         if (iss.labels && iss.labels.length > 0) {
             doc += `      <labels>${escapeXml(iss.labels.join(', '))}</labels>\n`;
         }
-        if (iss.reactionsTotal > 0) {
+        if (k.isDiscussions) {
+            if (iss.reactionsTotal > 0) doc += `      <upvotes>${iss.reactionsTotal}</upvotes>\n`;
+        } else if (iss.reactionsTotal > 0) {
             doc += `      <reactions total="${iss.reactionsTotal}" plus_one="${iss.reactionsPlusOne}" />\n`;
         }
         if (iss.relatedIssues && iss.relatedIssues.length > 0) {
@@ -83,13 +113,13 @@ export function formatIssuesClaudeXml(repoInfo, issues, options = {}) {
 
         doc += `    <document_content>\n`;
         const bodyClean = stripXmlInvalidChars(iss.cleanedBody || '(No description provided)');
-        doc += `      <issue_body>\n<![CDATA[\n${escapeCdata(bodyClean)}\n]]>\n      </issue_body>\n`;
+        doc += `      <${k.one}_body>\n<![CDATA[\n${escapeCdata(bodyClean)}\n]]>\n      </${k.one}_body>\n`;
 
         if (iss.cleanedComments && iss.cleanedComments.length > 0) {
             doc += `      <comments count="${iss.cleanedComments.length}">\n`;
             iss.cleanedComments.forEach((c, cIdx) => {
                 const cClean = stripXmlInvalidChars(c.body);
-                doc += `        <comment index="${cIdx + 1}" author="${escapeXml(c.author)}" role="${escapeXml(c.role)}" date="${escapeXml(c.createdAt)}">\n<![CDATA[\n${escapeCdata(cClean)}\n]]>\n        </comment>\n`;
+                doc += `        <comment index="${cIdx + 1}" author="${escapeXml(c.author)}" role="${escapeXml(c.role)}" date="${escapeXml(c.createdAt)}"${commentAttrs(c)}>\n<![CDATA[\n${escapeCdata(cClean)}\n]]>\n        </comment>\n`;
             });
             doc += `      </comments>\n`;
         }
@@ -107,7 +137,7 @@ export function formatIssuesClaudeXml(repoInfo, issues, options = {}) {
 }
 
 export function formatIssuesMarkdown(repoInfo, issues, options = {}) {
-    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues, options.nlpScope) : '';
+    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues, options.nlpScope, kindOf(options).noun) : '';
     const failedCount = issues.filter(i => i.commentsFetchFailed).length;
     const truncatedCount = issues.filter(i => i.commentsTruncated).length;
 
@@ -118,24 +148,32 @@ export function formatIssuesMarkdown(repoInfo, issues, options = {}) {
     if (failedCount > 0 || truncatedCount > 0) {
         md += `> **Warning:** ${failedCount > 0 ? `${failedCount} thread(s) failed to fetch comments. ` : ''}${truncatedCount > 0 ? `${truncatedCount} thread(s) truncated at API page limit.` : ''}\n\n`;
     }
-    md += `# GitHub Issues: ${repoInfo.owner}/${repoInfo.repo}\n`;
-    md += `Included Issues: ${issues.length}\n\n`;
+    const k = kindOf(options);
+    md += `# GitHub ${k.Noun}: ${repoInfo.owner}/${repoInfo.repo}\n`;
+    md += `Included ${k.Noun}: ${issues.length}\n\n`;
 
     if (nlpOverview) {
         const fence = getMarkdownFence(nlpOverview);
         md += `## NLP Topic & Phrase Overview\n${fence}text\n${nlpOverview}\n${fence}\n\n`;
     }
 
-    md += `## Issue Threads\n\n`;
+    md += `## ${k.One} Threads\n\n`;
     for (const iss of issues) {
         const stateTag = iss.stateReason ? `${iss.state.toUpperCase()} (${iss.stateReason})` : iss.state.toUpperCase();
         md += `### [#${iss.number}] ${iss.title}\n`;
         md += `- **State:** ${stateTag} | **Author:** @${iss.author} (${iss.authorAssociation}) | **Created:** ${iss.createdAt}${iss.closedAt ? ` | **Closed:** ${iss.closedAt}` : ''}\n`;
+        if (k.isDiscussions && (iss.category || answeredText(iss) || iss.reactionsTotal > 0)) {
+            const parts = [];
+            if (iss.category) parts.push(`**Category:** ${iss.category}`);
+            if (answeredText(iss)) parts.push(`**Answered:** ${answeredText(iss)}`);
+            if (iss.reactionsTotal > 0) parts.push(`**Upvotes:** ${iss.reactionsTotal}`);
+            md += `- ${parts.join(' | ')}\n`;
+        }
         if (iss.labels && iss.labels.length > 0) {
             md += `- **Labels:** ${iss.labels.join(', ')}\n`;
         }
         if (iss.relatedIssues && iss.relatedIssues.length > 0) {
-            md += `- **Referenced Issues:** ${iss.relatedIssues.map(n => `#${n}`).join(', ')}\n`;
+            md += `- **Referenced ${k.isDiscussions ? 'Threads' : 'Issues'}:** ${iss.relatedIssues.map(n => `#${n}`).join(', ')}\n`;
         }
         if (iss.commentsFetchFailed) {
             md += `> **Warning:** Comment thread fetch failed (${iss.commentsFetchError || 'API error'}).\n`;
@@ -148,7 +186,8 @@ export function formatIssuesMarkdown(repoInfo, issues, options = {}) {
         if (iss.cleanedComments && iss.cleanedComments.length > 0) {
             md += `#### Comments (${iss.cleanedComments.length})\n\n`;
             iss.cleanedComments.forEach((c, idx) => {
-                md += `**[Comment ${idx + 1}] @${c.author} (${c.role}) on ${c.createdAt}:**\n${c.body}\n\n`;
+                const marks = `${c.isAnswer ? ' [Accepted answer]' : ''}${c.replyTo ? ` (reply to @${c.replyTo})` : ''}`;
+                md += `**[Comment ${idx + 1}] @${c.author} (${c.role}) on ${c.createdAt}${marks}:**\n${c.body}\n\n`;
             });
         }
         md += `---\n\n`;
@@ -162,11 +201,12 @@ export function formatIssuesMarkdown(repoInfo, issues, options = {}) {
 }
 
 export function formatIssuesGenericXml(repoInfo, issues, options = {}) {
-    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues, options.nlpScope) : '';
+    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues, options.nlpScope, kindOf(options).noun) : '';
     const failedCount = issues.filter(i => i.commentsFetchFailed).length;
     const truncatedCount = issues.filter(i => i.commentsTruncated).length;
 
-    let xml = `<issues_repository name="${escapeXml(`${repoInfo.owner}/${repoInfo.repo}`)}" count="${issues.length}">\n`;
+    const k = kindOf(options);
+    let xml = `<${k.noun}_repository name="${escapeXml(`${repoInfo.owner}/${repoInfo.repo}`)}" count="${issues.length}">\n`;
     if (options.partNote) {
         xml += `  <note>${escapeXml(options.partNote)}</note>\n`;
     }
@@ -176,9 +216,12 @@ export function formatIssuesGenericXml(repoInfo, issues, options = {}) {
     if (nlpOverview) {
         xml += `  <nlp_overview>${escapeXml(nlpOverview)}</nlp_overview>\n`;
     }
-    xml += `  <issues>\n`;
+    xml += `  <${k.noun}>\n`;
     for (const iss of issues) {
-        xml += `    <issue number="${iss.number}" state="${escapeXml(iss.state)}" author="${escapeXml(iss.author)}" role="${escapeXml(iss.authorAssociation)}" created="${escapeXml(iss.createdAt)}">\n`;
+        const extra = k.isDiscussions
+            ? `${iss.category ? ` category="${escapeXml(iss.category)}"` : ''}${answeredText(iss) ? ` answered="${answeredText(iss)}"` : ''}${iss.reactionsTotal > 0 ? ` upvotes="${iss.reactionsTotal}"` : ''}`
+            : '';
+        xml += `    <${k.one} number="${iss.number}" state="${escapeXml(iss.state)}" author="${escapeXml(iss.author)}" role="${escapeXml(iss.authorAssociation)}" created="${escapeXml(iss.createdAt)}"${extra}>\n`;
         xml += `      <title>${escapeXml(iss.title)}</title>\n`;
         if (iss.commentsFetchFailed) {
             xml += `      <comments_warning>${escapeXml(iss.commentsFetchError || 'Comment thread fetch failed')}</comments_warning>\n`;
@@ -190,22 +233,22 @@ export function formatIssuesGenericXml(repoInfo, issues, options = {}) {
         if (iss.cleanedComments && iss.cleanedComments.length > 0) {
             xml += `      <comments>\n`;
             for (const c of iss.cleanedComments) {
-                xml += `        <comment author="${escapeXml(c.author)}" role="${escapeXml(c.role)}" date="${escapeXml(c.createdAt)}"><![CDATA[\n${escapeCdata(stripXmlInvalidChars(c.body))}\n]]></comment>\n`;
+                xml += `        <comment author="${escapeXml(c.author)}" role="${escapeXml(c.role)}" date="${escapeXml(c.createdAt)}"${commentAttrs(c)}><![CDATA[\n${escapeCdata(stripXmlInvalidChars(c.body))}\n]]></comment>\n`;
             }
             xml += `      </comments>\n`;
         }
-        xml += `    </issue>\n`;
+        xml += `    </${k.one}>\n`;
     }
-    xml += `  </issues>\n`;
+    xml += `  </${k.noun}>\n`;
     if (options.instructions) {
         xml += `  <instructions><![CDATA[\n${escapeCdata(stripXmlInvalidChars(options.instructions))}\n]]></instructions>\n`;
     }
-    xml += `</issues_repository>`;
+    xml += `</${k.noun}_repository>`;
     return { text: xml, ext: 'xml', mime: 'application/xml' };
 }
 
 export function formatIssuesJson(repoInfo, issues, options = {}) {
-    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues, options.nlpScope) : '';
+    const nlpOverview = options.includeNlpSummary ? formatNlpOverviewText(options.nlpData, issues, options.nlpScope, kindOf(options).noun) : '';
     const failedCount = issues.filter(i => i.commentsFetchFailed).length;
     const truncatedCount = issues.filter(i => i.commentsTruncated).length;
 
@@ -216,9 +259,14 @@ export function formatIssuesJson(repoInfo, issues, options = {}) {
             warnings: `${failedCount > 0 ? `${failedCount} thread(s) failed to fetch comments. ` : ''}${truncatedCount > 0 ? `${truncatedCount} thread(s) truncated at API page limit.` : ''}`
         } : {}),
         ...(nlpOverview ? { nlp_overview: nlpOverview } : {}),
-        issues: issues.map(iss => ({
+        [kindOf(options).noun]: issues.map(iss => ({
             number: iss.number,
             title: iss.title,
+            ...(kindOf(options).isDiscussions ? {
+                category: iss.category || '',
+                ...(answeredText(iss) ? { answered: iss.isAnswered } : {}),
+                upvotes: iss.reactionsTotal || 0
+            } : {}),
             state: iss.state,
             state_reason: iss.stateReason,
             author: iss.author,
@@ -226,7 +274,7 @@ export function formatIssuesJson(repoInfo, issues, options = {}) {
             created_at: iss.createdAt,
             closed_at: iss.closedAt,
             labels: iss.labels,
-            reactions_total: iss.reactionsTotal,
+            ...(kindOf(options).isDiscussions ? {} : { reactions_total: iss.reactionsTotal }),
             related_issues: iss.relatedIssues,
             body: iss.cleanedBody,
             comments: iss.cleanedComments,
