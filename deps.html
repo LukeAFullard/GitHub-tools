@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Dependency License Report</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/issues.css">
+</head>
+<body>
+
+<div class="app-container">
+    <!-- Top Header Bar -->
+    <header class="header-bar">
+        <div class="brand-With-Switcher">
+            <div class="brand-group">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+                <span class="brand-title">GitHub Context Tools</span>
+            </div>
+
+            <nav class="page-tabs" aria-label="Tools"><a id="tabCodeLink" href="index.html">Code</a><a id="tabIssuesLink" href="issues.html">Issues</a><a id="tabDiscussionsLink" href="discussions.html">Discussions</a><a id="tabDepsLink" href="deps.html" class="active" aria-current="page">Dependencies</a></nav>
+        </div>
+
+        <nav class="step-indicator" aria-label="Progress steps">
+            <span id="step1" class="step-item active">1. Load</span>
+            <span class="step-chevron" aria-hidden="true">&rsaquo;</span>
+            <span id="step2" class="step-item">2. Review</span>
+            <span class="step-chevron" aria-hidden="true">&rsaquo;</span>
+            <span id="step3" class="step-item">3. Copy</span>
+        </nav>
+
+        <div class="header-controls">
+
+            <button id="themeToggleBtn" class="secondary btn-sm" aria-label="Toggle dark/light theme" title="Toggle theme">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="5"></circle>
+                    <line x1="12" y1="1" x2="12" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="23"></line>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                    <line x1="1" y1="12" x2="3" y2="12"></line>
+                    <line x1="21" y1="12" x2="23" y2="12"></line>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+            </button>
+
+            <button id="shareUrlBtn" class="secondary btn-sm" title="Copy Deep-Link URL">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                </svg>
+                <span>Share link</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- First Screen Hero -->
+    <section id="heroBlock" class="hero-block">
+        <h2>Check a repo's dependency licenses, then hand the report to your AI</h2>
+        <p>Reads the repo's package.json, requirements, pyproject.toml, go.mod and Cargo.toml, looks up each package's license on deps.dev, and groups them for review. Runs in your browser. Package names and versions are sent to deps.dev; nothing else is.</p>
+        <p class="hero-zip-hint">Private repo without a token? Use <strong>Open .zip</strong>. The archive is read locally and never uploaded.</p>
+        <div id="exampleRepos" class="example-repos">
+            <span>Try:</span>
+            <button type="button" data-repo="expressjs/express">expressjs/express</button>
+            <button type="button" data-repo="psf/requests">psf/requests</button>
+            <button type="button" data-repo="BurntSushi/ripgrep">BurntSushi/ripgrep</button>
+        </div>
+    </section>
+
+    <!-- Source Input Bar -->
+    <section class="source-bar">
+        <form id="sourceForm" class="source-form" onsubmit="return false;">
+            <div class="repo-input-wrapper">
+                <label for="repoUrl" style="font-size: 0.8125rem; font-weight: 600; color: var(--ink);">GitHub repository</label>
+                <div class="input-row">
+                    <input type="text" id="repoUrl" placeholder="owner/repo or https://github.com/owner/repo" value="">
+                    <button id="loadDepsBtn" type="button" class="primary">Load dependencies</button>
+                    <button id="uploadZipBtn" type="button" class="secondary" title="Read the manifests from a local .zip of a repository. It is never uploaded.">Open .zip</button>
+                    <input type="file" id="zipFileInput" accept=".zip,application/zip" hidden>
+                    <button id="abortBtn" type="button" class="danger" style="display: none;">Cancel</button>
+                    <button id="optionsToggleBtn" type="button" class="options-toggle-btn secondary-control" aria-expanded="false" aria-controls="optionsDrawer">
+                        <span id="optionsToggleSummary">Settings</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    </button>
+                </div>
+                <div id="tokenPanel" class="token-panel" hidden>
+                    <p id="tokenPanelMessage" class="token-panel-message"></p>
+                    <label for="pat">GitHub token</label>
+                    <input type="password" id="pat" placeholder="ghp_... (Optional)" autocomplete="off">
+                    <p class="field-helper">Only needed for private repos or if GitHub's limit of 60 requests per hour is reached. It is only sent to GitHub and is never stored.</p>
+                </div>
+                <div id="repoInputError" class="inline-error">Enter a repo as owner/name or a GitHub URL.</div>
+                <p id="sourceNote" class="field-helper zip-source-note" hidden></p>
+            </div>
+        </form>
+    </section>
+
+    <!-- Target Bar -->
+    <div id="targetBar" class="target-bar" role="group" aria-label="Send to">
+        <span class="target-bar-label">Send to:</span>
+        <button type="button" data-target="claude" aria-pressed="true">Claude</button>
+        <button type="button" data-target="chatgpt" aria-pressed="false">ChatGPT</button>
+        <button type="button" data-target="gemini" aria-pressed="false">Gemini</button>
+        <button type="button" data-target="custom" aria-pressed="false">Custom</button>
+    </div>
+
+    <!-- Collapsible Settings Drawer -->
+    <div id="optionsDrawer" class="options-drawer">
+        <div class="option-field full-width" style="margin-bottom: 0.25rem;">
+            <a href="#" id="drawerTokenLink" class="drawer-token-link" style="font-size: 0.8125rem; color: var(--cobalt); text-decoration: underline;">Add a GitHub token</a>
+        </div>
+        <div class="option-field" id="formatField" hidden>
+            <label for="format">Output format</label>
+            <select id="format">
+                <option value="claude-xml">Anthropic Claude XML</option>
+                <option value="markdown">Markdown tables</option>
+                <option value="generic-xml">Generic XML</option>
+                <option value="json">Structured JSON</option>
+            </select>
+        </div>
+        <div class="option-field">
+            <label class="checkbox-label"><input type="checkbox" id="includeTransitive" checked> <span>Include transitive dependencies</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="includeDev"> <span>Include development and test dependencies</span></label>
+        </div>
+        <div class="option-field">
+            <label class="checkbox-label"><input type="checkbox" id="skipExamples" checked> <span>Skip example, test and docs folders</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="compactPermissive" checked> <span>List permissive packages briefly (saves tokens)</span></label>
+        </div>
+        <div class="option-field full-width">
+            <div class="field-label-row">
+                <label for="aiInstructions">Instructions for the AI (optional)</label>
+                <span id="instructionsCharCount" class="char-count">0 chars</span>
+            </div>
+            <textarea id="aiInstructions" rows="2" placeholder="e.g. Which of these licenses need attention for a closed-source app we distribute?"></textarea>
+            <div class="instructions-toolbar">
+                <div class="preset-buttons">
+                    <span class="preset-label">Presets:</span>
+                    <button type="button" class="preset-btn btn-xs" data-instruction="Review the copyleft, restricted and unknown licenses in this report against the repository's own license. For each, explain what to check and what questions to ask a lawyer. Do not state final legal conclusions.">Review licenses</button>
+                    <button type="button" class="preset-btn btn-xs" data-instruction="Draft a THIRD_PARTY_LICENSES.md attribution file for these packages, grouped by license, noting where full license texts must be included.">Attribution file</button>
+                    <button type="button" class="preset-btn btn-xs" data-instruction="For each copyleft, restricted or unknown-license package, suggest well-maintained alternatives with permissive licenses and estimate the effort to switch.">Find alternatives</button>
+                    <button type="button" class="preset-btn btn-xs" data-instruction="Triage the security advisories listed in this report: group them by package, say which look most serious, and suggest upgrade steps.">Triage advisories</button>
+                </div>
+                <button type="button" id="clearInstructionsBtn" class="secondary btn-xs">Clear</button>
+            </div>
+        </div>
+        <div class="option-field full-width">
+            <button type="button" id="drawerDoneBtn" class="primary btn-full drawer-done-btn" style="display: none;">Done</button>
+        </div>
+    </div>
+
+    <!-- License Summary Banner -->
+    <section id="budgetBanner" class="budget-banner workspace-section" aria-label="License summary">
+        <div class="budget-header">
+            <div class="budget-numbers">
+                <span id="statPackages" class="budget-hero-number">0</span>
+                <span class="budget-target-label">packages · repository license: <b id="repoLicenseText">-</b></span>
+            </div>
+            <div style="font-family: var(--font-mono); font-size: 0.78125rem;">
+                <span>Output: <b id="statTokens">0</b> tokens</span>
+                <span id="targetBudgetDisplay" style="margin-left: 0.5rem; color: var(--ink-soft);"></span>
+            </div>
+        </div>
+        <div id="groupPills" class="pill-container" role="group" aria-label="Filter by license group"></div>
+        <p class="field-helper" style="margin: 0.4rem 0 0;">Groups guide what to review. They are not legal advice or a compatibility verdict.</p>
+    </section>
+
+    <!-- Mobile Segmented Control -->
+    <div class="segmented-control" role="tablist">
+        <button id="tabListBtn" class="segmented-btn active" role="tab" aria-selected="true" aria-controls="depsCard">Packages</button>
+        <button id="tabOutputBtn" class="segmented-btn" role="tab" aria-selected="false" aria-controls="outputCard">Output</button>
+    </div>
+
+    <main id="workspacePanes" class="workspace-panes workspace-section">
+        <section class="pane active-mobile" id="depsCard" role="tabpanel" aria-labelledby="tabListBtn">
+            <div class="pane-header">
+                <span class="pane-title">Packages</span>
+                <span id="matchCount" class="badge" style="font-family: var(--font-mono); font-size: 0.78125rem; color: var(--ink-soft);"></span>
+            </div>
+            <div class="issues-filter-panel">
+                <div class="tree-search-bar" style="padding: 0; border: none;">
+                    <div class="search-input-wrapper">
+                        <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <input type="text" id="depSearchInput" aria-label="Search packages" placeholder="Search package or license...">
+                    </div>
+                </div>
+                <div class="filter-controls-grid">
+                    <select id="ecosystemFilter" aria-label="Filter by ecosystem"><option value="">Ecosystem: All</option></select>
+                    <select id="relationFilter" aria-label="Filter by relation">
+                        <option value="">Direct and transitive</option>
+                        <option value="direct">Direct only</option>
+                        <option value="transitive">Transitive only</option>
+                    </select>
+                    <label class="checkbox-label" style="align-self: center; font-size: 0.8125rem;"><input type="checkbox" id="advisoriesOnly"> <span>With advisories</span></label>
+                </div>
+            </div>
+            <div class="tree-viewport">
+                <div id="depsEmptyState" class="empty-state">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+                    <p>Load a repository to list its dependencies and their licenses.</p>
+                </div>
+                <ul class="issues-list" id="depsList" style="display: none;"></ul>
+            </div>
+            <div class="pane-footer">
+                <p id="outputScopeNote" class="field-helper">The output includes the packages shown.</p>
+            </div>
+        </section>
+
+        <section class="pane" id="outputCard" role="tabpanel" aria-labelledby="tabOutputBtn">
+            <div class="pane-header">
+                <span class="pane-title">Output</span>
+                <div style="display: flex; align-items: center; gap: 0.4rem;">
+                    <button id="wrapToggleBtn" class="primary btn-sm" aria-pressed="true" title="Toggle line wrapping">Wrap</button>
+                    <button id="copyBtn" class="primary btn-sm" disabled>Copy</button>
+                    <button id="downloadBtn" class="secondary btn-sm" disabled>Download</button>
+                </div>
+            </div>
+            <div class="output-viewport">
+                <div id="warningBanner" class="warning-banner" role="status" aria-live="polite" style="display:none"></div>
+                <div id="summaryCard" class="summary-card" hidden></div>
+                <div id="outputEmptyState" class="empty-state">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                    <p>The report appears here once dependencies are loaded.</p>
+                </div>
+                <div class="preview-toolbar" style="padding: 0.5rem 0.85rem 0; display: flex; align-items: center;">
+                    <button id="togglePreviewBtn" type="button" class="secondary btn-sm" aria-expanded="false" style="display: none;">Show preview</button>
+                </div>
+                <textarea id="previewArea" class="preview wrap" readonly style="display: none;"></textarea>
+            </div>
+        </section>
+    </main>
+
+    <!-- Activity Log -->
+    <section id="logCard" class="log-card workspace-section">
+        <div id="logHeader" class="log-header">
+            <span id="logSummary" class="log-summary-text">Ready</span>
+            <button id="logToggleBtn" class="secondary btn-xs" type="button">Details</button>
+        </div>
+        <div class="progress-track" id="progressTrack" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div id="log"></div>
+    </section>
+
+    <div id="stickyActionBar" class="sticky-action-bar">
+        <button id="mobilePrimaryBtn" class="primary btn-full">Load dependencies</button>
+    </div>
+
+    <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+</div>
+
+<script type="module" src="js/deps-app.js"></script>
+</body>
+</html>

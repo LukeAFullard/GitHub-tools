@@ -1369,6 +1369,11 @@ button:disabled {
 @media (max-width: 720px) {
     .header-bar {
         padding: 0.5rem 1rem;
+        flex-wrap: wrap;
+    }
+
+    .page-tabs a {
+        padding: 0.25rem 0.5rem;
     }
 
     .step-indicator {
@@ -1644,4 +1649,18 @@ body.zip-drag-over::after {
     font-size: 1.125rem;
     pointer-events: none;
     z-index: 1000;
+}
+
+/* Four page tabs: on phones the share button keeps only its icon. */
+@media (max-width: 480px) {
+    #shareUrlBtn span {
+        display: none;
+    }
+
+    /* Keep the theme and share buttons beside the title instead of on a row of their own. */
+    .header-controls {
+        position: absolute;
+        top: 0.5rem;
+        right: 1rem;
+    }
 }

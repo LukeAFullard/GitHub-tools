@@ -9,7 +9,7 @@ went into this plan. Corrections to the original proposal are noted inline.
 | 1 | Bug fixes and polish (Code + Issues explorers) | Done |
 | 2 | Local `.zip` archives in the Code Explorer | Done |
 | 3 | Discussions Explorer tab (`discussions.html`) | Done |
-| 4 | Dependencies & licences tab (`deps.html`), slimmed down | Next |
+| 4 | Dependencies & licences tab (`deps.html`), slimmed down | Done |
 
 Phases 3 and 4 are swapped from the original proposal: Discussions reuses most of the Issues
 Explorer and fits the app's purpose (packing content for an AI); the licence auditor is larger,
@@ -93,29 +93,48 @@ GitHub's API description). GraphQL is the official route and always needs a toke
       for other repositories. Try it on a public repo with Discussions (e.g. `whitphx/stlite`),
       with and without a token.
 
-## Phase 4: Dependencies & licences (`deps.html`), slimmed down
+## Phase 4: Dependencies & licences (`deps.html`) (done)
 
-The original proposal was a full licence-compatibility auditor. Problems found:
+The original proposal was a full licence-compatibility auditor. Problems found, and how the
+built version handles them:
 
 - "Conflict" verdicts are legal judgements that depend on how a package is used (linking,
-  distribution, hosted service). The tool should flag packages for review, not issue verdicts.
-- Classification errors: SSPL-1.0 is not OSI-approved and belongs under "restricted";
-  EUPL-1.2 has explicit compatibility terms; `GPL-2.0-only` and `GPL-2.0-or-later` must be
-  distinguished.
-- GitHub's SBOM endpoint (`/dependency-graph/sbom`) needs the dependency graph enabled and
-  often reports licences as `NOASSERTION`.
-- Reading `pyproject.toml` / `Cargo.toml` needs a TOML parser, against the no-dependencies rule.
-- `api.deps.dev` does allow browser requests (`access-control-allow-origin: *`), so it is a
-  viable source of licences and transitive dependencies.
+  distribution, hosted service). **Built:** packages are grouped for review (permissive / weak
+  copyleft / strong copyleft / restricted / unknown) with "review" wording and a not-legal-advice
+  note in the page and in every output; no "compatible" or "conflict" verdicts.
+- Classification errors in the proposal. **Built:** SSPL, BUSL, Elastic, PolyForm and
+  CC-BY-NC/ND are "restricted"; EUPL is strong copyleft; `-only` / `-or-later` are recognised
+  (and noted); linking exceptions such as Classpath move GPL to weak copyleft; `AND` takes the
+  strictest part, `OR` the easiest known option.
+- GitHub's SBOM endpoint. **Not used:** its synchronous export closes on 13 November 2026, and the
+  replacement is an asynchronous job that redirects to a temporary download URL, which could not
+  be tested from here. Its licence data is also often `NOASSERTION`.
+- Reading `pyproject.toml` / `Cargo.toml` needs a TOML parser. **Built:** narrow line-based
+  readers for the dependency sections only (PEP 621, Poetry, Cargo tables), no library.
+- `api.deps.dev` allows browser requests. **Built:** it supplies licences, known security
+  advisories and transitive dependency graphs (npm, PyPI, Cargo). Its stable v3 GET endpoints
+  are used; the experimental batch endpoint is not (its CORS preflight fails for JSON POSTs).
 
-Proposed scope:
+What was built:
 
-- [ ] Gather the dependency list: GitHub SBOM first; fall back to `package.json`,
-      `requirements.txt` and `go.mod` (no TOML at first) plus deps.dev for licences.
-      Works for `.zip` sources through the manifest files.
-- [ ] Show packages with ecosystem, version, direct/transitive and SPDX licence; group licences
-      as permissive / weak copyleft / strong copyleft / restricted or unknown, worded as
-      "review", never "compatible" or "conflict".
-- [ ] Pack the list (with the host repo's licence) as AI context in the four formats, with
-      instruction presets: attribution file (`THIRD_PARTY_LICENSES.md`), review unknown licences,
-      suggest permissive alternatives.
+- [x] `js/manifest-parsers.js`: package.json, requirements*.txt, pyproject.toml, go.mod,
+      Cargo.toml; skips vendored, hidden and (optionally) example/test/docs folders, local and VCS
+      dependencies, and the repository's own workspace packages.
+- [x] `js/license-classify.js`: SPDX expression parser and grouping, LICENSE-file detection for
+      `.zip` sources.
+- [x] `js/deps-api.js`: GitHub repo licence, tree and manifests, or a local `.zip`; deps.dev
+      lookups with caching, retries, a concurrency limit and a 1,500-package cap. Ranges are checked
+      at their lowest version (or the latest release when unpinned), and the output says so.
+- [x] `deps.html` + `js/deps-app.js`: group pills, ecosystem / direct-transitive / advisories
+      filters, dev and transitive toggles, target bar, instruction presets (review licences,
+      attribution file, alternatives, advisories). The output contains the packages shown.
+- [x] `js/deps-formatters.js`: report in the four formats, most-attention groups first;
+      permissive packages can be listed one per line to save tokens.
+- [x] "Dependencies" tab on every page; the header now fits four tabs on phones.
+- [x] Tests: `tests/deps.test.js` and `tests/e2e/deps-flow.test.mjs`; checked live against
+      deps.dev in a browser.
+
+Possible follow-ups:
+
+- [ ] Lockfiles (`package-lock.json`, `poetry.lock`, `Cargo.lock`) for exact installed versions.
+- [ ] More ecosystems deps.dev supports (Maven, NuGet, RubyGems).
