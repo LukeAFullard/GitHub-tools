@@ -194,7 +194,13 @@
                         <option value="direct">Direct only</option>
                         <option value="transitive">Transitive only</option>
                     </select>
-                    <label class="checkbox-label" style="align-self: center; font-size: 0.8125rem;"><input type="checkbox" id="advisoriesOnly"> <span>With advisories</span></label>
+                    <select id="attentionFilter" aria-label="Show packages that need attention">
+                        <option value="">Show: all packages</option>
+                        <option value="advisories">With security advisories</option>
+                        <option value="high">High or critical advisories</option>
+                        <option value="outdated">Outdated (direct)</option>
+                        <option value="health">Health warnings (direct)</option>
+                    </select>
                 </div>
             </div>
             <div class="tree-viewport">

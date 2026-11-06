@@ -5,7 +5,9 @@
 import { parseRepoInput } from './github-api.js';
 import { fetchRepoInfo, fetchRepoManifests, readZipManifests, collectDirectDependencies, resolveLicenses } from './deps-api.js';
 import { classifyLicense, guessLicenseFromText, LICENSE_GROUPS, GROUP_LABELS, GROUP_HINTS } from './license-classify.js';
-import { buildDepsOutput, groupCounts, sortPackages } from './deps-formatters.js';
+import { buildDepsOutput, groupCounts, sortPackages, collectAdvisories } from './deps-formatters.js';
+
+const SEVERITY_TEXT = { critical: 'critical', high: 'high', medium: 'medium', low: 'low', unknown: 'unrated' };
 import { parseZipArchive } from './zip-loader.js';
 import { escapeXml } from './formatters.js';
 import { estimateTokensAsync } from './tokenizer.js';
@@ -30,7 +32,7 @@ const dom = {
     statPackages: $('statPackages'), repoLicenseText: $('repoLicenseText'), statTokens: $('statTokens'),
     targetBudgetDisplay: $('targetBudgetDisplay'), groupPills: $('groupPills'),
     depSearchInput: $('depSearchInput'), ecosystemFilter: $('ecosystemFilter'), relationFilter: $('relationFilter'),
-    advisoriesOnly: $('advisoriesOnly'), matchCount: $('matchCount'), depsEmptyState: $('depsEmptyState'),
+    attentionFilter: $('attentionFilter'), matchCount: $('matchCount'), depsEmptyState: $('depsEmptyState'),
     depsList: $('depsList'), outputScopeNote: $('outputScopeNote'),
     wrapToggleBtn: $('wrapToggleBtn'), copyBtn: $('copyBtn'), downloadBtn: $('downloadBtn'),
     warningBanner: $('warningBanner'), summaryCard: $('summaryCard'), outputEmptyState: $('outputEmptyState'),
@@ -54,6 +56,8 @@ let state = {
     repoLicense: null,
     manifests: [],
     directDeps: [],
+    locks: [],
+    lockfiles: [],
     packages: [],
     warnings: [],
     groupFilter: null,
@@ -172,12 +176,15 @@ function filteredPackages() {
     const q = (dom.depSearchInput.value || '').trim().toLowerCase();
     const eco = dom.ecosystemFilter.value;
     const rel = dom.relationFilter.value;
-    const advOnly = dom.advisoriesOnly.checked;
+    const attention = dom.attentionFilter.value;
     return state.packages.filter(p => {
         if (state.groupFilter && p.license.group !== state.groupFilter) return false;
         if (eco && p.ecosystem !== eco) return false;
         if (rel && p.relation !== rel) return false;
-        if (advOnly && !(p.advisories && p.advisories.length)) return false;
+        if (attention === 'advisories' && !(p.advisories && p.advisories.length)) return false;
+        if (attention === 'high' && !['critical', 'high'].includes(p.maxSeverity)) return false;
+        if (attention === 'outdated' && !p.outdated) return false;
+        if (attention === 'health' && !(p.healthFlags && p.healthFlags.length)) return false;
         if (q && !p.name.toLowerCase().includes(q) && !(p.license.expression || '').toLowerCase().includes(q)) return false;
         return true;
     });
@@ -247,15 +254,36 @@ function renderList() {
         if (p.via && p.via.length) bits.push(`via ${p.via.slice(0, 2).join(', ')}${p.via.length > 2 ? '…' : ''}`);
         if (p.versionKind === 'range-min') bits.push('lowest version in range');
         if (p.versionKind === 'latest') bits.push('latest release');
+        if (p.versionKind === 'locked') bits.push('locked');
         meta.innerHTML = bits.map(b => `<span>${escapeXml(b)}</span>`).join('<span>•</span>');
         if (p.advisories && p.advisories.length) {
             // One advisory opens directly; several open the deps.dev page, which lists them all.
-            const advText = `${p.advisories.length} advisor${p.advisories.length === 1 ? 'y' : 'ies'}`;
+            const sev = p.maxSeverity || 'unknown';
+            const advText = `${p.advisories.length} advisor${p.advisories.length === 1 ? 'y' : 'ies'} · ${SEVERITY_TEXT[sev]}`;
+            const advTitle = (p.advisoryDetails || []).slice(0, 10)
+                .map(a => `${a.id} (${SEVERITY_TEXT[a.severity]}${a.score ? ` ${a.score}` : ''})${a.title ? `: ${a.title}` : ''}`).join('\n') || p.advisories.join(', ');
             const advHref = p.advisories.length === 1 ? advisoryUrl(p.advisories[0]) : depsDevUrl(p.ecosystem, p.name, p.version);
+            const cls = `issue-label-pill dep-advisory sev-${sev}`;
             const adv = advHref
-                ? externalLink(advHref, advText, { title: p.advisories.slice(0, 10).join(', '), className: 'issue-label-pill dep-advisory ext-link' })
-                : Object.assign(document.createElement('span'), { className: 'issue-label-pill dep-advisory', textContent: advText, title: p.advisories.slice(0, 10).join(', ') });
+                ? externalLink(advHref, advText, { title: advTitle, className: `${cls} ext-link` })
+                : Object.assign(document.createElement('span'), { className: cls, textContent: advText, title: advTitle });
             meta.appendChild(adv);
+        }
+        if (p.outdated && p.latest) {
+            const up = document.createElement('span');
+            up.className = 'issue-label-pill dep-outdated';
+            up.textContent = p.upgradeClears ? `latest ${p.latest} · fixes ${p.upgradeClears}` : `latest ${p.latest}`;
+            up.title = p.upgradeClears
+                ? `Upgrading to ${p.latest} clears ${p.upgradeClears} of ${p.advisories.length} known advisor${p.advisories.length === 1 ? 'y' : 'ies'}`
+                : `A newer release (${p.latest}) is available`;
+            meta.appendChild(up);
+        }
+        for (const flag of p.healthFlags || []) {
+            const h = document.createElement('span');
+            h.className = 'issue-label-pill dep-health';
+            h.textContent = flag;
+            if (p.health && p.health.project) h.title = `Source project: ${p.health.project}${p.health.scorecard !== null ? `, OpenSSF Scorecard ${p.health.scorecard}/10` : ''}`;
+            meta.appendChild(h);
         }
         for (const note of p.license.notes || []) {
             const n = document.createElement('span');
@@ -289,6 +317,7 @@ async function rebuildOutput() {
         repoLicense: state.repoLicense,
         packages: visible,
         manifests: state.manifests,
+        lockfiles: state.lockfiles,
         includeTransitive: dom.includeTransitive.checked,
         includeDev: dom.includeDev.checked,
         compactPermissive: dom.compactPermissive.checked,
@@ -315,12 +344,22 @@ async function rebuildOutput() {
         : `of ${state.budget.toLocaleString()}`;
     const counts = groupCounts(visible);
     const review = counts['strong-copyleft'] + counts['weak-copyleft'] + counts['restricted'];
-    const advisories = visible.reduce((n, p) => n + ((p.advisories && p.advisories.length) ? 1 : 0), 0);
+    const sev = { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 };
+    for (const { a } of collectAdvisories(visible)) sev[a.severity]++;
+    const totalAdv = Object.values(sev).reduce((x, y) => x + y, 0);
+    const directs = visible.filter(p => p.relation === 'direct');
+    const outdated = directs.filter(p => p.outdated).length;
+    const fixable = directs.filter(p => p.upgradeClears).length;
+    const health = directs.filter(p => p.healthFlags && p.healthFlags.length).length;
     dom.summaryCard.innerHTML = '';
     for (const line of [
         `${visible.length} package${visible.length === 1 ? '' : 's'} · about ${tokens.toLocaleString()} tokens`,
         `${review} to review (copyleft or restricted) · ${counts.unknown} unknown`,
-        `${advisories} with known security advisories`
+        totalAdv
+            ? `${totalAdv} security advisor${totalAdv === 1 ? 'y' : 'ies'}: ${sev.critical} critical, ${sev.high} high, ${sev.medium} medium, ${sev.low + sev.unknown} low or unrated`
+            : 'No known security advisories',
+        `Direct: ${outdated} outdated${fixable ? ` (${fixable} fixed by upgrading)` : ''} · ${health} with health warnings`,
+        state.lockfiles.length ? `Exact versions from ${state.lockfiles.join(', ')}` : 'No lockfile: versions estimated from manifest ranges'
     ]) {
         const el = document.createElement('div');
         el.textContent = line;
@@ -343,6 +382,8 @@ function fillEcosystemFilter() {
 
 function resetView() {
     state.packages = [];
+    state.locks = [];
+    state.lockfiles = [];
     state.groupFilter = null;
     state.output = null;
     state.warnings = [];
@@ -433,8 +474,11 @@ async function load(source) {
             return;
         }
 
-        const { deps, parseErrors } = collectDirectDependencies(manifests);
+        const { deps, locks, lockfilesUsed, parseErrors } = collectDirectDependencies(manifests);
         state.directDeps = deps;
+        state.locks = locks;
+        state.lockfiles = lockfilesUsed;
+        if (lockfilesUsed.length) log(`[INFO] Exact versions from ${lockfilesUsed.join(', ')}.`);
         for (const e of parseErrors) state.warnings.push(`${e.path}: ${e.error}.`);
         log(`[INFO] ${deps.length} direct dependencies. Looking up licenses on deps.dev...`);
         await resolve(signal, myGen);
@@ -455,6 +499,7 @@ async function load(source) {
 async function resolve(signal, myGen) {
     const t0 = Date.now();
     const { packages, capped } = await resolveLicenses(state.directDeps, {
+        locks: state.locks,
         includeTransitive: dom.includeTransitive.checked,
         includeDev: dom.includeDev.checked,
         signal,
@@ -578,7 +623,7 @@ document.querySelectorAll('.preset-buttons button[data-instruction]').forEach(bt
     });
 });
 
-[dom.depSearchInput, dom.ecosystemFilter, dom.relationFilter, dom.advisoriesOnly].forEach(el => {
+[dom.depSearchInput, dom.ecosystemFilter, dom.relationFilter, dom.attentionFilter].forEach(el => {
     el.addEventListener('input', () => { renderList(); rebuildOutput(); });
     el.addEventListener('change', () => { renderList(); rebuildOutput(); });
 });

@@ -136,7 +136,7 @@ What was built:
 
 Possible follow-ups:
 
-- [ ] Lockfiles (`package-lock.json`, `poetry.lock`, `Cargo.lock`) for exact installed versions.
+- [x] Lockfiles for exact installed versions (see Phase 8).
 - [ ] More ecosystems deps.dev supports (Maven, NuGet, RubyGems).
 
 ---
@@ -220,4 +220,24 @@ consent to nothing would be meaningless. When that changes:
    `_headers`, `tests/privacy.test.js` (it will fail on purpose), and bump `NOTICE_VERSION`.
 5. Cookieless analytics (e.g. Cloudflare Web Analytics, as on TimeDoco's marketing pages) usually
    needs no consent banner but must be disclosed in the privacy notice.
+
+## Phase 8: Dependencies, accurate and actionable (done)
+
+- [x] `js/lockfiles.js`: package-lock.json (v1-v3), yarn.lock (classic and Berry), pnpm-lock.yaml
+      (v5-v9, multi-document), poetry.lock, uv.lock, Pipfile.lock, Cargo.lock. Checked against real
+      lockfiles from npm/cli, React, Yarn Berry, Vite, Poetry, pydantic and ripgrep (package counts
+      verified independently). Workspace members are kept as pass-through nodes so monorepos' whole
+      trees are found; their dev dependencies are followed only with "Include dev".
+- [x] Advisory titles and CVSS severity (deps.dev advisories), worst first; a "Security
+      advisories" section in every report format; brief permissive lines keep their advisories.
+- [x] Direct dependencies: latest version, outdated flag, and whether upgrading clears advisories.
+- [x] Project health for direct dependencies: OpenSSF Scorecard, "Maintained" check, deprecated or
+      yanked releases, and a recognised source-repo licence that disagrees with the registry.
+- [x] "Show" filter: advisories, high/critical, outdated, health warnings.
+- Known limit: Cargo.lock does not mark dev-only crates, so workspace members' dev crates are
+  included for Rust projects.
+
+Next candidates: a licence policy (allow/flag lists, optionally read from the repo), comparing two
+branches or a pull request, full dependency paths ("why is this here?"), CSV/SBOM export, more
+ecosystems (.NET, Ruby, Maven).
 

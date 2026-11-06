@@ -19,7 +19,12 @@ const MANIFEST_PATTERNS = [
     { ecosystem: 'pypi', test: name => /^(requirements[\w.-]*|[\w.-]*requirements)\.txt$/i.test(name) },
     { ecosystem: 'pypi', test: name => name === 'pyproject.toml' },
     { ecosystem: 'go', test: name => name === 'go.mod' },
-    { ecosystem: 'cargo', test: name => name === 'Cargo.toml' }
+    { ecosystem: 'cargo', test: name => name === 'Cargo.toml' },
+    { ecosystem: 'pypi', test: name => name === 'Pipfile' },
+    // Lockfiles: exact versions and the real transitive tree (js/lockfiles.js).
+    { ecosystem: 'npm', kind: 'lock', test: name => ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml'].includes(name) },
+    { ecosystem: 'pypi', kind: 'lock', test: name => ['poetry.lock', 'uv.lock', 'Pipfile.lock'].includes(name) },
+    { ecosystem: 'cargo', kind: 'lock', test: name => name === 'Cargo.lock' }
 ];
 
 const SKIP_DIRS = new Set(['node_modules', 'vendor', 'third_party', 'third-party', '.git', 'dist', 'build', 'target', '.venv', 'venv', 'site-packages', 'bower_components', 'jspm_packages']);
@@ -39,7 +44,7 @@ export function findManifestPaths(paths, { skipExamples = true, max = 60 } = {})
         if (dirs.some(d => SKIP_DIRS.has(d) || d.startsWith('.'))) continue;
         if (skipExamples && dirs.some(d => EXAMPLE_DIRS.test(d))) continue;
         const pattern = MANIFEST_PATTERNS.find(p => p.test(name));
-        if (pattern) found.push({ path, ecosystem: pattern.ecosystem });
+        if (pattern) found.push({ path, ecosystem: pattern.ecosystem, kind: pattern.kind || 'manifest' });
     }
     // Shallow manifests first: the root project matters most if we hit the cap.
     found.sort((a, b) => a.path.split('/').length - b.path.split('/').length || a.path.localeCompare(b.path));
@@ -269,6 +274,27 @@ export function parseCargoToml(text, manifest = 'Cargo.toml') {
     return { deps, name };
 }
 
+/** Pipfile ([packages] and [dev-packages]); Pipfile.lock supplies exact versions when present. */
+export function parsePipfile(text, manifest = 'Pipfile') {
+    const sections = tomlSections(text);
+    const deps = [];
+    for (const [section, dev] of [['packages', false], ['dev-packages', true]]) {
+        for (const line of sections.get(section) || []) {
+            const kv = keyValue(line);
+            if (!kv) continue;
+            let spec;
+            if (kv.value.startsWith('{')) {
+                if (/\b(path|git|file|editable)\s*=/.test(kv.value)) continue;
+                spec = inlineField(kv.value, 'version') || '';
+            } else {
+                spec = quotedStrings(kv.value)[0] || '';
+            }
+            deps.push(dep('pypi', normalizePypiName(kv.key), spec === '*' ? '' : spec, manifest, { dev }));
+        }
+    }
+    return { deps };
+}
+
 /** Parses any supported manifest by file name. */
 export function parseManifest(path, text) {
     const name = path.split('/').pop();
@@ -276,6 +302,7 @@ export function parseManifest(path, text) {
     if (name === 'pyproject.toml') return parsePyprojectToml(text, path);
     if (name === 'go.mod') return parseGoMod(text, path);
     if (name === 'Cargo.toml') return parseCargoToml(text, path);
+    if (name === 'Pipfile') return parsePipfile(text, path);
     if (/\.txt$/i.test(name)) return parseRequirementsTxt(text, path);
     return { deps: [] };
 }

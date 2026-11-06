@@ -248,7 +248,7 @@ test('deps report: sorted by group and the four formats', () => {
     assert.match(xml, /<summary>Restricted: 1, Strong copyleft: 1, Weak copyleft: 1, Unknown: 1, Permissive: 1<\/summary>/);
     assert.match(xml, /not legal advice/);
     assert.ok(xml.indexOf('name="busl"') < xml.indexOf('name="z-gpl"'), 'restricted listed first');
-    assert.match(xml, /name="z-gpl"[^>]*advisories="GHSA-9"/);
+    assert.match(xml, /name="z-gpl"[^>]*advisories="GHSA-9 \(unrated\)"/);
     assert.match(xml, /name="m-mpl"[^>]*relation="transitive" license="MPL-2.0" via="a-mit"[^>]*notes="version: lowest version in range"/);
     assert.match(xml, /name="nolic"[^>]*license="none found"[^>]*notes="not found on deps.dev"/);
     assert.match(xml, /npm:a-mit@1\.0\.0 \(MIT\)/, 'permissive listed briefly');
@@ -257,7 +257,7 @@ test('deps report: sorted by group and the four formats', () => {
     const md = buildDepsOutput('markdown', { ...ctx, compactPermissive: false }).text;
     assert.match(md, /^# Dependency License Report: o\/r$/m);
     assert.match(md, /^## Strong copyleft \(1\)$/m);
-    assert.match(md, /^\| z-gpl \| 1\.0\.0 \| npm \| direct \| GPL-3\.0-only \|  \| GHSA-9 \|/m);
+    assert.match(md, /^\| z-gpl \| 1\.0\.0 \| npm \| direct \| GPL-3\.0-only \|  \| GHSA-9 \(unrated\) \|/m);
     assert.match(md, /^\| a-mit \| 1\.0\.0 \| npm \| direct \| MIT \|/m, 'permissive in a full table when not compact');
 
     const gx = buildDepsOutput('generic-xml', ctx).text;

@@ -533,3 +533,10 @@ a.issue-link { color: var(--ink-soft); }
     border: 1px dashed var(--cobalt);
     color: var(--cobalt);
 }
+
+/* Dependencies: advisory severity, upgrades, health */
+.dep-advisory.sev-critical, .dep-advisory.sev-high { color: #fff; background: var(--over); border-color: var(--over); }
+.dep-advisory.sev-medium { color: var(--near); border-color: var(--near); background: var(--near-bg); }
+.dep-advisory.sev-low, .dep-advisory.sev-unknown { color: var(--ink-soft); border-color: var(--line); }
+.dep-outdated { color: var(--cobalt); border-color: var(--cobalt); }
+.dep-health { color: var(--near); border-color: var(--near); border-style: dashed; }
