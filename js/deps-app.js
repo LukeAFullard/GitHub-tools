@@ -3,9 +3,12 @@
  * .zip, looks up licenses on deps.dev, groups them for review and packs a report for an AI.
  */
 import { parseRepoInput } from './github-api.js';
-import { fetchRepoInfo, fetchRepoManifests, readZipManifests, collectDirectDependencies, resolveLicenses } from './deps-api.js';
+import { parseCompareInput, diffPackages, summarizeDiff } from './deps-compare.js';
+import { fetchPullRequest, fetchRepoInfo, fetchRepoManifests, readZipManifests, collectDirectDependencies, resolveLicenses } from './deps-api.js';
 import { classifyLicense, guessLicenseFromText, LICENSE_GROUPS, GROUP_LABELS, GROUP_HINTS } from './license-classify.js';
-import { buildDepsOutput, groupCounts, sortPackages } from './deps-formatters.js';
+import { buildDepsOutput, groupCounts, sortPackages, collectAdvisories } from './deps-formatters.js';
+
+const SEVERITY_TEXT = { critical: 'critical', high: 'high', medium: 'medium', low: 'low', unknown: 'unrated' };
 import { parseZipArchive } from './zip-loader.js';
 import { escapeXml } from './formatters.js';
 import { estimateTokensAsync } from './tokenizer.js';
@@ -15,6 +18,9 @@ import { renderBanner } from './ui-banner.js';
 import { buildTabHref } from './nav.js';
 import { externalLink, registryUrl, depsDevUrl, advisoryUrl } from './links.js';
 import { confirmFirstUse } from './first-use.js';
+import { toCsv, toCycloneDx } from './deps-export.js';
+import { unsupportedText } from './manifest-parsers.js';
+import { DEFAULT_POLICY, normalizePolicy, parsePolicyFile, policyToFile, evaluatePolicy, describePolicy, POLICY_FILE } from './license-policy.js';
 
 const $ = id => document.getElementById(id);
 const dom = {
@@ -30,7 +36,10 @@ const dom = {
     statPackages: $('statPackages'), repoLicenseText: $('repoLicenseText'), statTokens: $('statTokens'),
     targetBudgetDisplay: $('targetBudgetDisplay'), groupPills: $('groupPills'),
     depSearchInput: $('depSearchInput'), ecosystemFilter: $('ecosystemFilter'), relationFilter: $('relationFilter'),
-    advisoriesOnly: $('advisoriesOnly'), matchCount: $('matchCount'), depsEmptyState: $('depsEmptyState'),
+    attentionFilter: $('attentionFilter'), repoPolicyNote: $('repoPolicyNote'), useRepoPolicy: $('useRepoPolicy'),
+    useRepoPolicyLabel: $('useRepoPolicyLabel'), policyBlock: $('policyBlock'), policyAllow: $('policyAllow'),
+    policyPackages: $('policyPackages'), policyResetBtn: $('policyResetBtn'), policyDownloadBtn: $('policyDownloadBtn'),
+    policyEditor: $('policyEditor'), compareInput: $('compareInput'), exportBar: $('exportBar'), csvBtn: $('csvBtn'), sbomBtn: $('sbomBtn'), matchCount: $('matchCount'), depsEmptyState: $('depsEmptyState'),
     depsList: $('depsList'), outputScopeNote: $('outputScopeNote'),
     wrapToggleBtn: $('wrapToggleBtn'), copyBtn: $('copyBtn'), downloadBtn: $('downloadBtn'),
     warningBanner: $('warningBanner'), summaryCard: $('summaryCard'), outputEmptyState: $('outputEmptyState'),
@@ -54,6 +63,12 @@ let state = {
     repoLicense: null,
     manifests: [],
     directDeps: [],
+    locks: [],
+    lockfiles: [],
+    localPolicy: normalizePolicy(DEFAULT_POLICY),
+    repoPolicy: null,      // from the repository's .gitdoco-policy.json, when present
+    compare: null,         // { baseLabel, headLabel, baseManifests } when comparing two refs or a PR
+    diff: null,
     packages: [],
     warnings: [],
     groupFilter: null,
@@ -132,12 +147,61 @@ function saveSettings() {
     if (dom.format) store.set('cfg_format', dom.format.value);
 }
 
+// ------------------------------------------------------------------ license policy
+
+const policyGroupSelects = () => [...document.querySelectorAll('select[data-policy-group]')];
+
+function readPolicyEditor() {
+    const groups = {};
+    for (const sel of policyGroupSelects()) groups[sel.dataset.policyGroup] = sel.value;
+    return normalizePolicy({ groups, blockLicenses: dom.policyBlock.value, allowLicenses: dom.policyAllow.value, allowPackages: dom.policyPackages.value });
+}
+
+function writePolicyEditor(policy) {
+    for (const sel of policyGroupSelects()) sel.value = policy.groups[sel.dataset.policyGroup];
+    dom.policyBlock.value = policy.blockLicenses.join(', ');
+    dom.policyAllow.value = policy.allowLicenses.join(', ');
+    dom.policyPackages.value = policy.allowPackages.join(', ');
+}
+
+const usingRepoPolicy = () => Boolean(state.repoPolicy && dom.useRepoPolicy.checked);
+const effectivePolicy = () => (usingRepoPolicy() ? state.repoPolicy : state.localPolicy);
+const policySource = () => (usingRepoPolicy() ? `Policy from the repository's ${POLICY_FILE}` : 'Policy from GitDoco settings');
+
+function renderPolicyEditor() {
+    const repo = Boolean(state.repoPolicy);
+    dom.repoPolicyNote.hidden = !repo;
+    dom.useRepoPolicyLabel.hidden = !repo;
+    if (repo) dom.repoPolicyNote.textContent = `This repository has a ${POLICY_FILE}. ${usingRepoPolicy() ? 'It is used below (read-only).' : 'Your own policy is used instead.'}`;
+    writePolicyEditor(effectivePolicy());
+    const locked = usingRepoPolicy();
+    for (const el of [...policyGroupSelects(), dom.policyBlock, dom.policyAllow, dom.policyPackages, dom.policyResetBtn]) el.disabled = locked;
+}
+
+function applyPolicy() {
+    const policy = effectivePolicy();
+    for (const p of state.packages) p.policy = evaluatePolicy(p, policy);
+}
+
+function onPolicyChanged() {
+    applyPolicy();
+    if (state.diff && state.diff.basePackages) {
+        for (const p of state.diff.basePackages) p.policy = evaluatePolicy(p, effectivePolicy());
+        state.diff = { ...diffPackages(state.diff.basePackages, state.packages), basePackages: state.diff.basePackages };
+    }
+    if (state.appState === 'loaded') renderAll();
+}
+
 function loadSettings() {
     const bool = (k, el) => { const v = store.get(k); if (v !== null && el) el.checked = v === 'true'; };
     bool('cfg_deps_includeTransitive', dom.includeTransitive);
     bool('cfg_deps_includeDev', dom.includeDev);
     bool('cfg_deps_skipExamples', dom.skipExamples);
     bool('cfg_deps_compactPermissive', dom.compactPermissive);
+    try {
+        const saved = store.get('cfg_deps_policy');
+        if (saved) state.localPolicy = normalizePolicy(JSON.parse(saved));
+    } catch (_) {}
     const inst = store.get('cfg_deps_aiInstructions');
     if (inst !== null) dom.aiInstructions.value = inst;
     const fmt = store.get('cfg_format');
@@ -172,12 +236,18 @@ function filteredPackages() {
     const q = (dom.depSearchInput.value || '').trim().toLowerCase();
     const eco = dom.ecosystemFilter.value;
     const rel = dom.relationFilter.value;
-    const advOnly = dom.advisoriesOnly.checked;
+    const attention = dom.attentionFilter.value;
     return state.packages.filter(p => {
         if (state.groupFilter && p.license.group !== state.groupFilter) return false;
         if (eco && p.ecosystem !== eco) return false;
         if (rel && p.relation !== rel) return false;
-        if (advOnly && !(p.advisories && p.advisories.length)) return false;
+        if (attention === 'advisories' && !(p.advisories && p.advisories.length)) return false;
+        if (attention === 'high' && !['critical', 'high'].includes(p.maxSeverity)) return false;
+        if (attention === 'outdated' && !p.outdated) return false;
+        if (attention === 'health' && !(p.healthFlags && p.healthFlags.length)) return false;
+        if (attention === 'changed' && !p.change) return false;
+        if (attention === 'blocked' && !(p.policy && p.policy.verdict === 'block')) return false;
+        if (attention === 'policy-review' && !(p.policy && p.policy.verdict === 'review')) return false;
         if (q && !p.name.toLowerCase().includes(q) && !(p.license.expression || '').toLowerCase().includes(q)) return false;
         return true;
     });
@@ -239,23 +309,59 @@ function renderList() {
         lic.className = 'issue-number';
         lic.textContent = p.license.expression || (p.status === 'not-found' ? 'not on deps.dev' : 'no license data');
         title.append(badge, name, lic);
+        if (p.change) {
+            const ch = document.createElement('span');
+            ch.className = `issue-state-badge change-badge change-${p.change}`;
+            ch.textContent = p.change === 'added' ? 'New' : `Updated from ${(p.changedFrom || []).join(', ')}`;
+            ch.title = p.change === 'added' ? `Not in ${state.compare ? state.compare.baseLabel : 'the base'}` : `Was ${(p.changedFrom || []).join(', ')} in ${state.compare ? state.compare.baseLabel : 'the base'}`;
+            title.appendChild(ch);
+        }
+        if (p.policy && p.policy.verdict !== 'allow') {
+            const pol = document.createElement('span');
+            pol.className = `issue-state-badge policy-badge policy-${p.policy.verdict}`;
+            pol.textContent = p.policy.verdict === 'block' ? 'Blocked' : 'Review';
+            pol.title = `${p.policy.verdict === 'block' ? 'Blocked' : 'Needs review'} by policy: ${p.policy.reason}`;
+            title.appendChild(pol);
+        }
         const ddHref = p.status !== 'not-found' ? depsDevUrl(p.ecosystem, p.name, p.version) : null;
         if (ddHref) title.appendChild(externalLink(ddHref, 'deps.dev', { title: `${p.name} on deps.dev: license, dependencies and advisories`, className: 'ext-link dep-source-link' }));
         const meta = document.createElement('div');
         meta.className = 'issue-meta-row';
         const bits = [p.ecosystem, p.relation + (p.dev ? ' (dev)' : '')];
-        if (p.via && p.via.length) bits.push(`via ${p.via.slice(0, 2).join(', ')}${p.via.length > 2 ? '…' : ''}`);
+        if (p.path && p.path.length > 2) bits.push(`via ${p.path.slice(0, -1).join(' → ')}`);
+        else if (p.via && p.via.length) bits.push(`via ${p.via.slice(0, 2).join(', ')}${p.via.length > 2 ? '…' : ''}`);
         if (p.versionKind === 'range-min') bits.push('lowest version in range');
         if (p.versionKind === 'latest') bits.push('latest release');
+        if (p.versionKind === 'locked') bits.push('locked');
         meta.innerHTML = bits.map(b => `<span>${escapeXml(b)}</span>`).join('<span>•</span>');
         if (p.advisories && p.advisories.length) {
             // One advisory opens directly; several open the deps.dev page, which lists them all.
-            const advText = `${p.advisories.length} advisor${p.advisories.length === 1 ? 'y' : 'ies'}`;
+            const sev = p.maxSeverity || 'unknown';
+            const advText = `${p.advisories.length} advisor${p.advisories.length === 1 ? 'y' : 'ies'} · ${SEVERITY_TEXT[sev]}`;
+            const advTitle = (p.advisoryDetails || []).slice(0, 10)
+                .map(a => `${a.id} (${SEVERITY_TEXT[a.severity]}${a.score ? ` ${a.score}` : ''})${a.title ? `: ${a.title}` : ''}`).join('\n') || p.advisories.join(', ');
             const advHref = p.advisories.length === 1 ? advisoryUrl(p.advisories[0]) : depsDevUrl(p.ecosystem, p.name, p.version);
+            const cls = `issue-label-pill dep-advisory sev-${sev}`;
             const adv = advHref
-                ? externalLink(advHref, advText, { title: p.advisories.slice(0, 10).join(', '), className: 'issue-label-pill dep-advisory ext-link' })
-                : Object.assign(document.createElement('span'), { className: 'issue-label-pill dep-advisory', textContent: advText, title: p.advisories.slice(0, 10).join(', ') });
+                ? externalLink(advHref, advText, { title: advTitle, className: `${cls} ext-link` })
+                : Object.assign(document.createElement('span'), { className: cls, textContent: advText, title: advTitle });
             meta.appendChild(adv);
+        }
+        if (p.outdated && p.latest) {
+            const up = document.createElement('span');
+            up.className = 'issue-label-pill dep-outdated';
+            up.textContent = p.upgradeClears ? `latest ${p.latest} · fixes ${p.upgradeClears}` : `latest ${p.latest}`;
+            up.title = p.upgradeClears
+                ? `Upgrading to ${p.latest} clears ${p.upgradeClears} of ${p.advisories.length} known advisor${p.advisories.length === 1 ? 'y' : 'ies'}`
+                : `A newer release (${p.latest}) is available`;
+            meta.appendChild(up);
+        }
+        for (const flag of p.healthFlags || []) {
+            const h = document.createElement('span');
+            h.className = 'issue-label-pill dep-health';
+            h.textContent = flag;
+            if (p.health && p.health.project) h.title = `Source project: ${p.health.project}${p.health.scorecard !== null ? `, OpenSSF Scorecard ${p.health.scorecard}/10` : ''}`;
+            meta.appendChild(h);
         }
         for (const note of p.license.notes || []) {
             const n = document.createElement('span');
@@ -289,6 +395,9 @@ async function rebuildOutput() {
         repoLicense: state.repoLicense,
         packages: visible,
         manifests: state.manifests,
+        lockfiles: state.lockfiles,
+        policy: { description: describePolicy(effectivePolicy(), policySource()) },
+        comparison: state.diff ? { base: state.compare.baseLabel, head: state.compare.headLabel, diff: state.diff } : null,
         includeTransitive: dom.includeTransitive.checked,
         includeDev: dom.includeDev.checked,
         compactPermissive: dom.compactPermissive.checked,
@@ -315,18 +424,33 @@ async function rebuildOutput() {
         : `of ${state.budget.toLocaleString()}`;
     const counts = groupCounts(visible);
     const review = counts['strong-copyleft'] + counts['weak-copyleft'] + counts['restricted'];
-    const advisories = visible.reduce((n, p) => n + ((p.advisories && p.advisories.length) ? 1 : 0), 0);
+    const sev = { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 };
+    for (const { a } of collectAdvisories(visible)) sev[a.severity]++;
+    const totalAdv = Object.values(sev).reduce((x, y) => x + y, 0);
+    const directs = visible.filter(p => p.relation === 'direct');
+    const outdated = directs.filter(p => p.outdated).length;
+    const fixable = directs.filter(p => p.upgradeClears).length;
+    const health = directs.filter(p => p.healthFlags && p.healthFlags.length).length;
     dom.summaryCard.innerHTML = '';
     for (const line of [
         `${visible.length} package${visible.length === 1 ? '' : 's'} · about ${tokens.toLocaleString()} tokens`,
         `${review} to review (copyleft or restricted) · ${counts.unknown} unknown`,
-        `${advisories} with known security advisories`
+        totalAdv
+            ? `${totalAdv} security advisor${totalAdv === 1 ? 'y' : 'ies'}: ${sev.critical} critical, ${sev.high} high, ${sev.medium} medium, ${sev.low + sev.unknown} low or unrated`
+            : 'No known security advisories',
+        `Direct: ${outdated} outdated${fixable ? ` (${fixable} fixed by upgrading)` : ''} · ${health} with health warnings`,
+        state.lockfiles.length
+            ? `Exact versions from ${state.lockfiles.join(', ')}${state.packages.some(p => p.versionKind && p.versionKind !== 'locked') ? '; others estimated' : ''}`
+            : 'No lockfile: versions estimated from manifest ranges',
+        ...(state.diff ? [`Compared with ${state.compare.baseLabel}: ${summarizeDiff(state.diff)}`] : []),
+        `Policy: ${visible.filter(p => p.policy && p.policy.verdict === 'block').length} blocked · ${visible.filter(p => p.policy && p.policy.verdict === 'review').length} to review (${usingRepoPolicy() ? POLICY_FILE : 'your settings'})`
     ]) {
         const el = document.createElement('div');
         el.textContent = line;
         dom.summaryCard.appendChild(el);
     }
     dom.summaryCard.hidden = false;
+    dom.exportBar.hidden = false;
 }
 
 function renderAll() {
@@ -343,6 +467,10 @@ function fillEcosystemFilter() {
 
 function resetView() {
     state.packages = [];
+    state.compare = null;
+    state.diff = null;
+    state.locks = [];
+    state.lockfiles = [];
     state.groupFilter = null;
     state.output = null;
     state.warnings = [];
@@ -354,6 +482,7 @@ function resetView() {
     dom.copyBtn.disabled = true;
     dom.downloadBtn.disabled = true;
     dom.summaryCard.hidden = true;
+    dom.exportBar.hidden = true;
     dom.outputEmptyState.style.display = 'flex';
     if (dom.togglePreviewBtn) {
         dom.togglePreviewBtn.style.display = 'none';
@@ -393,6 +522,7 @@ async function load(source) {
             dom.sourceNote.hidden = false;
             dom.sourceNote.textContent = `Reading ${source.archive.fileName} in your browser. Only package names and versions are sent to deps.dev.`;
             log(`[ZIP] Looking for manifests in ${source.archive.fileName}...`);
+            if (dom.compareInput.value.trim()) state.warnings.push('Comparing is only available for GitHub repositories; the .zip was checked on its own.');
             manifestResult = await readZipManifests(source.archive, { skipExamples: dom.skipExamples.checked });
             const licFile = source.archive.treeNodes.find(n => /^(LICENSE|LICENCE|COPYING)(\.(md|txt))?$/i.test(n.path));
             if (licFile) {
@@ -408,8 +538,30 @@ async function load(source) {
             log(`[FETCH] Reading ${state.repoName} from GitHub...`);
             const info = await fetchRepoInfo(source.owner, source.repo, { pat, signal });
             state.repoLicense = info.license ? classifyLicense(info.license) : null;
-            state.sourceText += ` (branch ${info.branch})`;
-            manifestResult = await fetchRepoManifests(source.owner, source.repo, { pat, branch: info.branch, isPrivate: info.isPrivate, skipExamples: dom.skipExamples.checked, signal });
+            const compare = parseCompareInput(dom.compareInput.value, source);
+            if (compare && compare.error) throw Object.assign(new Error(compare.error), { status: 400 });
+            let head = { owner: source.owner, repo: source.repo, ref: info.branch };
+            let base = null;
+            if (compare && compare.kind === 'pr') {
+                const pr = await fetchPullRequest(source.owner, source.repo, compare.number, { pat, signal });
+                base = { owner: source.owner, repo: source.repo, ref: pr.baseRef };
+                head = { owner: pr.headOwner, repo: pr.headRepo, ref: pr.headSha };
+                state.compare = { baseLabel: `${pr.baseRef} (base of #${pr.number})`, headLabel: `pull request #${pr.number}${pr.title ? ` "${pr.title}"` : ''} (${pr.headLabel}, ${pr.headSha.slice(0, 7)})` };
+                state.sourceText += ` (pull request #${pr.number} into ${pr.baseRef})`;
+            } else if (compare && compare.kind === 'ref') {
+                base = { owner: source.owner, repo: source.repo, ref: info.branch };
+                head = { owner: source.owner, repo: source.repo, ref: compare.ref };
+                state.compare = { baseLabel: info.branch, headLabel: compare.ref };
+                state.sourceText += ` (${compare.ref}, compared with ${info.branch})`;
+            } else {
+                state.sourceText += ` (branch ${info.branch})`;
+            }
+            manifestResult = await fetchRepoManifests(head.owner, head.repo, { pat, branch: head.ref, isPrivate: info.isPrivate, skipExamples: dom.skipExamples.checked, signal });
+            if (base) {
+                log(`[FETCH] Reading ${base.ref} to compare...`);
+                const baseResult = await fetchRepoManifests(base.owner, base.repo, { pat, branch: base.ref, isPrivate: info.isPrivate, skipExamples: dom.skipExamples.checked, signal });
+                state.compare.baseManifests = baseResult.manifests;
+            }
             // Remember the repo, but not a private one or one loaded with a token.
             if (!pat && !info.isPrivate) store.set('cfg_lastRepo', state.repoName);
             if (info.isPrivate) {
@@ -419,22 +571,42 @@ async function load(source) {
         if (myGen !== generation) return;
         progress(15);
 
-        const { manifests, failed, skipped, treeTruncated } = manifestResult;
-        state.manifests = manifests.map(m => m.path);
+        const { manifests, failed, skipped, treeTruncated, unsupported = [] } = manifestResult;
+        if (unsupported.length) {
+            state.warnings.push(unsupportedText(unsupported));
+            log(`[WARN] Not checked (unsupported): ${unsupported.slice(0, 8).map(u => u.path).join(', ')}${unsupported.length > 8 ? '…' : ''}`);
+        }
+        const policyFile = manifests.find(m => m.path === POLICY_FILE);
+        state.repoPolicy = null;
+        if (policyFile) {
+            try {
+                state.repoPolicy = parsePolicyFile(policyFile.text);
+                log(`[INFO] Using the repository's ${POLICY_FILE}.`);
+            } catch (err) {
+                state.warnings.push(`${err.message}; your own policy is used instead.`);
+            }
+        }
+        renderPolicyEditor();
+        state.manifests = manifests.filter(m => m.path !== POLICY_FILE).map(m => m.path);
         if (treeTruncated) state.warnings.push('GitHub returned a partial file list, so some manifests may be missing.');
         if (skipped > 0) state.warnings.push(`${skipped} more manifest file(s) were found but not read (limit 60).`);
         if (failed.length) state.warnings.push(`${failed.length} manifest file(s) could not be read: ${failed.map(f => f.path).slice(0, 5).join(', ')}.`);
         dom.repoLicenseText.textContent = state.repoLicense && state.repoLicense.expression ? state.repoLicense.expression : 'not detected';
         log(`[INFO] Found ${manifests.length} manifest(s): ${state.manifests.slice(0, 8).join(', ')}${manifests.length > 8 ? '…' : ''}`);
-        if (manifests.length === 0) {
-            showToast('No supported manifest files found (package.json, requirements.txt, pyproject.toml, go.mod, Cargo.toml).', 'warn');
+        if (manifests.every(m => m.path === POLICY_FILE)) {
+            showToast(unsupported.length
+                ? `${unsupportedText(unsupported)} Supported: npm, Python (requirements, pyproject.toml, Pipfile), Go and Rust.`
+                : 'No supported manifest files found. Supported: package.json, requirements*.txt, pyproject.toml, Pipfile, go.mod, Cargo.toml (and their lockfiles).', 'warn');
             log('[WARN] No supported manifest files found.');
             setAppState('empty');
             return;
         }
 
-        const { deps, parseErrors } = collectDirectDependencies(manifests);
+        const { deps, locks, lockfilesUsed, parseErrors } = collectDirectDependencies(manifests);
         state.directDeps = deps;
+        state.locks = locks;
+        state.lockfiles = lockfilesUsed;
+        if (lockfilesUsed.length) log(`[INFO] Exact versions from ${lockfilesUsed.join(', ')}.`);
         for (const e of parseErrors) state.warnings.push(`${e.path}: ${e.error}.`);
         log(`[INFO] ${deps.length} direct dependencies. Looking up licenses on deps.dev...`);
         await resolve(signal, myGen);
@@ -451,10 +623,13 @@ async function load(source) {
     }
 }
 
+const RESOLVE_WARNINGS = [/^Stopped at/, /license lookup\(s\) failed/, /^Cargo\.lock does not mark/, /^Go: indirect modules/];
+
 /** Re-runs the deps.dev lookup with the current options (results are cached, so this is quick). */
 async function resolve(signal, myGen) {
     const t0 = Date.now();
     const { packages, capped } = await resolveLicenses(state.directDeps, {
+        locks: state.locks,
         includeTransitive: dom.includeTransitive.checked,
         includeDev: dom.includeDev.checked,
         signal,
@@ -462,10 +637,31 @@ async function resolve(signal, myGen) {
     });
     if (myGen !== generation) return;
     state.packages = packages;
-    state.warnings = state.warnings.filter(w => !w.startsWith('Stopped at'));
+    applyPolicy();
+    state.diff = null;
+    if (state.compare && state.compare.baseManifests) {
+        log(`[INFO] Checking ${state.compare.baseLabel} for the comparison...`);
+        const b = collectDirectDependencies(state.compare.baseManifests);
+        const baseResult = await resolveLicenses(b.deps, {
+            locks: b.locks, includeTransitive: dom.includeTransitive.checked, includeDev: dom.includeDev.checked, details: false, signal
+        });
+        if (myGen !== generation) return;
+        const policy = effectivePolicy();
+        for (const p of baseResult.packages) p.policy = evaluatePolicy(p, policy);
+        state.diff = { ...diffPackages(baseResult.packages, state.packages), basePackages: baseResult.packages };
+        log(`[INFO] Compared with ${state.compare.baseLabel}: ${summarizeDiff(state.diff)}.`);
+    }
+    // Warnings that depend on the lookup options are recomputed on every run.
+    state.warnings = state.warnings.filter(w => !RESOLVE_WARNINGS.some(re => re.test(w)));
     if (capped) state.warnings.push('Stopped at 1,500 packages; the list is incomplete.');
     const failedLookups = packages.filter(p => p.status === 'error').length;
     if (failedLookups) state.warnings.push(`${failedLookups} license lookup(s) failed; they are listed as unknown.`);
+    if (dom.includeTransitive.checked && !dom.includeDev.checked && state.lockfiles.some(l => /(^|\/)Cargo\.lock$/.test(l))) {
+        state.warnings.push('Cargo.lock does not mark development-only crates, so some Rust dev dependencies may be included.');
+    }
+    if (dom.includeTransitive.checked && packages.some(p => p.ecosystem === 'go' && p.relation !== 'direct')) {
+        state.warnings.push('Go: indirect modules come from go.mod (deps.dev has no Go dependency graph), so they show no "via" path; modules made before Go 1.17 may list fewer.');
+    }
     progress(100);
     fillEcosystemFilter();
     dom.statPackages.textContent = packages.length.toLocaleString();
@@ -504,9 +700,12 @@ async function openZip(file) {
 dom.loadBtn.addEventListener('click', () => {
     const info = parseRepoInput(dom.repoUrl.value);
     if (!info) { showError('Enter a repo as owner/name or a GitHub URL.'); return; }
+    const compare = parseCompareInput(dom.compareInput.value, info);
+    if (compare && compare.error) { showError(compare.error); return; }
     load({ kind: 'github', owner: info.owner, repo: info.repo });
 });
 dom.repoUrl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); dom.loadBtn.click(); } });
+dom.compareInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); dom.loadBtn.click(); } });
 
 // The repo form never submits (Enter is handled by the buttons); kept out of HTML for the CSP.
 const sourceFormEl = document.getElementById('sourceForm');
@@ -556,6 +755,45 @@ dom.skipExamples.addEventListener('change', () => {
 });
 dom.compactPermissive.addEventListener('change', () => { saveSettings(); rebuildOutput(); });
 
+[...policyGroupSelects(), dom.policyBlock, dom.policyAllow, dom.policyPackages].forEach(el => {
+    el.addEventListener('change', () => {
+        if (usingRepoPolicy()) return;
+        state.localPolicy = readPolicyEditor();
+        store.set('cfg_deps_policy', JSON.stringify(state.localPolicy));
+        onPolicyChanged();
+    });
+});
+dom.useRepoPolicy.addEventListener('change', () => { renderPolicyEditor(); onPolicyChanged(); });
+dom.policyResetBtn.addEventListener('click', () => {
+    state.localPolicy = normalizePolicy(DEFAULT_POLICY);
+    store.set('cfg_deps_policy', JSON.stringify(state.localPolicy));
+    renderPolicyEditor();
+    onPolicyChanged();
+});
+function saveFile(text, filename, mime) {
+    const blob = new Blob([text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+const fileBase = () => (state.repoName.split('/').pop() || 'repo').replace(/[^\w.-]+/g, '-');
+
+dom.policyDownloadBtn.addEventListener('click', () => saveFile(policyToFile(effectivePolicy()), POLICY_FILE, 'application/json'));
+dom.csvBtn.addEventListener('click', () => {
+    saveFile(toCsv(sortPackages(filteredPackages())), `${fileBase()}-dependencies.csv`, 'text/csv');
+    showToast('Downloaded the CSV.', 'info');
+});
+dom.sbomBtn.addEventListener('click', () => {
+    const bom = toCycloneDx({ repoName: state.repoName, packages: sortPackages(filteredPackages()) });
+    saveFile(JSON.stringify(bom, null, 2), `${fileBase()}-sbom.cdx.json`, 'application/vnd.cyclonedx+json');
+    showToast('Downloaded the CycloneDX SBOM.', 'info');
+});
+
 let instTimer = null;
 dom.aiInstructions.addEventListener('input', () => {
     dom.instructionsCharCount.textContent = `${dom.aiInstructions.value.length} chars`;
@@ -578,7 +816,7 @@ document.querySelectorAll('.preset-buttons button[data-instruction]').forEach(bt
     });
 });
 
-[dom.depSearchInput, dom.ecosystemFilter, dom.relationFilter, dom.advisoriesOnly].forEach(el => {
+[dom.depSearchInput, dom.ecosystemFilter, dom.relationFilter, dom.attentionFilter].forEach(el => {
     el.addEventListener('input', () => { renderList(); rebuildOutput(); });
     el.addEventListener('change', () => { renderList(); rebuildOutput(); });
 });
@@ -648,6 +886,8 @@ if (dom.shareUrlBtn) {
         const url = new URL(window.location.href.split('?')[0]);
         const repo = dom.repoUrl.value.trim();
         if (repo) url.searchParams.set('repo', repo);
+        const compare = dom.compareInput.value.trim();
+        if (compare) url.searchParams.set('compare', compare);
         try { await navigator.clipboard.writeText(url.toString()); showToast('Deep-link URL copied!', 'info'); } catch (_) {}
     });
 }
@@ -674,6 +914,7 @@ if (dom.exampleRepos) {
 
 const params = new URLSearchParams(window.location.search);
 if (params.get('repo')) dom.repoUrl.value = params.get('repo');
+if (params.get('compare') && dom.compareInput) dom.compareInput.value = params.get('compare').slice(0, 300);
 else { const last = store.get('cfg_lastRepo'); if (last && !dom.repoUrl.value) dom.repoUrl.value = last; }
 loadSettings();
 // ?format= wins (lands on "Custom"); else the target saved on any tab; else Claude.
@@ -685,4 +926,5 @@ if (VALID_FORMATS.includes(params.get('format'))) {
     applyTarget(savedTarget && savedTarget in TARGETS ? savedTarget : 'claude');
 }
 resetView();
+renderPolicyEditor();
 setAppState('empty');

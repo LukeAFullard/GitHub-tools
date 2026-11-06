@@ -1,6 +1,7 @@
 /**
- * Reads direct dependencies from manifest files: package.json (npm), requirements*.txt and
- * pyproject.toml (PyPI), go.mod (Go) and Cargo.toml (Cargo).
+ * Reads direct dependencies from manifest files: package.json (npm), requirements*.txt,
+ * pyproject.toml and Pipfile (PyPI), go.mod (Go) and Cargo.toml (Cargo). Manifests of other
+ * ecosystems are recognised (UNSUPPORTED_PATTERNS) so the report can say what it did not check.
  *
  * The TOML readers are deliberately narrow line-based parsers for the dependency sections only
  * (the project has no third-party dependencies, so no TOML library). They handle the common
@@ -19,7 +20,29 @@ const MANIFEST_PATTERNS = [
     { ecosystem: 'pypi', test: name => /^(requirements[\w.-]*|[\w.-]*requirements)\.txt$/i.test(name) },
     { ecosystem: 'pypi', test: name => name === 'pyproject.toml' },
     { ecosystem: 'go', test: name => name === 'go.mod' },
-    { ecosystem: 'cargo', test: name => name === 'Cargo.toml' }
+    { ecosystem: 'cargo', test: name => name === 'Cargo.toml' },
+    { ecosystem: 'pypi', test: name => name === 'Pipfile' },
+    // Lockfiles: exact versions and the real transitive tree (js/lockfiles.js).
+    { ecosystem: 'npm', kind: 'lock', test: name => ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml'].includes(name) },
+    { ecosystem: 'pypi', kind: 'lock', test: name => ['poetry.lock', 'uv.lock', 'Pipfile.lock'].includes(name) },
+    { ecosystem: 'cargo', kind: 'lock', test: name => name === 'Cargo.lock' }
+];
+
+// Package manifests of ecosystems this tool does not read. Listing them lets the report warn that
+// it is incomplete instead of looking complete.
+const UNSUPPORTED_PATTERNS = [
+    { ecosystem: 'Maven', test: name => name === 'pom.xml' },
+    { ecosystem: 'Gradle', test: name => /^build\.gradle(\.kts)?$/.test(name) },
+    { ecosystem: 'RubyGems', test: name => name === 'Gemfile' || /\.gemspec$/.test(name) },
+    { ecosystem: 'Composer (PHP)', test: name => name === 'composer.json' },
+    { ecosystem: 'NuGet (.NET)', test: name => /\.(cs|fs|vb)proj$/.test(name) || name === 'packages.config' || name === 'Directory.Packages.props' },
+    { ecosystem: 'Swift Package Manager', test: name => name === 'Package.swift' },
+    { ecosystem: 'CocoaPods', test: name => name === 'Podfile' },
+    { ecosystem: 'Pub (Dart/Flutter)', test: name => name === 'pubspec.yaml' },
+    { ecosystem: 'Hex (Elixir)', test: name => name === 'mix.exs' },
+    { ecosystem: 'Conan / vcpkg (C/C++)', test: name => name === 'conanfile.txt' || name === 'conanfile.py' || name === 'vcpkg.json' },
+    // setup.py / setup.cfg are only reported when the folder has no manifest that is read.
+    { ecosystem: 'Python setup.py / setup.cfg', test: name => name === 'setup.py' || name === 'setup.cfg', pythonFallback: true }
 ];
 
 const SKIP_DIRS = new Set(['node_modules', 'vendor', 'third_party', 'third-party', '.git', 'dist', 'build', 'target', '.venv', 'venv', 'site-packages', 'bower_components', 'jspm_packages']);
@@ -32,18 +55,48 @@ const EXAMPLE_DIRS = /^(examples?|samples?|demos?|tests?|__tests__|testdata|fixt
  */
 export function findManifestPaths(paths, { skipExamples = true, max = 60 } = {}) {
     const found = [];
+    const unsupported = [];
     for (const path of paths) {
+        // A license policy committed at the repository root (js/license-policy.js).
+        if (path === '.gitdoco-policy.json') { found.push({ path, ecosystem: null, kind: 'policy' }); continue; }
         const parts = path.split('/');
         const name = parts[parts.length - 1];
         const dirs = parts.slice(0, -1);
         if (dirs.some(d => SKIP_DIRS.has(d) || d.startsWith('.'))) continue;
         if (skipExamples && dirs.some(d => EXAMPLE_DIRS.test(d))) continue;
         const pattern = MANIFEST_PATTERNS.find(p => p.test(name));
-        if (pattern) found.push({ path, ecosystem: pattern.ecosystem });
+        if (pattern) { found.push({ path, ecosystem: pattern.ecosystem, kind: pattern.kind || 'manifest' }); continue; }
+        const other = UNSUPPORTED_PATTERNS.find(p => p.test(name));
+        if (other) unsupported.push({ path, ecosystem: other.ecosystem, pythonFallback: Boolean(other.pythonFallback) });
     }
     // Shallow manifests first: the root project matters most if we hit the cap.
     found.sort((a, b) => a.path.split('/').length - b.path.split('/').length || a.path.localeCompare(b.path));
-    return { manifests: found.slice(0, max), skipped: Math.max(0, found.length - max) };
+    const dirOf = p => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
+    const pythonDirs = new Set(found.filter(m => m.ecosystem === 'pypi').map(m => dirOf(m.path)));
+    return {
+        manifests: found.slice(0, max),
+        skipped: Math.max(0, found.length - max),
+        unsupported: unsupported
+            .filter(u => !u.pythonFallback || !pythonDirs.has(dirOf(u.path)))
+            .map(({ path, ecosystem }) => ({ path, ecosystem }))
+            .sort((a, b) => a.path.split('/').length - b.path.split('/').length || a.path.localeCompare(b.path))
+    };
+}
+
+/**
+ * One sentence naming the ecosystems that were found but not checked, e.g.
+ * "Not checked: Maven (pom.xml) and RubyGems (Gemfile, api/Gemfile). ..." Empty when none.
+ */
+export function unsupportedText(unsupported) {
+    if (!unsupported || !unsupported.length) return '';
+    const byEco = new Map();
+    for (const u of unsupported) {
+        if (!byEco.has(u.ecosystem)) byEco.set(u.ecosystem, []);
+        byEco.get(u.ecosystem).push(u.path);
+    }
+    const parts = [...byEco].map(([eco, list]) => `${eco} (${list.slice(0, 3).join(', ')}${list.length > 3 ? `, +${list.length - 3} more` : ''})`);
+    const joined = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0];
+    return `Not checked: ${joined}. These package managers are not supported yet, so this report does not cover their dependencies.`;
 }
 
 function versionFromSpec(spec, { pep440 = false } = {}) {
@@ -269,6 +322,27 @@ export function parseCargoToml(text, manifest = 'Cargo.toml') {
     return { deps, name };
 }
 
+/** Pipfile ([packages] and [dev-packages]); Pipfile.lock supplies exact versions when present. */
+export function parsePipfile(text, manifest = 'Pipfile') {
+    const sections = tomlSections(text);
+    const deps = [];
+    for (const [section, dev] of [['packages', false], ['dev-packages', true]]) {
+        for (const line of sections.get(section) || []) {
+            const kv = keyValue(line);
+            if (!kv) continue;
+            let spec;
+            if (kv.value.startsWith('{')) {
+                if (/\b(path|git|file|editable)\s*=/.test(kv.value)) continue;
+                spec = inlineField(kv.value, 'version') || '';
+            } else {
+                spec = quotedStrings(kv.value)[0] || '';
+            }
+            deps.push(dep('pypi', normalizePypiName(kv.key), spec === '*' ? '' : spec, manifest, { dev }));
+        }
+    }
+    return { deps };
+}
+
 /** Parses any supported manifest by file name. */
 export function parseManifest(path, text) {
     const name = path.split('/').pop();
@@ -276,6 +350,7 @@ export function parseManifest(path, text) {
     if (name === 'pyproject.toml') return parsePyprojectToml(text, path);
     if (name === 'go.mod') return parseGoMod(text, path);
     if (name === 'Cargo.toml') return parseCargoToml(text, path);
+    if (name === 'Pipfile') return parsePipfile(text, path);
     if (/\.txt$/i.test(name)) return parseRequirementsTxt(text, path);
     return { deps: [] };
 }

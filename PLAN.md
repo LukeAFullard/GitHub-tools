@@ -136,7 +136,7 @@ What was built:
 
 Possible follow-ups:
 
-- [ ] Lockfiles (`package-lock.json`, `poetry.lock`, `Cargo.lock`) for exact installed versions.
+- [x] Lockfiles for exact installed versions (see Phase 8).
 - [ ] More ecosystems deps.dev supports (Maven, NuGet, RubyGems).
 
 ---
@@ -220,4 +220,40 @@ consent to nothing would be meaningless. When that changes:
    `_headers`, `tests/privacy.test.js` (it will fail on purpose), and bump `NOTICE_VERSION`.
 5. Cookieless analytics (e.g. Cloudflare Web Analytics, as on TimeDoco's marketing pages) usually
    needs no consent banner but must be disclosed in the privacy notice.
+
+## Phase 8: Dependencies, accurate and actionable (done)
+
+- [x] `js/lockfiles.js`: package-lock.json (v1-v3), yarn.lock (classic and Berry), pnpm-lock.yaml
+      (v5-v9, multi-document), poetry.lock, uv.lock, Pipfile.lock, Cargo.lock. Checked against real
+      lockfiles from npm/cli, React, Yarn Berry, Vite, Poetry, pydantic and ripgrep (package counts
+      verified independently). Workspace members are kept as pass-through nodes so monorepos' whole
+      trees are found; their dev dependencies are followed only with "Include dev".
+- [x] Advisory titles and CVSS severity (deps.dev advisories), worst first; a "Security
+      advisories" section in every report format; brief permissive lines keep their advisories.
+- [x] Direct dependencies: latest version, outdated flag, and whether upgrading clears advisories.
+- [x] Project health for direct dependencies: OpenSSF Scorecard, "Maintained" check, deprecated or
+      yanked releases, and a recognised source-repo licence that disagrees with the registry.
+- [x] "Show" filter: advisories, high/critical, outdated, health warnings.
+- Known limit: Cargo.lock does not mark dev-only crates, so workspace members' dev crates are
+  included for Rust projects.
+
+## Phase 9: Dependencies, ready for a team (done)
+
+- [x] Dependency paths ("why is this here?"): the shortest chain from a direct dependency (or a
+      workspace member) to each transitive package, from lockfiles or the deps.dev graph; shown as
+      "via a → b" and in every report format and export.
+- [x] Licence policy (`js/license-policy.js`): allow / review / block per licence group, plus
+      always-blocked and always-allowed licences and approved packages. Saved in the browser, or read
+      from a committed `.gitdoco-policy.json` (which takes precedence and can be downloaded from the
+      editor). SPDX OR picks the best option, AND the worst. Not legal advice.
+- [x] Exports (`js/deps-export.js`): CSV (with formula-injection protection) and CycloneDX 1.5 JSON
+      SBOM with purls, licences, scope, paths and vulnerabilities (validated against the official
+      schema).
+- [x] Compare (`js/deps-compare.js`): a branch, tag, commit or pull request (including forks)
+      against the base; added, updated and removed packages, new advisories and new policy findings,
+      as badges, a "Changed" filter, and a comparison section first in every report format.
+      `?compare=` is kept in share links.
+
+Next candidates: more ecosystems (.NET, Ruby, Maven), a CI-friendly mode that fails on new policy
+findings, and SPDX (tag-value or JSON) as a second SBOM format.
 

@@ -248,7 +248,7 @@ test('deps report: sorted by group and the four formats', () => {
     assert.match(xml, /<summary>Restricted: 1, Strong copyleft: 1, Weak copyleft: 1, Unknown: 1, Permissive: 1<\/summary>/);
     assert.match(xml, /not legal advice/);
     assert.ok(xml.indexOf('name="busl"') < xml.indexOf('name="z-gpl"'), 'restricted listed first');
-    assert.match(xml, /name="z-gpl"[^>]*advisories="GHSA-9"/);
+    assert.match(xml, /name="z-gpl"[^>]*advisories="GHSA-9 \(unrated\)"/);
     assert.match(xml, /name="m-mpl"[^>]*relation="transitive" license="MPL-2.0" via="a-mit"[^>]*notes="version: lowest version in range"/);
     assert.match(xml, /name="nolic"[^>]*license="none found"[^>]*notes="not found on deps.dev"/);
     assert.match(xml, /npm:a-mit@1\.0\.0 \(MIT\)/, 'permissive listed briefly');
@@ -257,7 +257,7 @@ test('deps report: sorted by group and the four formats', () => {
     const md = buildDepsOutput('markdown', { ...ctx, compactPermissive: false }).text;
     assert.match(md, /^# Dependency License Report: o\/r$/m);
     assert.match(md, /^## Strong copyleft \(1\)$/m);
-    assert.match(md, /^\| z-gpl \| 1\.0\.0 \| npm \| direct \| GPL-3\.0-only \|  \| GHSA-9 \|/m);
+    assert.match(md, /^\| z-gpl \| 1\.0\.0 \| npm \| direct \| GPL-3\.0-only \|  \| GHSA-9 \(unrated\) \|/m);
     assert.match(md, /^\| a-mit \| 1\.0\.0 \| npm \| direct \| MIT \|/m, 'permissive in a full table when not compact');
 
     const gx = buildDepsOutput('generic-xml', ctx).text;
@@ -275,4 +275,33 @@ test('deps report: sorted by group and the four formats', () => {
 test('nav knows the Dependencies tab', () => {
     assert.equal(buildTabHref('deps', 'o/r'), 'deps.html?repo=o%2Fr');
     assert.equal(buildTabHref('deps', ''), 'deps.html');
+});
+
+test('manifests of unsupported ecosystems are found so the report can say it is incomplete', async () => {
+    const { findManifestPaths, unsupportedText } = await import('../js/manifest-parsers.js');
+    const r = findManifestPaths([
+        'package.json', 'pom.xml', 'api/Gemfile', 'web/Gemfile', 'src/App.csproj', 'composer.json',
+        'node_modules/x/pom.xml', 'examples/demo/pom.xml',
+        'setup.py', 'tools/setup.py', 'tools/x.py', 'lib/setup.cfg', 'lib/pyproject.toml'
+    ]);
+    assert.deepEqual(r.manifests.map(m => m.path), ['package.json', 'lib/pyproject.toml']);
+    assert.deepEqual(r.unsupported.map(u => `${u.ecosystem}:${u.path}`), [
+        'Composer (PHP):composer.json', 'Maven:pom.xml', 'Python setup.py / setup.cfg:setup.py',
+        'RubyGems:api/Gemfile', 'NuGet (.NET):src/App.csproj', 'Python setup.py / setup.cfg:tools/setup.py', 'RubyGems:web/Gemfile'
+    ], 'skipped folders are ignored, and setup.cfg next to a pyproject.toml is not reported');
+    const text = unsupportedText(r.unsupported);
+    assert.match(text, /^Not checked: Composer \(PHP\) \(composer\.json\), Maven \(pom\.xml\), .* and NuGet \(\.NET\) \(src\/App\.csproj\)\./);
+    assert.match(text, /RubyGems \(api\/Gemfile, web\/Gemfile\)/);
+    assert.match(text, /not supported yet, so this report does not cover their dependencies\.$/);
+    assert.equal(unsupportedText([]), '');
+    const many = unsupportedText(['a', 'b', 'c', 'd', 'e'].map(d => ({ path: `${d}/pom.xml`, ecosystem: 'Maven' })));
+    assert.match(many, /Maven \(a\/pom\.xml, b\/pom\.xml, c\/pom\.xml, \+2 more\)/);
+});
+
+test('the versions line says when only some packages come from a lockfile', async () => {
+    const { lockText } = await import('../js/deps-formatters.js');
+    assert.equal(lockText({ lockfiles: [] }), 'No lockfile found: versions estimated from manifest ranges');
+    assert.equal(lockText({ lockfiles: ['Cargo.lock'], packages: [{ versionKind: 'locked' }] }), 'Exact versions from lockfiles: Cargo.lock');
+    assert.equal(lockText({ lockfiles: ['Cargo.lock'], packages: [{ versionKind: 'locked' }, { versionKind: 'range-min' }] }),
+        'Exact versions from lockfiles: Cargo.lock; packages not in a lockfile have estimated versions');
 });

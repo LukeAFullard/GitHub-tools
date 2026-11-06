@@ -15,6 +15,7 @@
 import { GITHUB_API_BASE } from './config.js';
 import { fetchRepoTree, fetchFileContent, extractRateLimitHeaders, sleep } from './github-api.js';
 import { findManifestPaths, parseManifest } from './manifest-parsers.js';
+import { parseLockfile, LOCKFILE_NAMES, compareVersions } from './lockfiles.js';
 import { classifyLicense } from './license-classify.js';
 
 export const DEPS_DEV_BASE = 'https://api.deps.dev/v3';
@@ -35,6 +36,35 @@ function authHeaders(pat) {
     if (!pat) return {};
     const token = pat.trim();
     return { 'Authorization': /^(github_pat_|gho_|ghu_|ghs_)/.test(token) ? `Bearer ${token}` : `token ${token}` };
+}
+
+/**
+ * A pull request's base branch and head commit (the head may live in a fork).
+ * @returns {{ number, title, baseRef, headSha, headOwner, headRepo, headLabel }}
+ */
+export async function fetchPullRequest(owner, repo, number, { pat = '', signal, onHeaders } = {}) {
+    const res = await fetch(`${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${Number(number)}`, {
+        headers: { 'Accept': 'application/vnd.github.v3+json', ...authHeaders(pat) }, signal
+    });
+    if (onHeaders) onHeaders(extractRateLimitHeaders(res));
+    if (!res.ok) {
+        throw new DepsError(res.status === 404
+            ? `Can't find pull request #${Number(number)} in ${owner}/${repo}.`
+            : `Pull request lookup failed (${res.status}).`, res.status);
+    }
+    const pr = await res.json();
+    if (!pr.head || !pr.head.repo || !pr.head.sha || !pr.base || !pr.base.ref) {
+        throw new DepsError(`Pull request #${Number(number)} has no readable head (its fork may have been deleted).`);
+    }
+    return {
+        number: pr.number,
+        title: pr.title || '',
+        baseRef: pr.base.ref,
+        headSha: pr.head.sha,
+        headOwner: pr.head.repo.owner ? pr.head.repo.owner.login : owner,
+        headRepo: pr.head.repo.name,
+        headLabel: pr.head.label || `${pr.head.repo.full_name}:${pr.head.ref}`
+    };
 }
 
 /** Repository metadata: default branch, privacy and the repo's own license (SPDX ID). */
@@ -79,33 +109,66 @@ async function readManifests(list, readText) {
 export async function fetchRepoManifests(owner, repo, { pat = '', branch, isPrivate = false, skipExamples = true, signal, onHeaders } = {}) {
     const tree = await fetchRepoTree(owner, repo, branch, pat, signal, onHeaders);
     const paths = tree.filter(n => n.type === 'blob').map(n => n.path);
-    const { manifests: found, skipped } = findManifestPaths(paths, { skipExamples });
+    const { manifests: found, skipped, unsupported } = findManifestPaths(paths, { skipExamples });
     const { manifests, failed } = await readManifests(found, async (path) => {
         const r = await fetchFileContent(owner, repo, branch, path, pat, signal, onHeaders, isPrivate);
         if (!r || !r.success) throw new Error(r && r.error ? r.error : `HTTP ${r ? r.status : '?'}`);
         return r.content;
     });
-    return { manifests, failed, skipped, treeTruncated: Boolean(tree.truncated) };
+    return { manifests, failed, skipped, unsupported, treeTruncated: Boolean(tree.truncated) };
 }
 
 /** Finds and reads the manifest files inside a parsed .zip archive (js/zip-loader.js). */
 export async function readZipManifests(archive, { skipExamples = true } = {}) {
-    const { manifests: found, skipped } = findManifestPaths(archive.treeNodes.map(n => n.path), { skipExamples });
+    const { manifests: found, skipped, unsupported } = findManifestPaths(archive.treeNodes.map(n => n.path), { skipExamples });
     const { manifests, failed } = await readManifests(found, path => archive.readText(path));
-    return { manifests, failed, skipped, treeTruncated: false };
+    return { manifests, failed, skipped, unsupported, treeTruncated: false };
 }
+
+const dirOf = path => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
 
 /**
  * Parses manifests into direct dependencies, merging duplicates and skipping packages that are
- * defined in the repository itself (monorepo workspaces).
+ * defined in the repository itself (monorepo workspaces). When a lockfile covers a manifest (same
+ * ecosystem, in the manifest's folder or a parent folder), its exact versions are used.
+ *
+ * @returns {{ deps, locks, lockfilesUsed: string[], parseErrors }}
  */
-export function collectDirectDependencies(manifests) {
-    const parsed = manifests.map(m => ({ ...m, result: parseManifest(m.path, m.text) }));
+export function collectDirectDependencies(files) {
+    const isLock = f => Boolean(LOCKFILE_NAMES[f.path.split('/').pop()]);
+    files = files.filter(f => f.path !== '.gitdoco-policy.json'); // read by the page, not a manifest
+    const parseErrors = [];
+    const locks = [];
+    for (const f of files.filter(isLock)) {
+        try {
+            const g = parseLockfile(f.path, f.text);
+            if (g) locks.push(g);
+        } catch (err) {
+            parseErrors.push({ path: f.path, error: `Could not read lockfile (${err.message || err})` });
+        }
+    }
+    const lockFor = (ecosystem, manifestDir) => locks
+        .map((g, index) => ({ g, index }))
+        .filter(({ g }) => g.ecosystem === ecosystem && (g.dir === '' || g.dir === manifestDir || manifestDir.startsWith(`${g.dir}/`)))
+        .sort((a, b) => b.g.dir.length - a.g.dir.length)[0] || null;
+
+    const parsed = files.filter(f => !isLock(f)).map(m => ({ ...m, result: parseManifest(m.path, m.text) }));
     const localNames = new Set(parsed.map(p => p.result.name).filter(Boolean));
     const byKey = new Map();
+    const used = new Set();
     for (const p of parsed) {
-        for (const d of p.result.deps || []) {
+        for (let d of p.result.deps || []) {
             if (localNames.has(d.name)) continue;
+            const lock = lockFor(d.ecosystem, dirOf(d.manifest));
+            if (lock) {
+                const id = lock.g.resolveDirect(d.name, d.spec, dirOf(d.manifest));
+                const node = id && lock.g.nodes.get(id);
+                if (node && node.local) continue; // the repository's own workspace package
+                if (node) {
+                    d = { ...d, version: node.version, versionKind: 'locked', lockIndex: lock.index, lockId: id };
+                    used.add(lock.g.file);
+                }
+            }
             const key = `${d.ecosystem}|${d.name}|${d.version || ''}`;
             const existing = byKey.get(key);
             if (existing) {
@@ -117,7 +180,8 @@ export function collectDirectDependencies(manifests) {
             }
         }
     }
-    return { deps: [...byKey.values()], parseErrors: parsed.filter(p => p.result.error).map(p => ({ path: p.path, error: p.result.error })) };
+    for (const p of parsed) if (p.result.error) parseErrors.push({ path: p.path, error: p.result.error });
+    return { deps: [...byKey.values()], locks, lockfilesUsed: [...used].sort(), parseErrors };
 }
 
 // ------------------------------------------------------------------ deps.dev
@@ -171,18 +235,59 @@ async function pool(items, limit, fn, signal) {
     await Promise.all(workers);
 }
 
+/** Shortest chain of names from the SELF node to each node of a deps.dev dependency graph. */
+export function graphPaths(nodes, edges) {
+    const out = new Array(nodes.length).fill(null);
+    const self = nodes.findIndex(n => n.relation === 'SELF');
+    if (self < 0) return out;
+    const children = new Map();
+    for (const e of edges) {
+        if (!children.has(e.fromNode)) children.set(e.fromNode, []);
+        children.get(e.fromNode).push(e.toNode);
+    }
+    const name = i => (nodes[i] && nodes[i].versionKey ? nodes[i].versionKey.name : '?');
+    out[self] = [name(self)];
+    const queue = [self];
+    while (queue.length) {
+        const i = queue.shift();
+        for (const j of children.get(i) || []) {
+            if (out[j]) continue;
+            out[j] = [...out[i], name(j)];
+            queue.push(j);
+        }
+    }
+    return out;
+}
+
+/** CVSS v3 score -> severity band (FIRST.org ranges). */
+export function severityOf(score) {
+    if (typeof score !== 'number' || score <= 0) return 'unknown';
+    if (score >= 9) return 'critical';
+    if (score >= 7) return 'high';
+    if (score >= 4) return 'medium';
+    return 'low';
+}
+export const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'unknown'];
+
 /**
  * Looks up licenses (and advisories) for direct dependencies and, optionally, their transitive
- * dependencies. Returns a flat package list.
+ * dependencies. Returns a flat package list. Lockfile versions and trees are used where
+ * collectDirectDependencies found them (pass its `locks` as options.locks).
  *
- * Package: { key, ecosystem, name, version, versionKind, relation: 'direct'|'transitive',
- *   dev, via: string[], manifests: string[], license: {expression, group, notes},
- *   advisories: string[], status: 'ok'|'not-found'|'error', error? }
+ * Package: { key, ecosystem, name, version, versionKind: 'locked'|'exact'|'range-min'|'latest',
+ *   relation: 'direct'|'transitive', dev, via: string[], manifests: string[],
+ *   license: {expression, group, notes}, advisories: string[],
+ *   advisoryDetails: [{ id, title, score, severity, aliases, url }], maxSeverity,
+ *   latest, outdated, upgradeClears, health: { scorecard, maintained, stars, openIssues, project,
+ *   projectLicense }, healthFlags: string[], deprecated, status: 'ok'|'not-found'|'error', error? }
+ * (latest/outdated/health only for direct dependencies.)
  */
 export async function resolveLicenses(directDeps, options = {}) {
     const {
         includeTransitive = true,
         includeDev = false,
+        locks = [],
+        details = true,
         maxPackages = 1500,
         concurrency = 8,
         signal,
@@ -199,7 +304,8 @@ export async function resolveLicenses(directDeps, options = {}) {
         const key = `${p.ecosystem}|${p.name}|${p.version || ''}`;
         const existing = packages.get(key);
         if (existing) {
-            if (p.relation === 'direct') existing.relation = 'direct';
+            if (p.relation === 'direct') { existing.relation = 'direct'; existing.path = null; }
+            if (existing.relation !== 'direct' && p.path && (!existing.path || p.path.length < existing.path.length)) existing.path = p.path;
             existing.dev = existing.dev && p.dev;
             for (const v of p.via || []) if (!existing.via.includes(v)) existing.via.push(v);
             for (const m of p.manifests || []) if (!existing.manifests.includes(m)) existing.manifests.push(m);
@@ -209,6 +315,7 @@ export async function resolveLicenses(directDeps, options = {}) {
         const rec = {
             key, ecosystem: p.ecosystem, name: p.name, version: p.version || null, versionKind: p.versionKind || 'exact',
             relation: p.relation, dev: Boolean(p.dev), via: [...(p.via || [])], manifests: [...(p.manifests || [])],
+            path: p.relation === 'direct' ? null : (p.path || null),
             license: classifyLicense([]), advisories: [], status: 'pending'
         };
         packages.set(key, rec);
@@ -239,20 +346,75 @@ export async function resolveLicenses(directDeps, options = {}) {
         tick();
     }, signal);
 
-    // 2. Transitive dependencies from deps.dev's resolved graphs (npm, PyPI, Cargo).
+    // 2. Transitive dependencies: from the lockfile when there is one (exact and complete),
+    //    otherwise from deps.dev's resolved graphs (npm, PyPI, Cargo).
     if (includeTransitive) {
-        const roots = directRecs.filter(({ rec }) => rec.relation === 'direct' && !rec.dev && rec.version && GRAPH_SYSTEMS.has(rec.ecosystem));
-        total += roots.length;
-        await pool(roots, concurrency, async ({ rec }) => {
+        const roots = directRecs.filter(({ rec }) => rec.relation === 'direct' && (includeDev || !rec.dev) && rec.version);
+        const fromLock = roots.filter(({ wanted }) => wanted.lockId && locks[wanted.lockIndex]);
+        // Runtime roots first, so a package reachable at runtime is never marked dev-only.
+        fromLock.sort((a, b) => Number(a.rec.dev) - Number(b.rec.dev));
+        const flatLocks = new Set();
+        // Walks a lockfile graph from one node. Local (workspace) nodes are passed through, not
+        // reported; their development dependencies are followed only with includeDev.
+        const workspaceLabel = n => `${n.name === '(root)' ? 'project' : n.name} (workspace)`;
+        const walk = (g, startId, viaName, dev, manifests) => {
+            const seen = new Set([startId]);
+            const queue = [[startId, dev, viaName, [viaName]]];
+            while (queue.length) {
+                const [id, isDev, via, path] = queue.shift();
+                const node = g.nodes.get(id);
+                if (!node) continue;
+                // Below a workspace member, "via" names the nearest member rather than the start.
+                const childVia = node.local && id !== startId ? workspaceLabel(node) : via;
+                const edges = [...node.deps].map(t => [t, isDev]);
+                if (node.local && includeDev) edges.push(...[...node.devDeps].map(t => [t, true]));
+                for (const [next, nextDev] of edges) {
+                    if (seen.has(next)) continue;
+                    seen.add(next);
+                    const n = g.nodes.get(next);
+                    if (!n) continue;
+                    // The chain from the direct dependency (or workspace member) down to this package.
+                    const nextPath = [...path, n.local ? workspaceLabel(n) : n.name];
+                    queue.push([next, nextDev, childVia, nextPath]);
+                    if (!n.local) add({ ecosystem: g.ecosystem, name: n.name, version: n.version, versionKind: 'locked', relation: 'transitive', dev: nextDev, via: [childVia], path: nextPath, manifests });
+                }
+            }
+        };
+        for (const { rec, wanted } of fromLock) {
+            const g = locks[wanted.lockIndex];
+            if (g.flat) { flatLocks.add(g); continue; }
+            walk(g, wanted.lockId, rec.name, rec.dev, rec.manifests);
+        }
+        // Workspace members' own dependencies (e.g. a Rust workspace's crates, npm/pnpm/yarn workspaces).
+        const usedLocks = new Set(fromLock.map(({ wanted }) => locks[wanted.lockIndex]));
+        for (const g of usedLocks) {
+            if (g.flat) continue;
+            for (const [id, node] of g.nodes) {
+                if (node.local) walk(g, id, workspaceLabel(node), false, [g.file]);
+            }
+        }
+        // Lockfiles without dependency edges (Pipfile.lock): every other locked package is transitive.
+        for (const g of flatLocks) {
+            for (const n of g.nodes.values()) {
+                if (n.dev && !includeDev) continue;
+                add({ ecosystem: g.ecosystem, name: n.name, version: n.version, versionKind: 'locked', relation: 'transitive', dev: n.dev, via: [], manifests: [g.file] });
+            }
+        }
+
+        const fromGraph = roots.filter(({ rec, wanted }) => !(wanted.lockId && locks[wanted.lockIndex]) && GRAPH_SYSTEMS.has(rec.ecosystem));
+        total += fromGraph.length;
+        await pool(fromGraph, concurrency, async ({ rec }) => {
             try {
                 const graph = await depsDevGet(`${pkgPath(rec.ecosystem, rec.name)}/versions/${encodeURIComponent(rec.version)}:dependencies`, signal);
-                for (const n of (graph && graph.nodes) || []) {
-                    if (n.relation === 'SELF' || !n.versionKey) continue;
+                const nodes = (graph && graph.nodes) || [];
+                const paths = graphPaths(nodes, (graph && graph.edges) || []);
+                nodes.forEach((n, i) => {
+                    if (n.relation === 'SELF' || !n.versionKey) return;
                     add({
                         ecosystem: rec.ecosystem, name: n.versionKey.name, version: n.versionKey.version,
-                        versionKind: 'exact', relation: 'transitive', dev: false, via: [rec.name], manifests: rec.manifests
+                        versionKind: 'exact', relation: 'transitive', dev: rec.dev, via: [rec.name], path: paths[i] || null, manifests: rec.manifests
                     });
-                }
+                });
             } catch (err) {
                 if (err.name === 'AbortError') throw err;
                 rec.graphError = err.message;
@@ -282,6 +444,8 @@ export async function resolveLicenses(directDeps, options = {}) {
                 rec.license = classifyLicense(info.licenses || []);
                 rec.advisories = (info.advisoryKeys || []).map(a => a.id).filter(Boolean);
                 rec.deprecated = Boolean(info.isDeprecated);
+                const source = (info.relatedProjects || []).find(r => r.relationType === 'SOURCE_REPO' && r.projectKey);
+                rec.sourceProject = source ? source.projectKey.id : null;
             }
         } catch (err) {
             if (err.name === 'AbortError') throw err;
@@ -291,5 +455,80 @@ export async function resolveLicenses(directDeps, options = {}) {
         tick();
     }, signal);
 
+    if (details) await addDetails(all, { concurrency, signal, onTick: () => tick(), onTotal: n => { total += n; } });
     return { packages: all, capped };
+}
+
+/**
+ * Advisory titles and severity for every package; latest version, whether upgrading clears
+ * the advisories, and project health (OpenSSF Scorecard, maintenance, source licence) for
+ * direct dependencies. Failures leave the fields empty rather than failing the report.
+ */
+async function addDetails(packages, { concurrency, signal, onTick, onTotal }) {
+    const ids = [...new Set(packages.flatMap(p => p.advisories || []))];
+    const directs = packages.filter(p => p.relation === 'direct' && p.status === 'ok' && p.version);
+    onTotal(ids.length + directs.length);
+
+    const advisories = new Map();
+    await pool(ids, concurrency, async (id) => {
+        try {
+            const a = await depsDevGet(`advisories/${encodeURIComponent(id)}`, signal);
+            if (a) {
+                const score = typeof a.cvss3Score === 'number' ? a.cvss3Score : null;
+                advisories.set(id, { id, title: a.title || '', score, severity: severityOf(score), aliases: a.aliases || [], url: a.url || '' });
+            }
+        } catch (err) {
+            if (err.name === 'AbortError') throw err;
+        }
+        onTick();
+    }, signal);
+    for (const p of packages) {
+        p.advisoryDetails = (p.advisories || []).map(id => advisories.get(id) || { id, title: '', score: null, severity: 'unknown', aliases: [], url: '' })
+            .sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity) || (b.score || 0) - (a.score || 0));
+        p.maxSeverity = p.advisoryDetails.length ? p.advisoryDetails[0].severity : null;
+        // deps.dev marks npm deprecations and PyPI/Cargo yanked releases the same way.
+        p.healthFlags = p.deprecated ? ['deprecated or yanked'] : [];
+    }
+
+    await pool(directs, concurrency, async (p) => {
+        try {
+            const latest = await defaultVersion(p.ecosystem, p.name, signal);
+            if (latest) {
+                p.latest = latest;
+                p.outdated = latest !== p.version && compareVersions(latest, p.version) > 0;
+                if (p.outdated && p.advisories.length) {
+                    const info = await depsDevGet(`${pkgPath(p.ecosystem, p.name)}/versions/${encodeURIComponent(latest)}`, signal);
+                    const remaining = new Set(((info && info.advisoryKeys) || []).map(a => a.id));
+                    p.upgradeClears = p.advisories.filter(id => !remaining.has(id)).length;
+                }
+            }
+            if (p.sourceProject) {
+                const proj = await depsDevGet(`projects/${encodeURIComponent(p.sourceProject)}`, signal);
+                if (proj) {
+                    const sc = proj.scorecard || null;
+                    const maintained = sc && Array.isArray(sc.checks) ? sc.checks.find(c => c.name === 'Maintained') : null;
+                    p.health = {
+                        project: p.sourceProject,
+                        scorecard: sc && typeof sc.overallScore === 'number' ? sc.overallScore : null,
+                        maintained: maintained && typeof maintained.score === 'number' ? maintained.score : null,
+                        stars: typeof proj.starsCount === 'number' ? proj.starsCount : null,
+                        openIssues: typeof proj.openIssuesCount === 'number' ? proj.openIssuesCount : null,
+                        projectLicense: proj.license || null
+                    };
+                    if (p.health.scorecard !== null && p.health.scorecard < 4) p.healthFlags.push(`low OpenSSF Scorecard (${p.health.scorecard.toFixed(1)}/10)`);
+                    // Scorecard's Maintained check: 0 = no recent commits or issue activity; -1 = not checked.
+                    if (p.health.maintained !== null && p.health.maintained >= 0 && p.health.maintained <= 1) p.healthFlags.push('little recent activity (Scorecard "Maintained" check)');
+                    // Only a recognised source licence that disagrees with the registry is worth flagging
+                    // (deps.dev reports "non-standard" when it cannot identify one).
+                    const repoLic = p.health.projectLicense ? classifyLicense(p.health.projectLicense) : null;
+                    if (repoLic && repoLic.group !== 'unknown' && repoLic.group !== p.license.group) {
+                        p.healthFlags.push(`source repo license is ${p.health.projectLicense}`);
+                    }
+                }
+            }
+        } catch (err) {
+            if (err.name === 'AbortError') throw err;
+        }
+        onTick();
+    }, signal);
 }

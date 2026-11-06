@@ -1697,3 +1697,9 @@ body.zip-drag-over::after {
 .first-use-accept input { margin-top: 0.2rem; }
 .first-use-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
 .first-use-actions button:disabled { opacity: 0.5; cursor: default; }
+
+/* Dependencies: what is and isn't checked */
+.deps-limits { margin: 0.25rem 0 0.75rem; font-size: 0.8125rem; color: var(--ink-soft); }
+.deps-limits summary { cursor: pointer; color: var(--cobalt); font-weight: 600; }
+.deps-limits ul { margin: 0.5rem 0 0; padding-left: 1.1rem; display: grid; gap: 0.3rem; }
+.deps-limits strong { color: var(--ink); }

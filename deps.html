@@ -61,7 +61,18 @@
     <!-- First Screen Hero -->
     <section id="heroBlock" class="hero-block">
         <h2>Check a repo's dependency licenses, then hand the report to your AI</h2>
-        <p>Reads the repo's package.json, requirements, pyproject.toml, go.mod and Cargo.toml, looks up each package's license on deps.dev, and groups them for review. Runs in your browser. Package names and versions are sent to deps.dev; nothing else is.</p>
+        <p>Reads the repo's npm, Python, Go and Rust dependencies (package.json, requirements, pyproject.toml, Pipfile, go.mod, Cargo.toml, and their lockfiles for exact versions), looks up each package's license and known advisories on deps.dev, and groups them for review. Runs in your browser. Package names and versions are sent to deps.dev; nothing else is.</p>
+        <details class="deps-limits">
+            <summary>What this does and doesn't check</summary>
+            <ul>
+                <li><strong>Supported:</strong> npm (package.json; package-lock, yarn and pnpm lockfiles), Python (requirements*.txt, pyproject.toml, Pipfile; poetry.lock, uv.lock, Pipfile.lock), Go (go.mod) and Rust (Cargo.toml, Cargo.lock).</li>
+                <li><strong>Not supported yet:</strong> Maven, Gradle, Ruby, PHP, .NET, Swift, Dart and others. If the repo has their manifests, the report says so and is incomplete.</li>
+                <li><strong>Never seen:</strong> code copied into the repo, git submodules, system or container packages, and scripts loaded from a CDN.</li>
+                <li><strong>Advisories:</strong> only those known to deps.dev. No advisory doesn't mean no vulnerability, and internal or private packages have no data.</li>
+                <li><strong>Licenses:</strong> from registry metadata, which can differ from a package's own license file. Groups and policies guide review; they are not legal advice.</li>
+                <li><strong>Versions:</strong> exact when a lockfile is present; otherwise estimated from the manifest's ranges. Go's indirect modules come from go.mod and have no "via" path; Cargo.lock doesn't mark dev-only crates.</li>
+            </ul>
+        </details>
         <p class="hero-zip-hint">Private repo without a token? Use <strong>Open .zip</strong>. The archive is read locally and never uploaded.</p>
         <div id="exampleRepos" class="example-repos">
             <span>Try:</span>
@@ -92,6 +103,10 @@
                     <label for="pat">GitHub token</label>
                     <input type="password" id="pat" placeholder="ghp_... (Optional)" autocomplete="off">
                     <p class="field-helper">Only needed for private repos or if GitHub's limit of 60 requests per hour is reached. It is only sent to GitHub and is never stored. For a private repo, its package names (including internal ones) are still sent to deps.dev to look up licenses.</p>
+                </div>
+                <div class="compare-row">
+                    <label for="compareInput">Compare with (optional)</label>
+                    <input type="text" id="compareInput" placeholder="branch, tag, commit, or pull request (#123 or its URL)" spellcheck="false">
                 </div>
                 <div id="repoInputError" class="inline-error">Enter a repo as owner/name or a GitHub URL.</div>
                 <p id="sourceNote" class="field-helper zip-source-note" hidden></p>
@@ -129,6 +144,61 @@
         <div class="option-field">
             <label class="checkbox-label"><input type="checkbox" id="skipExamples" checked> <span>Skip example, test and docs folders</span></label>
             <label class="checkbox-label"><input type="checkbox" id="compactPermissive" checked> <span>List permissive packages briefly (saves tokens)</span></label>
+        </div>
+
+        <!-- License policy -->
+        <div class="settings-group-header full-width"><span>License policy</span></div>
+        <div class="option-field full-width policy-editor" id="policyEditor">
+            <p id="repoPolicyNote" class="field-helper" hidden></p>
+            <label class="checkbox-label" id="useRepoPolicyLabel" hidden><input type="checkbox" id="useRepoPolicy" checked> <span>Use the repository's <code>.gitdoco-policy.json</code></span></label>
+            <div class="policy-groups">
+                <label>Permissive
+                    <select data-policy-group="permissive" aria-label="Policy for permissive licenses">
+                        <option value="allow">Allow</option>
+                        <option value="review">Review</option>
+                        <option value="block">Block</option>
+                    </select>
+                </label>
+                <label>Weak copyleft
+                    <select data-policy-group="weak-copyleft" aria-label="Policy for weak copyleft licenses">
+                        <option value="allow">Allow</option>
+                        <option value="review">Review</option>
+                        <option value="block">Block</option>
+                    </select>
+                </label>
+                <label>Strong copyleft
+                    <select data-policy-group="strong-copyleft" aria-label="Policy for strong copyleft licenses">
+                        <option value="allow">Allow</option>
+                        <option value="review">Review</option>
+                        <option value="block">Block</option>
+                    </select>
+                </label>
+                <label>Restricted
+                    <select data-policy-group="restricted" aria-label="Policy for restricted licenses">
+                        <option value="allow">Allow</option>
+                        <option value="review">Review</option>
+                        <option value="block">Block</option>
+                    </select>
+                </label>
+                <label>Unknown
+                    <select data-policy-group="unknown" aria-label="Policy for unknown licenses">
+                        <option value="allow">Allow</option>
+                        <option value="review">Review</option>
+                        <option value="block">Block</option>
+                    </select>
+                </label>
+            </div>
+            <label for="policyBlock">Always block these licenses (SPDX IDs, comma-separated)</label>
+            <input type="text" id="policyBlock" placeholder="e.g. AGPL-3.0, SSPL-1.0">
+            <label for="policyAllow">Always allow these licenses</label>
+            <input type="text" id="policyAllow" placeholder="e.g. MPL-2.0">
+            <label for="policyPackages">Approved packages (name or ecosystem:name)</label>
+            <input type="text" id="policyPackages" placeholder="e.g. npm:some-package, pypi:other">
+            <div class="policy-actions">
+                <button type="button" id="policyResetBtn" class="secondary btn-xs">Reset to defaults</button>
+                <button type="button" id="policyDownloadBtn" class="secondary btn-xs" title="Commit this file to the repository root to share the policy with your team">Download .gitdoco-policy.json</button>
+            </div>
+            <p class="field-helper">Applies your team's rules to the license groups. It is not legal advice.</p>
         </div>
         <div class="option-field full-width">
             <div class="field-label-row">
@@ -194,7 +264,16 @@
                         <option value="direct">Direct only</option>
                         <option value="transitive">Transitive only</option>
                     </select>
-                    <label class="checkbox-label" style="align-self: center; font-size: 0.8125rem;"><input type="checkbox" id="advisoriesOnly"> <span>With advisories</span></label>
+                    <select id="attentionFilter" aria-label="Show packages that need attention">
+                        <option value="">Show: all packages</option>
+                        <option value="advisories">With security advisories</option>
+                        <option value="high">High or critical advisories</option>
+                        <option value="outdated">Outdated (direct)</option>
+                        <option value="health">Health warnings (direct)</option>
+                        <option value="changed">Changed (compare)</option>
+                        <option value="blocked">Blocked by policy</option>
+                        <option value="policy-review">Needs review (policy)</option>
+                    </select>
                 </div>
             </div>
             <div class="tree-viewport">
@@ -221,6 +300,11 @@
             <div class="output-viewport">
                 <div id="warningBanner" class="warning-banner" role="status" aria-live="polite" style="display:none"></div>
                 <div id="summaryCard" class="summary-card" hidden></div>
+                <div id="exportBar" class="export-bar" hidden>
+                    <span>Export the packages shown:</span>
+                    <button type="button" id="csvBtn" class="secondary btn-xs">CSV</button>
+                    <button type="button" id="sbomBtn" class="secondary btn-xs" title="CycloneDX 1.5 JSON software bill of materials, with licenses and known vulnerabilities">SBOM (CycloneDX)</button>
+                </div>
                 <div id="outputEmptyState" class="empty-state">
                     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
                     <p>The report appears here once dependencies are loaded.</p>
