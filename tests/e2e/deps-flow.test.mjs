@@ -98,6 +98,17 @@ test('a repository policy file is used and blocks a package', async () => {
     delete files['.gitdoco-policy.json'];
 });
 
+test('manifests the tool cannot read are reported as not checked', async () => {
+    files['backend/pom.xml'] = '<project/>';
+    await el('loadDepsBtn').click();
+    await wait(150);
+    // The format is Markdown here (set by the target-bar test).
+    assert.match(out(), /^> \*\*Warning:\*\* Not checked: Maven \(backend\/pom\.xml\)\. These package managers are not supported yet/m);
+    assert.match(out(), /a package without advisories is not proven safe/);
+    assert.ok(!calls.some(c => c.includes('backend/pom.xml')), 'the unsupported file is not downloaded');
+    delete files['backend/pom.xml'];
+});
+
 test('comparing with a pull request shows what it adds and removes', async () => {
     await fire('targetBar', 'click', { target: { closest: () => ({ dataset: { target: 'claude' } }) } });
     el('compareInput').value = '#7';

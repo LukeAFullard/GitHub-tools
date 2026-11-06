@@ -109,20 +109,20 @@ async function readManifests(list, readText) {
 export async function fetchRepoManifests(owner, repo, { pat = '', branch, isPrivate = false, skipExamples = true, signal, onHeaders } = {}) {
     const tree = await fetchRepoTree(owner, repo, branch, pat, signal, onHeaders);
     const paths = tree.filter(n => n.type === 'blob').map(n => n.path);
-    const { manifests: found, skipped } = findManifestPaths(paths, { skipExamples });
+    const { manifests: found, skipped, unsupported } = findManifestPaths(paths, { skipExamples });
     const { manifests, failed } = await readManifests(found, async (path) => {
         const r = await fetchFileContent(owner, repo, branch, path, pat, signal, onHeaders, isPrivate);
         if (!r || !r.success) throw new Error(r && r.error ? r.error : `HTTP ${r ? r.status : '?'}`);
         return r.content;
     });
-    return { manifests, failed, skipped, treeTruncated: Boolean(tree.truncated) };
+    return { manifests, failed, skipped, unsupported, treeTruncated: Boolean(tree.truncated) };
 }
 
 /** Finds and reads the manifest files inside a parsed .zip archive (js/zip-loader.js). */
 export async function readZipManifests(archive, { skipExamples = true } = {}) {
-    const { manifests: found, skipped } = findManifestPaths(archive.treeNodes.map(n => n.path), { skipExamples });
+    const { manifests: found, skipped, unsupported } = findManifestPaths(archive.treeNodes.map(n => n.path), { skipExamples });
     const { manifests, failed } = await readManifests(found, path => archive.readText(path));
-    return { manifests, failed, skipped, treeTruncated: false };
+    return { manifests, failed, skipped, unsupported, treeTruncated: false };
 }
 
 const dirOf = path => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');

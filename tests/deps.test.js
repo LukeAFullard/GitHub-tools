@@ -276,3 +276,32 @@ test('nav knows the Dependencies tab', () => {
     assert.equal(buildTabHref('deps', 'o/r'), 'deps.html?repo=o%2Fr');
     assert.equal(buildTabHref('deps', ''), 'deps.html');
 });
+
+test('manifests of unsupported ecosystems are found so the report can say it is incomplete', async () => {
+    const { findManifestPaths, unsupportedText } = await import('../js/manifest-parsers.js');
+    const r = findManifestPaths([
+        'package.json', 'pom.xml', 'api/Gemfile', 'web/Gemfile', 'src/App.csproj', 'composer.json',
+        'node_modules/x/pom.xml', 'examples/demo/pom.xml',
+        'setup.py', 'tools/setup.py', 'tools/x.py', 'lib/setup.cfg', 'lib/pyproject.toml'
+    ]);
+    assert.deepEqual(r.manifests.map(m => m.path), ['package.json', 'lib/pyproject.toml']);
+    assert.deepEqual(r.unsupported.map(u => `${u.ecosystem}:${u.path}`), [
+        'Composer (PHP):composer.json', 'Maven:pom.xml', 'Python setup.py / setup.cfg:setup.py',
+        'RubyGems:api/Gemfile', 'NuGet (.NET):src/App.csproj', 'Python setup.py / setup.cfg:tools/setup.py', 'RubyGems:web/Gemfile'
+    ], 'skipped folders are ignored, and setup.cfg next to a pyproject.toml is not reported');
+    const text = unsupportedText(r.unsupported);
+    assert.match(text, /^Not checked: Composer \(PHP\) \(composer\.json\), Maven \(pom\.xml\), .* and NuGet \(\.NET\) \(src\/App\.csproj\)\./);
+    assert.match(text, /RubyGems \(api\/Gemfile, web\/Gemfile\)/);
+    assert.match(text, /not supported yet, so this report does not cover their dependencies\.$/);
+    assert.equal(unsupportedText([]), '');
+    const many = unsupportedText(['a', 'b', 'c', 'd', 'e'].map(d => ({ path: `${d}/pom.xml`, ecosystem: 'Maven' })));
+    assert.match(many, /Maven \(a\/pom\.xml, b\/pom\.xml, c\/pom\.xml, \+2 more\)/);
+});
+
+test('the versions line says when only some packages come from a lockfile', async () => {
+    const { lockText } = await import('../js/deps-formatters.js');
+    assert.equal(lockText({ lockfiles: [] }), 'No lockfile found: versions estimated from manifest ranges');
+    assert.equal(lockText({ lockfiles: ['Cargo.lock'], packages: [{ versionKind: 'locked' }] }), 'Exact versions from lockfiles: Cargo.lock');
+    assert.equal(lockText({ lockfiles: ['Cargo.lock'], packages: [{ versionKind: 'locked' }, { versionKind: 'range-min' }] }),
+        'Exact versions from lockfiles: Cargo.lock; packages not in a lockfile have estimated versions');
+});

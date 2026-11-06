@@ -19,6 +19,7 @@ import { buildTabHref } from './nav.js';
 import { externalLink, registryUrl, depsDevUrl, advisoryUrl } from './links.js';
 import { confirmFirstUse } from './first-use.js';
 import { toCsv, toCycloneDx } from './deps-export.js';
+import { unsupportedText } from './manifest-parsers.js';
 import { DEFAULT_POLICY, normalizePolicy, parsePolicyFile, policyToFile, evaluatePolicy, describePolicy, POLICY_FILE } from './license-policy.js';
 
 const $ = id => document.getElementById(id);
@@ -438,7 +439,9 @@ async function rebuildOutput() {
             ? `${totalAdv} security advisor${totalAdv === 1 ? 'y' : 'ies'}: ${sev.critical} critical, ${sev.high} high, ${sev.medium} medium, ${sev.low + sev.unknown} low or unrated`
             : 'No known security advisories',
         `Direct: ${outdated} outdated${fixable ? ` (${fixable} fixed by upgrading)` : ''} · ${health} with health warnings`,
-        state.lockfiles.length ? `Exact versions from ${state.lockfiles.join(', ')}` : 'No lockfile: versions estimated from manifest ranges',
+        state.lockfiles.length
+            ? `Exact versions from ${state.lockfiles.join(', ')}${state.packages.some(p => p.versionKind && p.versionKind !== 'locked') ? '; others estimated' : ''}`
+            : 'No lockfile: versions estimated from manifest ranges',
         ...(state.diff ? [`Compared with ${state.compare.baseLabel}: ${summarizeDiff(state.diff)}`] : []),
         `Policy: ${visible.filter(p => p.policy && p.policy.verdict === 'block').length} blocked · ${visible.filter(p => p.policy && p.policy.verdict === 'review').length} to review (${usingRepoPolicy() ? POLICY_FILE : 'your settings'})`
     ]) {
@@ -568,7 +571,11 @@ async function load(source) {
         if (myGen !== generation) return;
         progress(15);
 
-        const { manifests, failed, skipped, treeTruncated } = manifestResult;
+        const { manifests, failed, skipped, treeTruncated, unsupported = [] } = manifestResult;
+        if (unsupported.length) {
+            state.warnings.push(unsupportedText(unsupported));
+            log(`[WARN] Not checked (unsupported): ${unsupported.slice(0, 8).map(u => u.path).join(', ')}${unsupported.length > 8 ? '…' : ''}`);
+        }
         const policyFile = manifests.find(m => m.path === POLICY_FILE);
         state.repoPolicy = null;
         if (policyFile) {
@@ -586,8 +593,10 @@ async function load(source) {
         if (failed.length) state.warnings.push(`${failed.length} manifest file(s) could not be read: ${failed.map(f => f.path).slice(0, 5).join(', ')}.`);
         dom.repoLicenseText.textContent = state.repoLicense && state.repoLicense.expression ? state.repoLicense.expression : 'not detected';
         log(`[INFO] Found ${manifests.length} manifest(s): ${state.manifests.slice(0, 8).join(', ')}${manifests.length > 8 ? '…' : ''}`);
-        if (manifests.length === 0) {
-            showToast('No supported manifest files found (package.json, requirements.txt, pyproject.toml, go.mod, Cargo.toml).', 'warn');
+        if (manifests.every(m => m.path === POLICY_FILE)) {
+            showToast(unsupported.length
+                ? `${unsupportedText(unsupported)} Supported: npm, Python (requirements, pyproject.toml, Pipfile), Go and Rust.`
+                : 'No supported manifest files found. Supported: package.json, requirements*.txt, pyproject.toml, Pipfile, go.mod, Cargo.toml (and their lockfiles).', 'warn');
             log('[WARN] No supported manifest files found.');
             setAppState('empty');
             return;
@@ -613,6 +622,8 @@ async function load(source) {
         }
     }
 }
+
+const RESOLVE_WARNINGS = [/^Stopped at/, /license lookup\(s\) failed/, /^Cargo\.lock does not mark/, /^Go: indirect modules/];
 
 /** Re-runs the deps.dev lookup with the current options (results are cached, so this is quick). */
 async function resolve(signal, myGen) {
@@ -640,10 +651,17 @@ async function resolve(signal, myGen) {
         state.diff = { ...diffPackages(baseResult.packages, state.packages), basePackages: baseResult.packages };
         log(`[INFO] Compared with ${state.compare.baseLabel}: ${summarizeDiff(state.diff)}.`);
     }
-    state.warnings = state.warnings.filter(w => !w.startsWith('Stopped at'));
+    // Warnings that depend on the lookup options are recomputed on every run.
+    state.warnings = state.warnings.filter(w => !RESOLVE_WARNINGS.some(re => re.test(w)));
     if (capped) state.warnings.push('Stopped at 1,500 packages; the list is incomplete.');
     const failedLookups = packages.filter(p => p.status === 'error').length;
     if (failedLookups) state.warnings.push(`${failedLookups} license lookup(s) failed; they are listed as unknown.`);
+    if (dom.includeTransitive.checked && !dom.includeDev.checked && state.lockfiles.some(l => /(^|\/)Cargo\.lock$/.test(l))) {
+        state.warnings.push('Cargo.lock does not mark development-only crates, so some Rust dev dependencies may be included.');
+    }
+    if (dom.includeTransitive.checked && packages.some(p => p.ecosystem === 'go' && p.relation !== 'direct')) {
+        state.warnings.push('Go: indirect modules come from go.mod (deps.dev has no Go dependency graph), so they show no "via" path; modules made before Go 1.17 may list fewer.');
+    }
     progress(100);
     fillEcosystemFilter();
     dom.statPackages.textContent = packages.length.toLocaleString();

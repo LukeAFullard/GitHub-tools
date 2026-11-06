@@ -61,7 +61,18 @@
     <!-- First Screen Hero -->
     <section id="heroBlock" class="hero-block">
         <h2>Check a repo's dependency licenses, then hand the report to your AI</h2>
-        <p>Reads the repo's package.json, requirements, pyproject.toml, go.mod and Cargo.toml, looks up each package's license on deps.dev, and groups them for review. Runs in your browser. Package names and versions are sent to deps.dev; nothing else is.</p>
+        <p>Reads the repo's npm, Python, Go and Rust dependencies (package.json, requirements, pyproject.toml, Pipfile, go.mod, Cargo.toml, and their lockfiles for exact versions), looks up each package's license and known advisories on deps.dev, and groups them for review. Runs in your browser. Package names and versions are sent to deps.dev; nothing else is.</p>
+        <details class="deps-limits">
+            <summary>What this does and doesn't check</summary>
+            <ul>
+                <li><strong>Supported:</strong> npm (package.json; package-lock, yarn and pnpm lockfiles), Python (requirements*.txt, pyproject.toml, Pipfile; poetry.lock, uv.lock, Pipfile.lock), Go (go.mod) and Rust (Cargo.toml, Cargo.lock).</li>
+                <li><strong>Not supported yet:</strong> Maven, Gradle, Ruby, PHP, .NET, Swift, Dart and others. If the repo has their manifests, the report says so and is incomplete.</li>
+                <li><strong>Never seen:</strong> code copied into the repo, git submodules, system or container packages, and scripts loaded from a CDN.</li>
+                <li><strong>Advisories:</strong> only those known to deps.dev. No advisory doesn't mean no vulnerability, and internal or private packages have no data.</li>
+                <li><strong>Licenses:</strong> from registry metadata, which can differ from a package's own license file. Groups and policies guide review; they are not legal advice.</li>
+                <li><strong>Versions:</strong> exact when a lockfile is present; otherwise estimated from the manifest's ranges. Go's indirect modules come from go.mod and have no "via" path; Cargo.lock doesn't mark dev-only crates.</li>
+            </ul>
+        </details>
         <p class="hero-zip-hint">Private repo without a token? Use <strong>Open .zip</strong>. The archive is read locally and never uploaded.</p>
         <div id="exampleRepos" class="example-repos">
             <span>Try:</span>

@@ -13,7 +13,10 @@ export const REPORT_NOTE = 'License groups are a heuristic to guide review, not 
     + 'obligations depend on how each package is used (linking, distribution, hosted service). '
     + 'License, advisory and project health data come from deps.dev (health: OpenSSF Scorecard). Versions come from lockfiles '
     + 'where present; otherwise, where a manifest gives a range, the lowest version in the range (or the latest release when '
-    + 'none is given) was checked, so installed versions may differ.';
+    + 'none is given) was checked, so installed versions may differ. Only advisories known to deps.dev are listed, so a package '
+    + 'without advisories is not proven safe; licenses come from registry metadata and can differ from a package\'s own license '
+    + 'file. Only npm, PyPI, Go and Cargo dependencies declared in manifests are covered: code copied into the repository, git '
+    + 'submodules, and system or container packages are not checked.';
 
 const SEVERITY_RANK = { critical: 0, high: 1, medium: 2, low: 3, unknown: 4 };
 const SEVERITY_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low', unknown: 'Unrated' };
@@ -50,10 +53,10 @@ const policyAttr = p => (p.policy && p.policy.verdict !== 'allow' ? `${p.policy.
 const pkgLabel = p => `${p.ecosystem}:${p.name}@${p.version || '?'}`;
 const advIds = p => advisoryList(p).join(', ');
 
-function lockText(ctx) {
-    return ctx.lockfiles && ctx.lockfiles.length
-        ? `Exact versions from lockfiles: ${ctx.lockfiles.join(', ')}`
-        : 'No lockfile found: versions estimated from manifest ranges';
+export function lockText(ctx) {
+    if (!ctx.lockfiles || !ctx.lockfiles.length) return 'No lockfile found: versions estimated from manifest ranges';
+    const partial = (ctx.packages || []).some(p => p.versionKind && p.versionKind !== 'locked');
+    return `Exact versions from lockfiles: ${ctx.lockfiles.join(', ')}${partial ? '; packages not in a lockfile have estimated versions' : ''}`;
 }
 
 const ORDER = Object.fromEntries(LICENSE_GROUPS.map((g, i) => [g, i]));
