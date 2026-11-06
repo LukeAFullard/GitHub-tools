@@ -14,6 +14,7 @@ import { switchTab } from './ui-tabs.js';
 import { renderBanner } from './ui-banner.js';
 import { buildTabHref } from './nav.js';
 import { externalLink, registryUrl, depsDevUrl, advisoryUrl } from './links.js';
+import { confirmFirstUse } from './first-use.js';
 
 const $ = id => document.getElementById(id);
 const dom = {
@@ -368,6 +369,8 @@ function resetView() {
 
 async function load(source) {
     showError('');
+    // First contact with GitHub / deps.dev: one-time notice.
+    if (!(await confirmFirstUse(source.kind === 'zip' ? 'depsZip' : 'deps'))) return;
     if (controller) controller.abort();
     controller = new AbortController();
     const signal = controller.signal;

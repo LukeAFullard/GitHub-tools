@@ -177,7 +177,47 @@ footer or nav.
 - [ ] Name and address: "GitDoco" at `gitdoco.timedoco.com` are used in the page, canonical URL,
       sitemap and social image; change them in `index.html`, `robots.txt` and `sitemap.xml` if
       different.
-- [ ] Add a `LICENSE` file: `package.json` and the README say MIT but the repo has no license file.
+- [x] `LICENSE` (MIT, LukeAFullard) added, plus `fonts/OFL.txt` for the bundled IBM Plex fonts.
 - [ ] Analytics: TimeDoco's marketing pages use Cloudflare Web Analytics; none is added here (the
       CSP would need `static.cloudflareinsights.com`).
+
+## Phase 6: Privacy audit (done)
+
+- [x] Nothing third-party is loaded; only GitHub and deps.dev are contacted, and only after the user
+      acts (fixed: the Code/Issues/Discussions pages called GitHub's rate-limit API on open).
+- [x] No cookies, IndexedDB, service worker or caches; localStorage holds settings, AI instructions
+      and the last public repo only; the token is never stored. No `Referer` on any request.
+- [x] `privacy.html` (notice + "Clear GitDoco data in this browser"), linked from the landing page.
+- [x] `tests/privacy.test.js` guards these promises.
+- [ ] Hosting: keep Cloudflare features that inject scripts off (see README, Deploying).
+
+## Phase 7: Terms, notice before first contact, and planning for ads (done / planned)
+
+- [x] `terms.html` (modelled on TimeDoco's terms): third-party services' own terms, user
+      responsibility for content and tokens, best-effort secret hiding, no legal/security advice,
+      warranty disclaimer, liability limit, MIT code licence, changes.
+- [x] Privacy notice: "What GitDoco cannot control" (GitHub, deps.dev/Google, AI services, hosting,
+      browser/extensions/network, linked sites) and "Changes" (consent before any analytics or ads).
+- [x] One-time notice (`js/first-use.js`) before a tool first contacts GitHub or deps.dev: names
+      the services, links Terms and Privacy, Continue stays disabled until "I accept" is ticked;
+      Cancel/Escape send nothing. Remembered in `cfg_notice_accepted`; bump `NOTICE_VERSION` to ask
+      everyone again after a material change. Local `.zip` in the Code tool skips it (no contact).
+
+### If ads or analytics are added later
+
+This is not a cookie/consent banner: GitDoco has nothing that needs consent today, and asking for
+consent to nothing would be meaningless. When that changes:
+
+1. **Use a certified consent platform (CMP)** rather than a home-made banner. Google requires a
+   Google-certified CMP (IAB TCF) to serve AdSense/Ad Manager ads to users in the EEA, UK and
+   Switzerland; Google's own "Privacy & messaging" CMP is free. Share one CMP across timedoco.com
+   and GitDoco.
+2. **Keep ads off the tool pages.** Third-party ad scripts on pages where users enter GitHub
+   tokens and view private code could read both. Put ads only on the landing page, blog or FAQ,
+   never on `code.html`, `issues.html`, `discussions.html` or `deps.html`.
+3. **Nothing optional runs before consent**, and refusing is as easy as accepting.
+4. **Update in the same change:** `privacy.html` (sections 1, 2, 8), the CSP in every page and
+   `_headers`, `tests/privacy.test.js` (it will fail on purpose), and bump `NOTICE_VERSION`.
+5. Cookieless analytics (e.g. Cloudflare Web Analytics, as on TimeDoco's marketing pages) usually
+   needs no consent banner but must be disclosed in the privacy notice.
 

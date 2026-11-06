@@ -193,3 +193,19 @@ h1, h2, h3 { color: var(--heading); line-height: 1.2; margin: 0; }
 .footer-links a { color: var(--muted); display: inline-flex; }
 .footer-links a:hover { color: var(--heading); }
 .footer-links svg { width: 1.4rem; height: 1.4rem; }
+
+/* Privacy page */
+.legal { max-width: 46rem; padding-top: 3rem; padding-bottom: 3.5rem; }
+.legal h1 { font-size: clamp(1.9rem, 4vw, 2.5rem); margin-bottom: 0.35rem; }
+.legal h2 { font-size: 1.2rem; margin: 2rem 0 0.5rem; }
+.legal p, .legal li { color: var(--muted); }
+.legal ul { padding-left: 1.2rem; }
+.legal li { margin-bottom: 0.4rem; }
+.updated { font-size: 0.875rem; margin-top: 0; }
+.summary { font-size: 1.1rem; color: var(--text) !important; border-left: 3px solid var(--verdigris); padding-left: 0.9rem; }
+.clear-box { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.1rem; margin-top: 1rem; }
+.clear-box p { margin: 0 0 0.75rem; word-break: break-word; }
+.clear-box .btn:disabled { opacity: 0.5; cursor: default; }
+.clear-status { margin: 0.6rem 0 0 !important; font-weight: 600; color: var(--text) !important; }
+.footer-text-link { color: var(--muted); }
+.header-nav a[aria-current="page"] { color: var(--accent-text); }

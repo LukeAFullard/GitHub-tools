@@ -20,6 +20,7 @@ import { buildSummaryLines } from './ui-summary.js';
 import { buildTabHref } from './nav.js';
 import { externalLink, isGithubUrl } from './links.js';
 import { searchTopic } from './topic-search.js';
+import { confirmFirstUse } from './first-use.js';
 
 export const KIND = globalThis.__THREAD_EXPLORER_KIND__ === 'discussions' ? 'discussions' : 'issues';
 const IS_DISCUSSIONS = KIND === 'discussions';
@@ -358,8 +359,9 @@ if (dom.repoUrl) {
     });
 }
 
+// Check the quota when the user enters a token, not on page open: opening a page must not
+// contact GitHub. Loading a repo updates the quota from GitHub's response headers anyway.
 dom.pat.addEventListener('change', refreshRateLimitBadge);
-refreshRateLimitBadge();
 
 if (dom.warningBannerDismissBtn) {
     dom.warningBannerDismissBtn.addEventListener('click', hidePersistentWarning);
@@ -1117,6 +1119,8 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
         dom.repoInputError.style.display = 'block';
         return;
     }
+    // First contact with GitHub: one-time notice.
+    if (!(await confirmFirstUse('github'))) return;
 
     if (loadController) loadController.abort();
     if (buildController) buildController.abort();

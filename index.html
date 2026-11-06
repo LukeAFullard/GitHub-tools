@@ -34,7 +34,7 @@
         </a>
         <nav class="header-nav" aria-label="Site">
             <a href="#tools">Tools</a>
-            <a href="#privacy">Privacy</a>
+            <a href="privacy.html">Privacy</a>
             <a href="#faq">FAQ</a>
             <a class="btn btn-dark" href="code.html">Open GitDoco</a>
         </nav>
@@ -146,12 +146,12 @@
             <div><h3>Secrets hidden</h3><p>API keys, tokens, private keys and <code>.env</code> files are detected and replaced before you copy anything.</p></div>
             <div><h3>Clear about the rest</h3><p>The Dependencies tool sends package names and versions to deps.dev to look up licenses. Nothing else leaves your browser.</p></div>
         </div>
-        <p class="note">Repository content is untrusted input to your AI: code, issues and comments can contain text written to steer it. Review the output before using it for sensitive work.</p>
+        <p class="note">Repository content is untrusted input to your AI: code, issues and comments can contain text written to steer it. Review the output before using it for sensitive work. <a href="privacy.html">Read the full privacy notice</a>.</p>
     </section>
 
     <section id="faq" class="wrap section faq">
         <h2>Questions</h2>
-        <details><summary>Is GitDoco free?</summary><p>Yes. It is free, with no account and no usage limits beyond GitHub's own API limits, and its source code is on GitHub.</p></details>
+        <details><summary>Is GitDoco free?</summary><p>Yes. It is free and open source under the MIT License, with no account and no usage limits beyond GitHub's own API limits.</p></details>
         <details><summary>Do I need a GitHub token?</summary><p>Not for public repositories. Without a token GitHub allows 60 requests an hour, which covers most small and medium repos. A token raises that to 5,000 and is needed for private repos. For Discussions, a token also switches to GitHub's official API.</p></details>
         <details><summary>Which AI tools does it work with?</summary><p>Any that accept text. Presets for Claude, ChatGPT and Gemini set the output format and token budget; Custom lets you choose Claude XML, Markdown, generic XML or JSON and your own split size.</p></details>
         <details><summary>What if the repo is too big?</summary><p>Deselect folders, minify code, or split the output into parts that each fit your AI's context window. The token meter shows where you stand before you copy.</p></details>
@@ -161,14 +161,14 @@
 
     <section class="wrap section about">
         <h2>About</h2>
-        <p>GitDoco is part of <strong>In Your Own Browser</strong>: small, privacy-first tools that run entirely on your device. If you track time for clients, try its sibling <a href="https://timedoco.com/" target="_blank" rel="noopener">TimeDoco</a>. Feedback, bug reports and ideas are very welcome on <a href="https://github.com/LukeAFullard/GitHub-tools" target="_blank" rel="noopener">GitHub</a>.</p>
+        <p>GitDoco is part of <strong>In Your Own Browser</strong>: small, privacy-first tools that run entirely on your device. If you track time for clients, try its sibling <a href="https://timedoco.com/" target="_blank" rel="noopener noreferrer">TimeDoco</a>. Feedback, bug reports and ideas are very welcome on <a href="https://github.com/LukeAFullard/GitHub-tools" target="_blank" rel="noopener noreferrer">GitHub</a>.</p>
         <a class="btn btn-signal" href="code.html">Open GitDoco</a>
     </section>
 </main>
 
 <footer class="site-footer">
     <div class="wrap footer-row">
-        <div>&copy; GitDoco &mdash; part of In Your Own Browser.</div>
+        <div>&copy; GitDoco &mdash; part of In Your Own Browser. <a class="footer-text-link" href="privacy.html">Privacy</a> &middot; <a class="footer-text-link" href="terms.html">Terms</a> &middot; <a class="footer-text-link" href="https://github.com/LukeAFullard/GitHub-tools/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a></div>
         <nav class="footer-links" aria-label="Elsewhere">
             <a href="https://github.com/LukeAFullard/GitHub-tools" target="_blank" rel="noopener noreferrer" aria-label="Source code on GitHub">
                 <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.65.5.5 5.65.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
