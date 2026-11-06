@@ -177,7 +177,17 @@ footer or nav.
 - [ ] Name and address: "GitDoco" at `gitdoco.timedoco.com` are used in the page, canonical URL,
       sitemap and social image; change them in `index.html`, `robots.txt` and `sitemap.xml` if
       different.
-- [ ] Add a `LICENSE` file: `package.json` and the README say MIT but the repo has no license file.
+- [x] `LICENSE` (MIT, LukeAFullard) added, plus `fonts/OFL.txt` for the bundled IBM Plex fonts.
 - [ ] Analytics: TimeDoco's marketing pages use Cloudflare Web Analytics; none is added here (the
       CSP would need `static.cloudflareinsights.com`).
+
+## Phase 6: Privacy audit (done)
+
+- [x] Nothing third-party is loaded; only GitHub and deps.dev are contacted, and only after the user
+      acts (fixed: the Code/Issues/Discussions pages called GitHub's rate-limit API on open).
+- [x] No cookies, IndexedDB, service worker or caches; localStorage holds settings, AI instructions
+      and the last public repo only; the token is never stored. No `Referer` on any request.
+- [x] `privacy.html` (notice + "Clear GitDoco data in this browser"), linked from the landing page.
+- [x] `tests/privacy.test.js` guards these promises.
+- [ ] Hosting: keep Cloudflare features that inject scripts off (see README, Deploying).
 

@@ -358,8 +358,9 @@ if (dom.repoUrl) {
     });
 }
 
+// Check the quota when the user enters a token, not on page open: opening a page must not
+// contact GitHub. Loading a repo updates the quota from GitHub's response headers anyway.
 dom.pat.addEventListener('change', refreshRateLimitBadge);
-refreshRateLimitBadge();
 
 if (dom.warningBannerDismissBtn) {
     dom.warningBannerDismissBtn.addEventListener('click', hidePersistentWarning);

@@ -90,7 +90,7 @@ test('the Code page says generic secrets are only hidden with Strict', () => {
 // ------------------------------------------------------------------ finding 3: CSP
 
 test('every page has a CSP and no inline scripts or event handlers', () => {
-    for (const page of ['index.html', 'code.html', 'issues.html', 'discussions.html', 'deps.html']) {
+    for (const page of ['index.html', 'privacy.html', 'code.html', 'issues.html', 'discussions.html', 'deps.html']) {
         const html = fs.readFileSync(ROOT + page, 'utf8');
         const csp = /<meta http-equiv="Content-Security-Policy" content="([^"]+)">/.exec(html);
         assert.ok(csp, `${page}: CSP meta tag`);

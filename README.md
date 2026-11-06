@@ -66,10 +66,13 @@ Navigate to `http://localhost:8000` in your web browser.
 
 The site is static: no build step is needed to run it. To publish only the site files (not tests or tooling), run `npm run build` and serve `dist/`. On Cloudflare Pages: build command `node scripts/build-site.mjs`, output directory `dist`, no framework preset; `_headers` sets the security headers. The suggested address is `gitdoco.timedoco.com` (see `PLAN.md`).
 
+**Keep the host from adding scripts.** The privacy promises below depend on the site serving only its own files. In the Cloudflare dashboard, leave these off for the GitDoco project/zone: Web Analytics (automatic setup), Zaraz, Rocket Loader, Email Address Obfuscation and Browser Insights. Some of them inject scripts from the site's own origin (`/cdn-cgi/`), which the CSP's `script-src 'self'` would allow.
+
 ## Security & Privacy
 
 - **Repository content is untrusted input to your AI.** Code, issues, discussions and package metadata can contain text written to steer an AI (prompt injection). Review the output before sending it, especially for private or sensitive work.
 - **Secrets:** known token and key formats are hidden by default; generic passwords and tokens in code are flagged, and hidden only with "Strict". Files such as `.env`, private keys, key stores, `.npmrc`/`.netrc` and Terraform state are replaced entirely.
+- **No tracking.** No cookies, analytics, third-party scripts, fonts or images; the IBM Plex fonts are bundled. Opening a page contacts nothing; the browser only talks to `api.github.com`, `raw.githubusercontent.com` and (Dependencies tab) `api.deps.dev` once you use a tool, without a `Referer` header or cookies. `tests/privacy.test.js` guards all of this; `privacy.html` explains it to users and has a button that clears everything GitDoco stores.
 - **Tokens** stay in memory and are only sent to `api.github.com`. Repository names loaded with a token are not remembered between visits.
 - **Dependencies tab:** package names and versions (including a private repo's internal packages) are sent to deps.dev to look up licenses.
 - **Content-Security-Policy:** every page sets a CSP that allows scripts only from the site itself and network requests only to GitHub and deps.dev. A `<meta>` tag cannot set everything, so if your host supports response headers, also send:
@@ -85,6 +88,7 @@ The site is static: no build step is needed to run it. To publish only the site 
 ```
 .
 ├── index.html          # Landing page
+├── privacy.html        # Privacy notice + "clear saved data" button
 ├── code.html           # Code Packer Web interface
 ├── _headers            # Security headers for Cloudflare Pages / Netlify
 ├── scripts/build-site.mjs # Copies the public site into dist/ (no dependencies)
@@ -112,6 +116,7 @@ The site is static: no build step is needed to run it. To publish only the site 
     ├── license-classify.js # SPDX expression parsing and license grouping
     ├── links.js        # Safe outbound links (GitHub, registries, deps.dev, advisories)
     ├── nlp-text.js     # Shared text tokenizing for topics and topic search
+    ├── privacy.js      # Privacy page: lists and clears what GitDoco stores
     ├── manifest-parsers.js # package.json, requirements, pyproject, go.mod, Cargo.toml readers
     ├── minifier.js     # Code minification & comment stripping engine
     ├── nlp.worker.js   # Web Worker for N-grams & TF-IDF Cosine K-Means clustering
@@ -125,4 +130,4 @@ The site is static: no build step is needed to run it. To publish only the site 
 
 ## License
 
-MIT
+MIT; see [LICENSE](LICENSE). The bundled IBM Plex fonts are under the SIL Open Font License 1.1 ([fonts/OFL.txt](fonts/OFL.txt)).
