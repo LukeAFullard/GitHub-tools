@@ -5,7 +5,7 @@ import {
     parsePipfileLock, parseLockfile, compareVersions
 } from '../js/lockfiles.js';
 import { findManifestPaths, parsePipfile } from '../js/manifest-parsers.js';
-import { collectDirectDependencies, resolveLicenses, clearDepsDevCache, severityOf, DEPS_DEV_BASE } from '../js/deps-api.js';
+import { collectDirectDependencies, resolveLicenses, clearDepsDevCache, severityOf, graphPaths, DEPS_DEV_BASE } from '../js/deps-api.js';
 import { buildDepsOutput, collectAdvisories } from '../js/deps-formatters.js';
 import { classifyLicense } from '../js/license-classify.js';
 
@@ -361,7 +361,9 @@ test('lockfile versions and tree, advisory severity, outdated and health, end to
     const ctx = { repoName: 'o/r', repoLicense: classifyLicense('MIT'), packages, lockfiles: lockfilesUsed, includeTransitive: true, compactPermissive: true };
     const xml = buildDepsOutput('claude-xml', ctx).text;
     assert.match(xml, /<versions>Exact versions from lockfiles: package-lock\.json<\/versions>/);
-    assert.match(xml, /<advisory id="GHSA-crit" severity="critical" cvss="9\.8" package="qs@6\.13\.0" relation="transitive">Prototype pollution<\/advisory>/);
+    assert.match(xml, /<advisory id="GHSA-crit" severity="critical" cvss="9\.8" package="qs@6\.13\.0" relation="transitive" path="express → qs">Prototype pollution<\/advisory>/);
+    assert.deepEqual(by.qs.path, ['express', 'qs'], 'the chain that pulls qs in');
+    assert.equal(by.express.path, null, 'direct dependencies have no chain');
     assert.match(xml, /<advisory id="GHSA-high" severity="high" cvss="7\.5" package="express@4\.21\.2" relation="direct" aliases="CVE-2024-1" fix="latest 5\.1\.0 clears 1 of 2">Open redirect<\/advisory>/);
     assert.match(xml, /npm:express@4\.21\.2 \(MIT\) \[advisories: GHSA-high \(high 7\.5\), GHSA-low \(low 2\.1\)\]/, 'brief permissive lines keep advisories');
     assert.match(xml, /name="old-lib"[^>]*notes="[^"]*low OpenSSF Scorecard/);
@@ -393,6 +395,7 @@ test('workspaces: dependencies of local members are found; dev-only ones only wi
     const r = await resolveLicenses(rust.deps, { locks: rust.locks, details: false });
     assert.deepEqual(r.packages.map(p => `${p.name}:${p.relation}`).sort(), ['anyhow:direct', 'regex:transitive']);
     assert.deepEqual(r.packages.find(p => p.name === 'regex').via, ['member (workspace)']);
+    assert.deepEqual(r.packages.find(p => p.name === 'regex').path, ['member (workspace)', 'regex'], 'shortest chain, from the nearest workspace member');
 
     // pnpm workspace with a dev-only tool.
     const lock = `lockfileVersion: '9.0'
@@ -438,4 +441,11 @@ snapshots:
     assert.deepEqual(runtime.packages.map(p => p.name).sort(), ['a'], 'dev tools left out by default');
     const withDev = await resolveLicenses(js.deps, { locks: js.locks, includeDev: true, details: false });
     assert.deepEqual(withDev.packages.map(p => `${p.name}:${p.dev}`).sort(), ['a:false', 'tool-dep:true', 'tool:true']);
+});
+
+test('graphPaths: shortest chain from SELF in a deps.dev graph', () => {
+    const nodes = ['app', 'a', 'b', 'c'].map((name, i) => ({ versionKey: { name }, relation: i === 0 ? 'SELF' : 'INDIRECT' }));
+    const edges = [{ fromNode: 0, toNode: 1 }, { fromNode: 1, toNode: 2 }, { fromNode: 2, toNode: 3 }, { fromNode: 0, toNode: 3 }];
+    assert.deepEqual(graphPaths(nodes, edges), [['app'], ['app', 'a'], ['app', 'a', 'b'], ['app', 'c']]);
+    assert.deepEqual(graphPaths([], []), []);
 });

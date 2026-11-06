@@ -38,6 +38,35 @@ function authHeaders(pat) {
     return { 'Authorization': /^(github_pat_|gho_|ghu_|ghs_)/.test(token) ? `Bearer ${token}` : `token ${token}` };
 }
 
+/**
+ * A pull request's base branch and head commit (the head may live in a fork).
+ * @returns {{ number, title, baseRef, headSha, headOwner, headRepo, headLabel }}
+ */
+export async function fetchPullRequest(owner, repo, number, { pat = '', signal, onHeaders } = {}) {
+    const res = await fetch(`${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${Number(number)}`, {
+        headers: { 'Accept': 'application/vnd.github.v3+json', ...authHeaders(pat) }, signal
+    });
+    if (onHeaders) onHeaders(extractRateLimitHeaders(res));
+    if (!res.ok) {
+        throw new DepsError(res.status === 404
+            ? `Can't find pull request #${Number(number)} in ${owner}/${repo}.`
+            : `Pull request lookup failed (${res.status}).`, res.status);
+    }
+    const pr = await res.json();
+    if (!pr.head || !pr.head.repo || !pr.head.sha || !pr.base || !pr.base.ref) {
+        throw new DepsError(`Pull request #${Number(number)} has no readable head (its fork may have been deleted).`);
+    }
+    return {
+        number: pr.number,
+        title: pr.title || '',
+        baseRef: pr.base.ref,
+        headSha: pr.head.sha,
+        headOwner: pr.head.repo.owner ? pr.head.repo.owner.login : owner,
+        headRepo: pr.head.repo.name,
+        headLabel: pr.head.label || `${pr.head.repo.full_name}:${pr.head.ref}`
+    };
+}
+
 /** Repository metadata: default branch, privacy and the repo's own license (SPDX ID). */
 export async function fetchRepoInfo(owner, repo, { pat = '', signal, onHeaders } = {}) {
     const res = await fetch(`${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
@@ -107,6 +136,7 @@ const dirOf = path => (path.includes('/') ? path.slice(0, path.lastIndexOf('/'))
  */
 export function collectDirectDependencies(files) {
     const isLock = f => Boolean(LOCKFILE_NAMES[f.path.split('/').pop()]);
+    files = files.filter(f => f.path !== '.gitdoco-policy.json'); // read by the page, not a manifest
     const parseErrors = [];
     const locks = [];
     for (const f of files.filter(isLock)) {
@@ -205,6 +235,30 @@ async function pool(items, limit, fn, signal) {
     await Promise.all(workers);
 }
 
+/** Shortest chain of names from the SELF node to each node of a deps.dev dependency graph. */
+export function graphPaths(nodes, edges) {
+    const out = new Array(nodes.length).fill(null);
+    const self = nodes.findIndex(n => n.relation === 'SELF');
+    if (self < 0) return out;
+    const children = new Map();
+    for (const e of edges) {
+        if (!children.has(e.fromNode)) children.set(e.fromNode, []);
+        children.get(e.fromNode).push(e.toNode);
+    }
+    const name = i => (nodes[i] && nodes[i].versionKey ? nodes[i].versionKey.name : '?');
+    out[self] = [name(self)];
+    const queue = [self];
+    while (queue.length) {
+        const i = queue.shift();
+        for (const j of children.get(i) || []) {
+            if (out[j]) continue;
+            out[j] = [...out[i], name(j)];
+            queue.push(j);
+        }
+    }
+    return out;
+}
+
 /** CVSS v3 score -> severity band (FIRST.org ranges). */
 export function severityOf(score) {
     if (typeof score !== 'number' || score <= 0) return 'unknown';
@@ -250,7 +304,8 @@ export async function resolveLicenses(directDeps, options = {}) {
         const key = `${p.ecosystem}|${p.name}|${p.version || ''}`;
         const existing = packages.get(key);
         if (existing) {
-            if (p.relation === 'direct') existing.relation = 'direct';
+            if (p.relation === 'direct') { existing.relation = 'direct'; existing.path = null; }
+            if (existing.relation !== 'direct' && p.path && (!existing.path || p.path.length < existing.path.length)) existing.path = p.path;
             existing.dev = existing.dev && p.dev;
             for (const v of p.via || []) if (!existing.via.includes(v)) existing.via.push(v);
             for (const m of p.manifests || []) if (!existing.manifests.includes(m)) existing.manifests.push(m);
@@ -260,6 +315,7 @@ export async function resolveLicenses(directDeps, options = {}) {
         const rec = {
             key, ecosystem: p.ecosystem, name: p.name, version: p.version || null, versionKind: p.versionKind || 'exact',
             relation: p.relation, dev: Boolean(p.dev), via: [...(p.via || [])], manifests: [...(p.manifests || [])],
+            path: p.relation === 'direct' ? null : (p.path || null),
             license: classifyLicense([]), advisories: [], status: 'pending'
         };
         packages.set(key, rec);
@@ -303,9 +359,9 @@ export async function resolveLicenses(directDeps, options = {}) {
         const workspaceLabel = n => `${n.name === '(root)' ? 'project' : n.name} (workspace)`;
         const walk = (g, startId, viaName, dev, manifests) => {
             const seen = new Set([startId]);
-            const queue = [[startId, dev, viaName]];
+            const queue = [[startId, dev, viaName, [viaName]]];
             while (queue.length) {
-                const [id, isDev, via] = queue.shift();
+                const [id, isDev, via, path] = queue.shift();
                 const node = g.nodes.get(id);
                 if (!node) continue;
                 // Below a workspace member, "via" names the nearest member rather than the start.
@@ -315,9 +371,12 @@ export async function resolveLicenses(directDeps, options = {}) {
                 for (const [next, nextDev] of edges) {
                     if (seen.has(next)) continue;
                     seen.add(next);
-                    queue.push([next, nextDev, childVia]);
                     const n = g.nodes.get(next);
-                    if (n && !n.local) add({ ecosystem: g.ecosystem, name: n.name, version: n.version, versionKind: 'locked', relation: 'transitive', dev: nextDev, via: [childVia], manifests });
+                    if (!n) continue;
+                    // The chain from the direct dependency (or workspace member) down to this package.
+                    const nextPath = [...path, n.local ? workspaceLabel(n) : n.name];
+                    queue.push([next, nextDev, childVia, nextPath]);
+                    if (!n.local) add({ ecosystem: g.ecosystem, name: n.name, version: n.version, versionKind: 'locked', relation: 'transitive', dev: nextDev, via: [childVia], path: nextPath, manifests });
                 }
             }
         };
@@ -347,13 +406,15 @@ export async function resolveLicenses(directDeps, options = {}) {
         await pool(fromGraph, concurrency, async ({ rec }) => {
             try {
                 const graph = await depsDevGet(`${pkgPath(rec.ecosystem, rec.name)}/versions/${encodeURIComponent(rec.version)}:dependencies`, signal);
-                for (const n of (graph && graph.nodes) || []) {
-                    if (n.relation === 'SELF' || !n.versionKey) continue;
+                const nodes = (graph && graph.nodes) || [];
+                const paths = graphPaths(nodes, (graph && graph.edges) || []);
+                nodes.forEach((n, i) => {
+                    if (n.relation === 'SELF' || !n.versionKey) return;
                     add({
                         ecosystem: rec.ecosystem, name: n.versionKey.name, version: n.versionKey.version,
-                        versionKind: 'exact', relation: 'transitive', dev: rec.dev, via: [rec.name], manifests: rec.manifests
+                        versionKind: 'exact', relation: 'transitive', dev: rec.dev, via: [rec.name], path: paths[i] || null, manifests: rec.manifests
                     });
-                }
+                });
             } catch (err) {
                 if (err.name === 'AbortError') throw err;
                 rec.graphError = err.message;

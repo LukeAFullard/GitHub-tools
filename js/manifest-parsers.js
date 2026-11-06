@@ -38,6 +38,8 @@ const EXAMPLE_DIRS = /^(examples?|samples?|demos?|tests?|__tests__|testdata|fixt
 export function findManifestPaths(paths, { skipExamples = true, max = 60 } = {}) {
     const found = [];
     for (const path of paths) {
+        // A license policy committed at the repository root (js/license-policy.js).
+        if (path === '.gitdoco-policy.json') { found.push({ path, ecosystem: null, kind: 'policy' }); continue; }
         const parts = path.split('/');
         const name = parts[parts.length - 1];
         const dirs = parts.slice(0, -1);
