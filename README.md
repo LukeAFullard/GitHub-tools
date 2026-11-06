@@ -73,6 +73,8 @@ The site is static: no build step is needed to run it. To publish only the site 
 - **Repository content is untrusted input to your AI.** Code, issues, discussions and package metadata can contain text written to steer an AI (prompt injection). Review the output before sending it, especially for private or sensitive work.
 - **Secrets:** known token and key formats are hidden by default; generic passwords and tokens in code are flagged, and hidden only with "Strict". Files such as `.env`, private keys, key stores, `.npmrc`/`.netrc` and Terraform state are replaced entirely.
 - **No tracking.** No cookies, analytics, third-party scripts, fonts or images; the IBM Plex fonts are bundled. Opening a page contacts nothing; the browser only talks to `api.github.com`, `raw.githubusercontent.com` and (Dependencies tab) `api.deps.dev` once you use a tool, without a `Referer` header or cookies. `tests/privacy.test.js` guards all of this; `privacy.html` explains it to users and has a button that clears everything GitDoco stores.
+- **First use:** before a tool first contacts GitHub or deps.dev, a one-time notice says who the browser will connect to and asks the user to accept the [Terms](terms.html) and acknowledge the [Privacy notice](privacy.html). Nothing is requested until they do.
+- **What GitDoco cannot control** (GitHub, deps.dev, AI services, hosting logs, browser extensions) is spelled out in `privacy.html`.
 - **Tokens** stay in memory and are only sent to `api.github.com`. Repository names loaded with a token are not remembered between visits.
 - **Dependencies tab:** package names and versions (including a private repo's internal packages) are sent to deps.dev to look up licenses.
 - **Content-Security-Policy:** every page sets a CSP that allows scripts only from the site itself and network requests only to GitHub and deps.dev. A `<meta>` tag cannot set everything, so if your host supports response headers, also send:
@@ -89,6 +91,7 @@ The site is static: no build step is needed to run it. To publish only the site 
 .
 ├── index.html          # Landing page
 ├── privacy.html        # Privacy notice + "clear saved data" button
+├── terms.html          # Terms of Use
 ├── code.html           # Code Packer Web interface
 ├── _headers            # Security headers for Cloudflare Pages / Netlify
 ├── scripts/build-site.mjs # Copies the public site into dist/ (no dependencies)
@@ -101,6 +104,7 @@ The site is static: no build step is needed to run it. To publish only the site 
 └── js/
     ├── app.js          # Core Code Packer controller and UI event wiring
     ├── config.js       # Global constants, default ignore lists, API endpoints
+    ├── first-use.js    # One-time notice before the first request to GitHub / deps.dev
     ├── formatters.js   # Code LLM context output formatters (XML, MD, JSON)
     ├── github-api.js   # GitHub API fetch logic & rate-limit handling
     ├── deps-api.js     # Manifests from GitHub or .zip, deps.dev license/advisory/graph lookups

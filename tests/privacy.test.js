@@ -10,7 +10,7 @@ import path from 'node:path';
  */
 const ROOT = new URL('../', import.meta.url).pathname;
 const read = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
-const PAGES = ['index.html', 'privacy.html', 'code.html', 'issues.html', 'discussions.html', 'deps.html'];
+const PAGES = ['index.html', 'privacy.html', 'terms.html', 'code.html', 'issues.html', 'discussions.html', 'deps.html'];
 const JS = fs.readdirSync(path.join(ROOT, 'js')).filter(f => f.endsWith('.js')).map(f => `js/${f}`);
 const CSS = fs.readdirSync(path.join(ROOT, 'css')).filter(f => f.endsWith('.css')).map(f => `css/${f}`);
 const ALLOWED_CONNECT = ['https://api.github.com', 'https://raw.githubusercontent.com', 'https://api.deps.dev'];
@@ -78,6 +78,7 @@ test('"Clear GitDoco data" covers every key the site stores', () => {
         for (const m of read(f).matchAll(/(?:setItem|store\.set)\(\s*['`]([^'`]+)['`]/g)) keys.add(m[1]);
     }
     assert.ok(keys.size > 5);
+    keys.add(/NOTICE_KEY = '([^']+)'/.exec(read('js/first-use.js'))[1]);
     const pattern = /KEY = (\/.+\/);/.exec(read('js/privacy.js'))[1];
     const re = new Function(`return ${pattern}`)();
     for (const k of keys) assert.match(k.replace(/\$\{KIND\}/, 'issues'), re, `key ${k} is not cleared`);

@@ -26,6 +26,7 @@ import { buildSummaryLines } from './ui-summary.js';
 import { buildTabHref } from './nav.js';
 import { parseZipArchive } from './zip-loader.js';
 import { githubFileUrl } from './links.js';
+import { confirmFirstUse } from './first-use.js';
 import {
     parseRepoInput,
     isSafeBranchName,
@@ -1409,6 +1410,8 @@ async function loadSource(zipArchive = null) {
         showInlineError('That branch or tag name is not valid.');
         return;
     }
+    // First contact with GitHub: one-time notice (a local .zip contacts nothing).
+    if (!zipArchive && parseRepoInput(dom.repoUrl.value) && !(await confirmFirstUse('github'))) return;
     if (abortController) {
         abortController.abort();
     }
