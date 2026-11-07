@@ -2,7 +2,7 @@
  * Controller for the Dependencies tab (deps.html): finds manifests in a GitHub repo or a local
  * .zip, looks up licenses on deps.dev, groups them for review and packs a report for an AI.
  */
-import { parseRepoInput } from './github-api.js';
+import { parseRepoInput, isSafeBranchName } from './github-api.js';
 import { parseCompareInput, diffPackages, summarizeDiff } from './deps-compare.js';
 import { fetchPullRequest, fetchRepoInfo, fetchRepoManifests, readZipManifests, collectDirectDependencies, resolveLicenses } from './deps-api.js';
 import { classifyLicense, guessLicenseFromText, LICENSE_GROUPS, GROUP_LABELS, GROUP_HINTS } from './license-classify.js';
@@ -559,10 +559,12 @@ async function load(source) {
                 state.compare = { baseLabel: `${pr.baseRef} (base of #${pr.number})`, headLabel: `pull request #${pr.number}${pr.title ? ` "${pr.title}"` : ''} (${pr.headLabel}, ${pr.headSha.slice(0, 7)})` };
                 state.sourceText += ` (pull request #${pr.number} into ${pr.baseRef})`;
             } else if (compare && compare.kind === 'ref') {
-                base = { owner: source.owner, repo: source.repo, ref: info.branch };
+                // The base is the default branch unless the page was opened with ?base= (a compare link).
+                const baseRef = state.compareBase || info.branch;
+                base = { owner: source.owner, repo: source.repo, ref: baseRef };
                 head = { owner: source.owner, repo: source.repo, ref: compare.ref };
-                state.compare = { baseLabel: info.branch, headLabel: compare.ref };
-                state.sourceText += ` (${compare.ref}, compared with ${info.branch})`;
+                state.compare = { baseLabel: baseRef, headLabel: compare.ref };
+                state.sourceText += ` (${compare.ref}, compared with ${baseRef})`;
             } else {
                 state.sourceText += ` (branch ${info.branch})`;
             }
@@ -741,6 +743,7 @@ dom.loadBtn.addEventListener('click', () => {
     load({ kind: 'github', owner: info.owner, repo: info.repo });
 });
 dom.repoUrl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); dom.loadBtn.click(); } });
+dom.compareInput.addEventListener('input', () => { state.compareBase = null; });
 dom.compareInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); dom.loadBtn.click(); } });
 
 // The repo form never submits (Enter is handled by the buttons); kept out of HTML for the CSP.
@@ -770,7 +773,7 @@ dom.logToggleBtn.addEventListener('click', (e) => {
     dom.logToggleBtn.textContent = logOpen ? 'Hide log' : 'Activity log';
     dom.logToggleBtn.setAttribute('aria-expanded', logOpen ? 'true' : 'false');
 });
-dom.logHeader.addEventListener('click', (e) => { if (e.target && e.target.closest && e.target.closest('a')) return; dom.logToggleBtn.click(); });
+status.bindLogHeader(dom.logHeader, dom.logToggleBtn);
 
 if (dom.targetBar) {
     dom.targetBar.addEventListener('click', (e) => {
@@ -923,6 +926,7 @@ if (dom.shareUrlBtn) {
         if (repo) url.searchParams.set('repo', repo);
         const compare = dom.compareInput.value.trim();
         if (compare) url.searchParams.set('compare', compare);
+        if (compare && state.compareBase) url.searchParams.set('base', state.compareBase);
         try { await navigator.clipboard.writeText(url.toString()); showToast('Deep-link URL copied!', 'info'); } catch (_) {}
     });
 }
@@ -950,6 +954,8 @@ if (dom.exampleRepos) {
 const params = new URLSearchParams(window.location.search);
 if (params.get('repo')) dom.repoUrl.value = params.get('repo');
 if (params.get('compare') && dom.compareInput) dom.compareInput.value = params.get('compare').slice(0, 300);
+// ?base= (from a GitHub compare link): compare with that branch instead of the default one.
+if (params.get('base') && isSafeBranchName(params.get('base'))) state.compareBase = params.get('base');
 else { const last = store.get('cfg_lastRepo'); if (last && !dom.repoUrl.value) dom.repoUrl.value = last; }
 loadSettings();
 // ?format= wins (lands on "Custom"); else the target saved on any tab; else Claude.

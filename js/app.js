@@ -434,12 +434,7 @@ if (dom.logToggleBtn && dom.log) {
     dom.logToggleBtn.setAttribute('aria-expanded', logOpen ? 'true' : 'false');
     });
 }
-if (dom.logHeader) {
-    dom.logHeader.addEventListener('click', (e) => {
-        if (e.target && e.target.closest && e.target.closest('a')) return;
-        if (dom.logToggleBtn) dom.logToggleBtn.click();
-    });
-}
+status.bindLogHeader(dom.logHeader, dom.logToggleBtn);
 
 // The work shown in the status bar now (js/ui-status.js).
 let codeStatus = 0;

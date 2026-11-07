@@ -9,7 +9,7 @@
  *   /owner/repo/issues[/...]                      Issues
  *   /owner/repo/pulls[/...]                       Issues, pull requests only
  *   /owner/repo/pull/123[/...]                    Dependencies, comparing pull request #123 with its base
- *   /owner/repo/compare/base...head               Dependencies, comparing head
+ *   /owner/repo/compare/base...head               Dependencies, comparing head with base
  *   /owner/repo/discussions[/...]                 Discussions
  *   /owner/repo/tree|blob/<ref>[/<path>]          Code, at that branch (and folder)
  *   /owner/repo/commit/<sha>                      Code, at that commit
@@ -22,9 +22,9 @@
 
 const OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const REPO = /^[A-Za-z0-9._-]{1,100}$/;
-// First path segments that are GitDoco's own folders or GitHub site pages, not owners.
+// First path segments that are GitHub site pages, not owners. (GitDoco's own folders such as js/
+// and css/ are not listed: they are also valid account names, and their files never reach 404.html.)
 const NOT_OWNERS = new Set([
-    'assets', 'css', 'js', 'fonts', 'dist',
     'about', 'apps', 'collections', 'contact', 'enterprise', 'events', 'explore', 'features', 'login', 'logout',
     'marketplace', 'new', 'notifications', 'orgs', 'organizations', 'pricing', 'pulls', 'issues', 'search',
     'settings', 'sponsors', 'topics', 'trending', 'users'
@@ -67,11 +67,13 @@ export function routeFor(pathname) {
                 : { tool: 'issues', repo, href: link('issues.html', { repo, includePrs: 'prs' }) };
         }
         case 'compare': {
+            // base...head (or base..head); a lone ref is compared with the default branch.
             const spec = rest.join('/');
-            const head = spec.includes('...') ? spec.split('...').pop() : spec;
-            return head
-                ? { tool: 'deps', repo, href: link('deps.html', { repo, compare: head.slice(0, 250) }) }
-                : { tool: 'deps', repo, href: link('deps.html', { repo }) };
+            const m = /^(.+?)\.{2,3}(.+)$/.exec(spec);
+            const base = m ? m[1] : '';
+            const head = m ? m[2] : spec;
+            if (!head) return { tool: 'deps', repo, href: link('deps.html', { repo }) };
+            return { tool: 'deps', repo, href: link('deps.html', { repo, compare: head.slice(0, 250), ...(base ? { base: base.slice(0, 250) } : {}) }) };
         }
         case 'discussions':
             return { tool: 'discussions', repo, href: link('discussions.html', { repo }) };
@@ -80,7 +82,8 @@ export function routeFor(pathname) {
         case 'commit': {
             if (!rest.length) return { tool: 'code', repo, href: link('code.html', { repo }) };
             // A file (blob) opens its folder; the Code tool resolves branch names that contain "/".
-            const tail = section.toLowerCase() === 'blob' ? rest.slice(0, -1) : rest;
+            // /blob/<ref> with no file keeps the ref.
+            const tail = section.toLowerCase() === 'blob' && rest.length > 1 ? rest.slice(0, -1) : rest;
             const target = `${github}/tree/${tail.map(encodeURIComponent).join('/')}`;
             return { tool: 'code', repo, href: link('code.html', { repo: target }) };
         }

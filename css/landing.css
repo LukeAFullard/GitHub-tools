@@ -247,3 +247,6 @@ h1, h2, h3 { color: var(--heading); line-height: 1.2; margin: 0; }
 /* Quick start: the repo field gets its own row, the two main actions sit side by side under it. */
 .quick-row input { flex: 1 1 100%; }
 .quick-row .btn { flex: 1 1 0; }
+
+/* 404 page while a possible repository shortcut is being routed (js/route-early.js) */
+.routing main { visibility: hidden; }

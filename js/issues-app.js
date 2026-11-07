@@ -21,7 +21,7 @@ import { buildTabHref, startFromShortcut } from './nav.js';
 import { externalLink, isGithubUrl } from './links.js';
 import { searchTopic } from './topic-search.js';
 import { confirmFirstUse } from './first-use.js';
-import { begin, progress, end, isCurrent, initTokenLinks } from './ui-status.js';
+import { begin, progress, end, isCurrent, initTokenLinks, bindLogHeader } from './ui-status.js';
 
 export const KIND = globalThis.__THREAD_EXPLORER_KIND__ === 'discussions' ? 'discussions' : 'issues';
 const IS_DISCUSSIONS = KIND === 'discussions';
@@ -552,7 +552,7 @@ dom.logToggleBtn.addEventListener('click', (e) => {
     dom.logToggleBtn.textContent = logOpen ? 'Hide log' : 'Activity log';
     dom.logToggleBtn.setAttribute('aria-expanded', logOpen ? 'true' : 'false');
 });
-dom.logHeader.addEventListener('click', (e) => { if (e.target && e.target.closest && e.target.closest('a')) return; dom.logToggleBtn.click(); });
+bindLogHeader(dom.logHeader, dom.logToggleBtn);
 
 dom.toggleNlpCollapseBtn.addEventListener('click', () => {
     const hidden = dom.nlpBody.style.display === 'none';

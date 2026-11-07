@@ -5,6 +5,7 @@
 import { routeFor, toolLinks } from './repo-route.js';
 
 const route = routeFor(window.location.pathname);
+const reveal = () => document.documentElement.classList.remove('routing');
 if (route && route.href) {
     window.location.replace(route.href);
 } else if (route && route.hub) {
@@ -19,4 +20,9 @@ if (route && route.href) {
     document.title = `${route.repo}: GitDoco`;
     document.getElementById('notFound').hidden = true;
     document.getElementById('repoHub').hidden = false;
+    reveal();
+} else {
+    // The static title is neutral so shared shortcut links don't preview as "Page not found".
+    document.title = 'Page not found: GitDoco';
+    reveal();
 }

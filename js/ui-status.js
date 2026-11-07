@@ -125,3 +125,15 @@ export function initTokenLinks(showTokenPanel) {
         });
     });
 }
+
+/**
+ * Clicking the status bar header toggles the activity log (via its button), except when the click
+ * is on a link in it ("Report a problem").
+ */
+export function bindLogHeader(header, toggleButton) {
+    if (!header || !toggleButton) return;
+    header.addEventListener('click', (e) => {
+        if (e.target && typeof e.target.closest === 'function' && e.target.closest('a')) return;
+        toggleButton.click();
+    });
+}
