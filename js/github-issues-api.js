@@ -19,6 +19,11 @@ function getAuthHeader(pat) {
  * Errors carry `status` (HTTP status) and `isRateLimit` where relevant.
  */
 export async function fetchWithRetry(url, pat, signal, onHeaders, init = {}) {
+    return (await requestWithRetry(url, pat, signal, onHeaders, init)).data;
+}
+
+/** Like fetchWithRetry, but also returns the response's Link header (for pagination). */
+async function requestWithRetry(url, pat, signal, onHeaders, init = {}) {
     const headers = {
         'Accept': 'application/vnd.github.v3+json',
         ...getAuthHeader(pat),
@@ -31,7 +36,8 @@ export async function fetchWithRetry(url, pat, signal, onHeaders, init = {}) {
         if (onHeaders) onHeaders(meta);
 
         if (res.ok) {
-            return await res.json();
+            const link = res.headers && typeof res.headers.get === 'function' ? res.headers.get('link') : '';
+            return { data: await res.json(), link: link || '' };
         }
         let apiMessage = '';
         if (res.status === 403 || res.status === 429) {
@@ -60,6 +66,58 @@ export async function fetchWithRetry(url, pat, signal, onHeaders, init = {}) {
 }
 
 /**
+ * The rel="next" URL of a GitHub Link header. Only a URL on the GitHub API itself is returned:
+ * the token is sent with the next request, so it must never be pointed anywhere else.
+ */
+export function nextPageUrl(linkHeader) {
+    if (!linkHeader) return null;
+    for (const part of String(linkHeader).split(',')) {
+        const m = /<([^>]+)>\s*;\s*rel="?next"?/i.exec(part);
+        if (!m) continue;
+        try {
+            const next = new URL(m[1]);
+            return next.origin === new URL(GITHUB_API_BASE).origin ? next.href : null;
+        } catch (_) {
+            return null;
+        }
+    }
+    return null;
+}
+
+/**
+ * Walks a paginated GitHub list, yielding one page (an array) at a time.
+ *
+ * It follows the Link header's rel="next" URL rather than building `page=N`: on large datasets
+ * GitHub rejects page numbers ("422 Pagination with the page parameter is not supported for large
+ * datasets, please use cursor based pagination") and its next links carry the cursor instead.
+ * Page numbers are used only when a response has no Link header at all and the page was full
+ * (a proxy that strips headers, or a simple test server); GitHub always sends one when more exist.
+ *
+ * The generator's return value says whether more pages remained when it stopped at `maxPages`.
+ */
+export async function* paginate(firstUrl, pat, signal, onHeaders, { maxPages = Infinity, perPage = 100 } = {}) {
+    let url = firstUrl;
+    for (let page = 1; url; page++) {
+        if (page > maxPages) return { more: true };
+        const { data, link } = await requestWithRetry(url, pat, signal, onHeaders);
+        const batch = Array.isArray(data) ? data : [];
+        if (batch.length === 0) return { more: false };
+        const stop = yield batch;
+        if (stop) return { more: Boolean(link ? nextPageUrl(link) : batch.length >= perPage) };
+        if (link) {
+            url = nextPageUrl(link);
+        } else if (batch.length >= perPage) {
+            const fallback = new URL(firstUrl);
+            fallback.searchParams.set('page', String(page + 1));
+            url = fallback.href;
+        } else {
+            url = null;
+        }
+    }
+    return { more: false };
+}
+
+/**
  * Fetches paginated issues manifest (100 items per page).
  * Includes full issue title, body, labels, state_reason, reactions, and comment count.
  */
@@ -74,22 +132,19 @@ export async function fetchIssuesManifest(owner, repo, options = {}) {
     } = options;
 
     const collected = [];
-    let page = 1;
     const HARD_MAX_PAGES = 30;
-    let lastBatchWasFull = false;
+    const firstUrl = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?state=all&per_page=100&sort=created&direction=desc`;
+    const pages = paginate(firstUrl, pat, signal, onHeaders, { maxPages: HARD_MAX_PAGES });
+    let stoppedEarly = false;
 
-    while (collected.length < maxItems && page <= HARD_MAX_PAGES) {
-        const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?state=all&per_page=100&sort=created&direction=desc&page=${page}`;
-        const batch = await fetchWithRetry(url, pat, signal, onHeaders);
-
-        if (!Array.isArray(batch) || batch.length === 0) {
-            lastBatchWasFull = false;
+    for (let step = await pages.next(); ; ) {
+        if (step.done) {
+            // More pages were left when the page limit was reached (issues-only mode can need many,
+            // since pull requests share the list and are skipped).
+            stoppedEarly = Boolean(step.value && step.value.more) && collected.length < maxItems;
             break;
         }
-
-        lastBatchWasFull = batch.length === 100;
-
-        for (const raw of batch) {
+        for (const raw of step.value) {
             const isPr = Boolean(raw.pull_request);
             if (itemType === 'issues' && isPr) continue;
             if (itemType === 'prs' && !isPr) continue;
@@ -126,11 +181,10 @@ export async function fetchIssuesManifest(owner, repo, options = {}) {
         }
 
         if (onProgress) onProgress(collected.length, maxItems);
-        if (batch.length < 100) break;
-        page++;
+        step = await pages.next(collected.length >= maxItems);
     }
 
-    collected.stoppedEarly = collected.length < maxItems && lastBatchWasFull;
+    collected.stoppedEarly = stoppedEarly;
     return collected;
 }
 
@@ -138,15 +192,13 @@ export async function fetchIssuesManifest(owner, repo, options = {}) {
  * Fetches comments for selected issues.
  * Uses direct per-issue endpoints for small selections, or bulk repo comment pages when efficient.
  */
-async function fetchAllPages(baseUrl, pat, signal, onHeaders, maxPages = 10) {
+export async function fetchAllPages(firstUrl, pat, signal, onHeaders, maxPages = 10) {
     const items = [];
-    for (let page = 1; page <= maxPages; page++) {
-        const batch = await fetchWithRetry(`${baseUrl}&page=${page}`, pat, signal, onHeaders);
-        if (!Array.isArray(batch) || batch.length === 0) return { items, truncated: false };
-        items.push(...batch);
-        if (batch.length < 100) return { items, truncated: false };
+    const pages = paginate(firstUrl, pat, signal, onHeaders, { maxPages });
+    for (let step = await pages.next(); ; step = await pages.next()) {
+        if (step.done) return { items, truncated: Boolean(step.value && step.value.more) };
+        items.push(...step.value);
     }
-    return { items, truncated: true };
 }
 
 /**

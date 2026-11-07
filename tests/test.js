@@ -2032,7 +2032,8 @@ test('github-issues-api: Phase 2 C2 multi-page comment fetching', async () => {
     try {
         globalThis.fetch = async (url) => {
             if (url.includes('/issues/1/comments')) {
-                if (/[?&]page=1\b/.test(url)) {
+                // The first request has no page number (GitHub's default is page 1).
+                if (!/[?&]page=/.test(url) || /[?&]page=1\b/.test(url)) {
                     return {
                         ok: true,
                         status: 200,

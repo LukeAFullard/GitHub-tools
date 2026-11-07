@@ -13,7 +13,7 @@
  * plus discussion fields (category, isAnswered, accepted answer, reply links).
  */
 import { GITHUB_API_BASE } from './config.js';
-import { fetchWithRetry } from './github-issues-api.js';
+import { fetchWithRetry, paginate, fetchAllPages } from './github-issues-api.js';
 
 const GRAPHQL_URL = `${GITHUB_API_BASE}/graphql`;
 const COMMENT_PAGE_SIZE = 100;
@@ -290,26 +290,24 @@ function fromRestDiscussion(d) {
 
 async function restManifest(owner, repo, { maxItems, signal, onHeaders, onProgress }) {
     const collected = [];
-    let page = 1;
-    let lastFull = false;
+    let stoppedEarly = false;
     try {
-        while (collected.length < maxItems && page <= HARD_MAX_PAGES) {
-            const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/discussions?per_page=100&page=${page}`;
-            const batch = await fetchWithRetry(url, '', signal, onHeaders);
-            if (!Array.isArray(batch) || batch.length === 0) { lastFull = false; break; }
-            lastFull = batch.length === 100;
-            for (const d of batch) {
+        // Follows GitHub's rel="next" links (page numbers fail on large repositories; see paginate).
+        const firstUrl = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/discussions?per_page=100`;
+        const pages = paginate(firstUrl, '', signal, onHeaders, { maxPages: HARD_MAX_PAGES });
+        for (let step = await pages.next(); ; ) {
+            if (step.done) { stoppedEarly = Boolean(step.value && step.value.more) && collected.length < maxItems; break; }
+            for (const d of step.value) {
                 collected.push(fromRestDiscussion(d));
                 if (collected.length >= maxItems) break;
             }
             if (onProgress) onProgress(collected.length, maxItems);
-            if (batch.length < 100) break;
-            page++;
+            step = await pages.next(collected.length >= maxItems);
         }
     } catch (err) {
         throw restError(err);
     }
-    collected.stoppedEarly = collected.length < maxItems && lastFull;
+    collected.stoppedEarly = stoppedEarly;
     return collected;
 }
 
@@ -370,14 +368,10 @@ async function restComments(owner, repo, discussions, opts) {
             const raw = [];
             let truncated = false;
             try {
-                for (let page = 1; ; page++) {
-                    if (page > maxCommentPages) { truncated = true; break; }
-                    const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/discussions/${Number(d.number)}/comments?per_page=100&page=${page}`;
-                    const batch = await fetchWithRetry(url, '', signal, counting);
-                    if (!Array.isArray(batch) || batch.length === 0) break;
-                    raw.push(...batch);
-                    if (batch.length < 100) break;
-                }
+                const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/discussions/${Number(d.number)}/comments?per_page=100`;
+                const all = await fetchAllPages(url, '', signal, counting, maxCommentPages);
+                raw.push(...all.items);
+                truncated = all.truncated;
                 const list = arrangeRestComments(raw, d);
                 if (truncated) list.truncated = true;
                 commentsByIssue.set(d.number, list);
