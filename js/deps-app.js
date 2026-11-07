@@ -19,7 +19,9 @@ import { buildTabHref, startFromShortcut } from './nav.js';
 import { externalLink, registryUrl, depsDevUrl, advisoryUrl } from './links.js';
 import { confirmFirstUse } from './first-use.js';
 import * as status from './ui-status.js';
+import { showCopyHint, hideCopyHint, initShortcuts } from './ui-actions.js';
 import { toCsv, toCycloneDx } from './deps-export.js';
+import { toHtmlReport, toThirdPartyNotices } from './deps-report.js';
 import { unsupportedText } from './manifest-parsers.js';
 import { DEFAULT_POLICY, normalizePolicy, parsePolicyFile, policyToFile, evaluatePolicy, describePolicy, POLICY_FILE } from './license-policy.js';
 
@@ -40,7 +42,7 @@ const dom = {
     attentionFilter: $('attentionFilter'), repoPolicyNote: $('repoPolicyNote'), useRepoPolicy: $('useRepoPolicy'),
     useRepoPolicyLabel: $('useRepoPolicyLabel'), policyBlock: $('policyBlock'), policyAllow: $('policyAllow'),
     policyPackages: $('policyPackages'), policyResetBtn: $('policyResetBtn'), policyDownloadBtn: $('policyDownloadBtn'),
-    policyEditor: $('policyEditor'), compareInput: $('compareInput'), exportBar: $('exportBar'), csvBtn: $('csvBtn'), sbomBtn: $('sbomBtn'), matchCount: $('matchCount'), depsEmptyState: $('depsEmptyState'),
+    policyEditor: $('policyEditor'), compareInput: $('compareInput'), exportBar: $('exportBar'), csvBtn: $('csvBtn'), sbomBtn: $('sbomBtn'), htmlReportBtn: $('htmlReportBtn'), noticesBtn: $('noticesBtn'), matchCount: $('matchCount'), depsEmptyState: $('depsEmptyState'),
     depsList: $('depsList'), outputScopeNote: $('outputScopeNote'),
     wrapToggleBtn: $('wrapToggleBtn'), copyBtn: $('copyBtn'), downloadBtn: $('downloadBtn'),
     warningBanner: $('warningBanner'), summaryCard: $('summaryCard'), outputEmptyState: $('outputEmptyState'),
@@ -124,6 +126,7 @@ function copyLabel() {
 }
 
 function setAppState(next) {
+    status.showResults(state.appState, next);
     state.appState = next;
     if (document.body) document.body.classList.toggle('is-empty', next === 'empty');
     if (dom.step1) dom.step1.classList.toggle('active', next === 'empty');
@@ -392,11 +395,9 @@ function renderList() {
 }
 
 let outputGen = 0;
-async function rebuildOutput() {
-    if (state.appState !== 'loaded') return;
-    const myGen = ++outputGen;
-    const visible = filteredPackages();
-    const out = buildDepsOutput(dom.format.value, {
+/** What the reports describe: the packages shown, with the load's context. */
+function reportContext(visible = filteredPackages()) {
+    return {
         repoName: state.repoName,
         source: state.sourceText,
         repoLicense: state.repoLicense,
@@ -410,7 +411,14 @@ async function rebuildOutput() {
         compactPermissive: dom.compactPermissive.checked,
         warnings: state.warnings,
         instructions: dom.aiInstructions.value
-    });
+    };
+}
+
+async function rebuildOutput() {
+    if (state.appState !== 'loaded') return;
+    const myGen = ++outputGen;
+    const visible = filteredPackages();
+    const out = buildDepsOutput(dom.format.value, reportContext(visible));
     state.output = out;
     dom.previewArea.value = out.text.slice(0, 45000) + (out.text.length > 45000 ? '\n\n... [Truncated for preview] ...' : '');
     dom.outputEmptyState.style.display = 'none';
@@ -438,26 +446,53 @@ async function rebuildOutput() {
     const outdated = directs.filter(p => p.outdated).length;
     const fixable = directs.filter(p => p.upgradeClears).length;
     const health = directs.filter(p => p.healthFlags && p.healthFlags.length).length;
+    const blocked = visible.filter(p => p.policy && p.policy.verdict === 'block').length;
+    const toReview = visible.filter(p => p.policy && p.policy.verdict === 'review').length;
+    // A part is plain text, or [text, filter]: clicking it filters the package list ("Show" menu).
+    const f = (text, filter, count) => (count ? [text, filter] : text);
     dom.summaryCard.innerHTML = '';
-    for (const line of [
-        `${visible.length} package${visible.length === 1 ? '' : 's'} · about ${tokens.toLocaleString()} tokens`,
-        `${review} to review (copyleft or restricted) · ${counts.unknown} unknown`,
+    for (const parts of [
+        [`${visible.length} package${visible.length === 1 ? '' : 's'} · about ${tokens.toLocaleString()} tokens`],
+        [`${review} to review (copyleft or restricted) · ${counts.unknown} unknown`],
         totalAdv
-            ? `${totalAdv} security advisor${totalAdv === 1 ? 'y' : 'ies'}: ${sev.critical} critical, ${sev.high} high, ${sev.medium} medium, ${sev.low + sev.unknown} low or unrated`
-            : 'No known security advisories',
-        `Direct: ${outdated} outdated${fixable ? ` (${fixable} fixed by upgrading)` : ''} · ${health} with health warnings`,
-        state.lockfiles.length
+            ? [f(`${totalAdv} security advisor${totalAdv === 1 ? 'y' : 'ies'}`, 'advisories', totalAdv), ': ',
+                f(`${sev.critical} critical, ${sev.high} high`, 'high', sev.critical + sev.high), `, ${sev.medium} medium, ${sev.low + sev.unknown} low or unrated`]
+            : ['No known security advisories'],
+        ['Direct: ', f(`${outdated} outdated`, 'outdated', outdated), fixable ? ` (${fixable} fixed by upgrading)` : '', ' · ', f(`${health} with health warnings`, 'health', health)],
+        [state.lockfiles.length
             ? `Exact versions from ${state.lockfiles.join(', ')}${state.packages.some(p => p.versionKind && p.versionKind !== 'locked') ? '; others estimated' : ''}`
-            : 'No lockfile: versions estimated from manifest ranges',
-        ...(state.diff ? [`Compared with ${state.compare.baseLabel}: ${summarizeDiff(state.diff)}`] : []),
-        `Policy: ${visible.filter(p => p.policy && p.policy.verdict === 'block').length} blocked · ${visible.filter(p => p.policy && p.policy.verdict === 'review').length} to review (${usingRepoPolicy() ? POLICY_FILE : 'your settings'})`
+            : 'No lockfile: versions estimated from manifest ranges'],
+        ...(state.diff ? [[`Compared with ${state.compare.baseLabel}: `, f(summarizeDiff(state.diff), 'changed', state.diff.added.length + state.diff.updated.length)]] : []),
+        ['Policy: ', f(`${blocked} blocked`, 'blocked', blocked), ' · ', f(`${toReview} to review`, 'policy-review', toReview), ` (${usingRepoPolicy() ? POLICY_FILE : 'your settings'})`]
     ]) {
         const el = document.createElement('div');
-        el.textContent = line;
+        for (const part of parts) {
+            if (typeof part === 'string') { el.appendChild(document.createTextNode(part)); continue; }
+            const [text, filter] = part;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'summary-filter';
+            btn.textContent = text;
+            const on = dom.attentionFilter.value === filter;
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+            btn.title = on ? 'Showing only these packages. Click to show all.' : 'Show only these packages';
+            btn.addEventListener('click', () => applyAttentionFilter(on ? '' : filter));
+            el.appendChild(btn);
+        }
         dom.summaryCard.appendChild(el);
     }
     dom.summaryCard.hidden = false;
     dom.exportBar.hidden = false;
+}
+
+/** Sets the "Show" filter (from a summary line) and brings the package list into view. */
+function applyAttentionFilter(value) {
+    dom.attentionFilter.value = value;
+    dom.attentionFilter.dispatchEvent(new Event('change'));
+    if (value && dom.depsList && typeof dom.depsList.scrollIntoView === 'function') {
+        const viewport = dom.depsList.closest ? dom.depsList.closest('.tree-viewport') : null;
+        if (viewport) viewport.scrollTop = 0;
+    }
 }
 
 function renderAll() {
@@ -473,6 +508,7 @@ function fillEcosystemFilter() {
 }
 
 function resetView() {
+    hideCopyHint();
     state.packages = [];
     state.maxLookups = DEFAULT_LOOKUPS;
     state.unchecked = 0;
@@ -833,6 +869,14 @@ dom.sbomBtn.addEventListener('click', () => {
     saveFile(JSON.stringify(bom, null, 2), `${fileBase()}-sbom.cdx.json`, 'application/vnd.cyclonedx+json');
     showToast('Downloaded the CycloneDX SBOM.', 'info');
 });
+dom.htmlReportBtn.addEventListener('click', () => {
+    saveFile(toHtmlReport(reportContext()), `${fileBase()}-dependency-report.html`, 'text/html');
+    showToast('Downloaded the report. Open it in a browser to read or print it.', 'info');
+});
+dom.noticesBtn.addEventListener('click', () => {
+    saveFile(toThirdPartyNotices({ repoName: state.repoName, packages: filteredPackages() }), 'THIRD_PARTY_NOTICES.md', 'text/markdown');
+    showToast('Downloaded THIRD_PARTY_NOTICES.md. Add each package\'s copyright and license text before publishing it.', 'info');
+});
 
 let instTimer = null;
 dom.aiInstructions.addEventListener('input', () => {
@@ -867,6 +911,7 @@ dom.copyBtn.addEventListener('click', async () => {
         await navigator.clipboard.writeText(state.output.text);
         showToast('Copied the dependency report.', 'info');
         dom.copyBtn.textContent = 'Copied!';
+        showCopyHint(dom.copyBtn, state.targetKey);
         setTimeout(() => { dom.copyBtn.textContent = copyLabel(); }, 2000);
     } catch (_) {
         showToast('Unable to copy automatically.', 'error');
@@ -971,3 +1016,4 @@ renderPolicyEditor();
 setAppState('empty');
 status.initTokenLinks(showTokenPanel);
 startFromShortcut(dom.loadBtn, dom.repoUrl);
+initShortcuts({ main: () => dom.loadBtn, copy: dom.copyBtn, mainButtons: [dom.loadBtn] });

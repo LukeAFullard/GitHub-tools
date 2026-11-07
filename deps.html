@@ -302,7 +302,9 @@
                 <div id="summaryCard" class="summary-card" hidden></div>
                 <div id="exportBar" class="export-bar" hidden>
                     <span>Export the packages shown:</span>
-                    <button type="button" id="csvBtn" class="secondary btn-xs">CSV</button>
+                    <button type="button" id="htmlReportBtn" class="secondary btn-xs" title="A readable, printable report for people who don't use AI: summary, policy findings, advisories and every package">Report (HTML)</button>
+                    <button type="button" id="noticesBtn" class="secondary btn-xs" title="THIRD_PARTY_NOTICES.md: runtime packages grouped by license, with links to each license text">Notices file</button>
+                    <button type="button" id="csvBtn" class="secondary btn-xs" title="One row per package, for spreadsheets">CSV</button>
                     <button type="button" id="sbomBtn" class="secondary btn-xs" title="CycloneDX 1.5 JSON software bill of materials, with licenses and known vulnerabilities">SBOM (CycloneDX)</button>
                 </div>
                 <div id="outputEmptyState" class="empty-state">

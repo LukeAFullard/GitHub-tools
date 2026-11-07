@@ -294,3 +294,24 @@ findings, and SPDX (tag-value or JSON) as a second SBOM format.
       from the address bar.
 - Later: a GitHub Action that fails a pull request on new policy findings or advisories; a scheduled
   live check against large public repositories (would have caught the 422 pagination change).
+
+## Phase 12: Results first, and reports for people (done)
+
+- [x] After a load the repo bar shrinks to one line and the page scrolls to the results.
+- [x] Dependencies: clicking a summary count (advisories, high/critical, outdated, health warnings,
+      changed, blocked, to review) filters the list; clicking it again shows everything.
+- [x] After Copy: "Copied. Now paste it into Claude." with a link that opens the chosen AI (nothing is
+      sent to it), and part-by-part guidance for split output.
+- [x] Keyboard shortcuts: Ctrl/Cmd+Enter for the next step, Ctrl/Cmd+Shift+Enter to copy
+      (Ctrl+Shift+C would clash with browser developer tools).
+- [x] Dependencies exports a printable HTML report (summary cards, policy findings, advisories,
+      licenses, every package; no scripts, everything escaped) and `THIRD_PARTY_NOTICES.md`
+      (runtime packages by license, links to license texts, and a reminder that copyright lines
+      and full license texts must come from each package).
+
+## Hosting and repository move
+
+The repository moves to the InYourOwnBrowser organisation (github.com/InYourOwnBrowser) and will
+deploy from there to Cloudflare Pages on its own domain. After the transfer, update the 15
+`LukeAFullard/GitHub-tools` links in the HTML pages (one `sed`, see README "Deploying"), and check
+the shortcut links once on the live site.

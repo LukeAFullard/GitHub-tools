@@ -1857,3 +1857,36 @@ button.link-btn { min-height: 0 !important; padding: 0 !important; display: inli
 .feedback-link { font-size: 0.75rem; color: var(--ink-soft); text-decoration: underline; text-underline-offset: 2px; }
 .feedback-link:hover { color: var(--cobalt); }
 @media (max-width: 480px) { .feedback-link { display: none; } }
+
+/* After a load (body.has-results, js/ui-status.js showResults): the repo bar shrinks to one line,
+   so the results are the first thing on screen. The repo field stays editable to switch repo. */
+.workspace-section, #nlpBanner { scroll-margin-top: calc(var(--header-h) + 0.25rem); }
+.has-results .source-bar { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+.has-results .repo-input-wrapper > label[for="repoUrl"],
+.has-results .repo-input-wrapper > p.field-helper.secondary-control { display: none; }
+.has-results .branch-token-group label { display: none; }
+.has-results .target-bar { padding-top: 0.35rem; padding-bottom: 0.35rem; }
+@media (min-width: 900px) {
+    .has-results .input-row { flex-wrap: nowrap; }
+    .has-results .input-row input[type="text"] { width: auto; flex: 1 1 auto; min-width: 12rem; }
+    .has-results .compare-row { margin-top: 0.35rem; }
+}
+
+/* Dependencies summary: counts that filter the package list when clicked */
+.summary-filter {
+    display: inline; padding: 0; min-height: 0 !important; border: none; background: none;
+    font: inherit; font-weight: 600; color: var(--cobalt); cursor: pointer;
+    text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px;
+}
+.summary-filter:hover { text-decoration-style: solid; }
+.summary-filter[aria-pressed="true"] { background: var(--cobalt-subtle); border-radius: 3px; padding: 0 0.25rem; text-decoration-style: solid; }
+
+/* After Copy: where to paste it (js/ui-actions.js) */
+.copy-hint {
+    display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+    padding: 0.55rem 1rem; border-bottom: 1px solid var(--line);
+    background: var(--fits-bg); color: var(--ink); font-size: 0.875rem; font-weight: 600;
+}
+.copy-hint[hidden] { display: none; }
+.copy-hint-link { font-weight: 700; color: var(--cobalt); }
+.copy-hint-close { margin-left: auto; padding: 0 0.4rem; min-height: 0 !important; border: none; background: none; color: var(--ink-soft); font-size: 1.1rem; line-height: 1; }

@@ -28,6 +28,7 @@ import { parseZipArchive } from './zip-loader.js';
 import { githubFileUrl } from './links.js';
 import { confirmFirstUse } from './first-use.js';
 import * as status from './ui-status.js';
+import { showCopyHint, hideCopyHint, initShortcuts } from './ui-actions.js';
 import {
     parseRepoInput,
     isSafeBranchName,
@@ -471,6 +472,7 @@ export function showTokenField(reason = '') {
 
 // --- App State & Sequence Steps ---
 function setAppState(state, note = '') {
+    status.showResults(currentAppState, state);
     currentAppState = state;
     if (document.body) {
         document.body.classList.toggle('is-empty', state === 'empty');
@@ -729,6 +731,7 @@ function hidePersistentWarning() {
 }
 
 function clearOutputState() {
+    hideCopyHint();
     generatedChunks = [];
     activeChunkIndex = 0;
     packedOutputText = "";
@@ -887,6 +890,11 @@ updateCopyBtnLabel();
 setAppState('empty');
 status.initTokenLinks(showTokenPanel);
 startFromShortcut(dom.packBtn, dom.repoUrl);
+initShortcuts({
+    main: () => (currentAppState === 'empty' ? dom.packBtn : dom.startDownloadBtn),
+    copy: dom.copyBtn,
+    mainButtons: [dom.packBtn, dom.startDownloadBtn]
+});
 
 // Settings drawer token link
 if (dom.drawerTokenLink) {
@@ -2114,6 +2122,7 @@ dom.copyBtn.addEventListener('click', async () => {
             showToast('Copied context to clipboard!', "info");
         }
         dom.copyBtn.textContent = 'Copied!';
+        showCopyHint(dom.copyBtn, currentTargetKey, { part: activeChunkIndex + 1, parts: Math.max(1, numParts) });
         setTimeout(() => updateCopyBtnLabel(activeChunkIndex), 2000);
     } catch (_) {
         showToast('Unable to copy automatically. Please copy directly from preview.', 'error');
