@@ -185,6 +185,21 @@ test('ui: renderBanner creates correct DOM elements and hides when empty', () =>
         assert.equal(mockEl.children[0].textContent, 'Warning message');
         assert.equal(mockEl.children[1].className, 'banner-item error');
         assert.equal(mockEl.children[1].textContent, 'Error message');
+
+        // An item with an action gets a button that runs it
+        let clicked = 0;
+        globalThis.document.createElement = (tag) => {
+            const el = { tagName: tag, className: '', textContent: '', children: [], listeners: {},
+                appendChild(c) { this.children.push(c); return c; },
+                addEventListener(type, fn) { this.listeners[type] = fn; } };
+            return el;
+        };
+        renderBanner(mockEl, [{ level: 'warn', text: 'Some packages not checked', action: { label: 'Check the rest', onClick: () => { clicked++; } } }]);
+        const btn = mockEl.children[0].children[0];
+        assert.equal(btn.tagName, 'button');
+        assert.equal(btn.textContent, 'Check the rest');
+        btn.listeners.click();
+        assert.equal(clicked, 1);
     } finally {
         globalThis.document = originalDoc;
     }

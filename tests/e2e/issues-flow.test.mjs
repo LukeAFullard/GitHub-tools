@@ -14,7 +14,7 @@ test('load: manifest loads and the first 25 open issues are selected', async () 
     el('repoUrl').value = 'o/r';
     await el('loadIssuesBtn').click();
     await wait(50);
-    assert.match(logText(), /Loaded \d+ items/);
+    assert.match(logText(), /Loaded \d+ issues\./);
 });
 
 test('build with comment scope "none" fetches no comments', async () => {

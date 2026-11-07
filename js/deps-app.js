@@ -18,6 +18,7 @@ import { renderBanner } from './ui-banner.js';
 import { buildTabHref } from './nav.js';
 import { externalLink, registryUrl, depsDevUrl, advisoryUrl } from './links.js';
 import { confirmFirstUse } from './first-use.js';
+import * as status from './ui-status.js';
 import { toCsv, toCycloneDx } from './deps-export.js';
 import { unsupportedText } from './manifest-parsers.js';
 import { DEFAULT_POLICY, normalizePolicy, parsePolicyFile, policyToFile, evaluatePolicy, describePolicy, POLICY_FILE } from './license-policy.js';
@@ -53,6 +54,9 @@ const dom = {
 };
 
 const VALID_FORMATS = ['claude-xml', 'markdown', 'generic-xml', 'json'];
+const DEFAULT_LOOKUPS = 5000;
+const UNCHECKED_WARNING = /were not looked up on deps\.dev/;
+
 let state = {
     appState: 'empty',          // 'empty' | 'loaded'
     targetKey: 'claude',
@@ -72,7 +76,9 @@ let state = {
     packages: [],
     warnings: [],
     groupFilter: null,
-    output: null
+    output: null,
+    maxLookups: DEFAULT_LOOKUPS, // deps.dev lookups per run; "Check the remaining" raises it
+    unchecked: 0
 };
 let controller = null;
 let generation = 0;
@@ -94,10 +100,11 @@ function log(msg) {
     if (dom.logSummary) dom.logSummary.textContent = msg.replace(/^\[[A-Z]+\]\s*/, '');
 }
 
-function progress(percent) {
-    const v = Math.min(100, Math.max(0, Math.round(percent)));
-    if (dom.progressFill) dom.progressFill.style.width = `${v}%`;
-    if (dom.progressTrack) dom.progressTrack.setAttribute('aria-valuenow', String(v));
+let depsStatus = 0;
+
+/** Progress of the current load or update, shown in the status bar. */
+function progress(percent, message) {
+    status.progress(depsStatus, { percent, message });
 }
 
 function showError(msg) {
@@ -307,7 +314,7 @@ function renderList() {
         }
         const lic = document.createElement('span');
         lic.className = 'issue-number';
-        lic.textContent = p.license.expression || (p.status === 'not-found' ? 'not on deps.dev' : 'no license data');
+        lic.textContent = p.license.expression || (p.status === 'not-found' ? 'not on deps.dev' : p.status === 'not-checked' ? 'not checked yet' : 'no license data');
         title.append(badge, name, lic);
         if (p.change) {
             const ch = document.createElement('span');
@@ -467,6 +474,8 @@ function fillEcosystemFilter() {
 
 function resetView() {
     state.packages = [];
+    state.maxLookups = DEFAULT_LOOKUPS;
+    state.unchecked = 0;
     state.compare = null;
     state.diff = null;
     state.locks = [];
@@ -508,9 +517,10 @@ async function load(source) {
     state.source = source;
     dom.loadBtn.disabled = true;
     dom.abortBtn.style.display = 'inline-flex';
-    dom.progressTrack.style.display = 'block';
-    progress(2);
     dom.log.textContent = '';
+    const myStatus = depsStatus = status.begin(source.kind === 'zip'
+        ? `Reading ${source.archive.fileName}…`
+        : `Reading ${source.owner}/${source.repo} from GitHub…`, { button: source.kind === 'zip' ? dom.uploadZipBtn : dom.loadBtn, percent: 2 });
     const pat = dom.pat.value.trim();
 
     try {
@@ -616,6 +626,7 @@ async function load(source) {
         showToast(err.message, 'error');
         if (err.status === 404 || err.status === 403 || err.status === 429) showTokenPanel(err.status === 404 ? 'If this is a private repo, add a token.' : '');
     } finally {
+        status.end(myStatus);
         if (myGen === generation) {
             dom.loadBtn.disabled = false;
             dom.abortBtn.style.display = 'none';
@@ -623,17 +634,36 @@ async function load(source) {
     }
 }
 
-const RESOLVE_WARNINGS = [/^Stopped at/, /license lookup\(s\) failed/, /^Cargo\.lock does not mark/, /^Go: indirect modules/];
+const RESOLVE_WARNINGS = [/^Stopped at/, UNCHECKED_WARNING, /license lookup\(s\) failed/, /^Cargo\.lock does not mark/, /^Go: indirect modules/];
+
+/** Warning banner; the "not looked up" warning gets a button that checks the rest. */
+function renderWarnings() {
+    renderBanner(dom.warningBanner, state.warnings.map(w => ({
+        level: 'warn',
+        text: w,
+        action: UNCHECKED_WARNING.test(w) && state.unchecked > 0
+            ? { label: `Check the remaining ${state.unchecked.toLocaleString()}`, onClick: checkRemaining }
+            : null
+    })));
+}
+
+/** Looks up the packages left out by the lookup limit (the ones already checked are cached). */
+function checkRemaining() {
+    state.maxLookups = Infinity;
+    log(`[INFO] Checking the remaining ${state.unchecked} packages on deps.dev...`);
+    rerunResolve();
+}
 
 /** Re-runs the deps.dev lookup with the current options (results are cached, so this is quick). */
 async function resolve(signal, myGen) {
     const t0 = Date.now();
-    const { packages, capped } = await resolveLicenses(state.directDeps, {
+    const { packages, capped, unchecked } = await resolveLicenses(state.directDeps, {
         locks: state.locks,
+        maxLookups: state.maxLookups,
         includeTransitive: dom.includeTransitive.checked,
         includeDev: dom.includeDev.checked,
         signal,
-        onProgress: (done, total) => progress(15 + (done / Math.max(total, 1)) * 85)
+        onProgress: (done, total) => progress(15 + (done / Math.max(total, 1)) * 85, `Looking up licenses and advisories on deps.dev… ${done} of ${total} packages`)
     });
     if (myGen !== generation) return;
     state.packages = packages;
@@ -643,7 +673,7 @@ async function resolve(signal, myGen) {
         log(`[INFO] Checking ${state.compare.baseLabel} for the comparison...`);
         const b = collectDirectDependencies(state.compare.baseManifests);
         const baseResult = await resolveLicenses(b.deps, {
-            locks: b.locks, includeTransitive: dom.includeTransitive.checked, includeDev: dom.includeDev.checked, details: false, signal
+            locks: b.locks, includeTransitive: dom.includeTransitive.checked, includeDev: dom.includeDev.checked, details: false, maxLookups: state.maxLookups, signal
         });
         if (myGen !== generation) return;
         const policy = effectivePolicy();
@@ -653,7 +683,12 @@ async function resolve(signal, myGen) {
     }
     // Warnings that depend on the lookup options are recomputed on every run.
     state.warnings = state.warnings.filter(w => !RESOLVE_WARNINGS.some(re => re.test(w)));
-    if (capped) state.warnings.push('Stopped at 1,500 packages; the list is incomplete.');
+    state.unchecked = unchecked || 0;
+    if (state.unchecked) {
+        state.warnings.push(`${state.unchecked.toLocaleString()} of ${packages.length.toLocaleString()} packages were not looked up on deps.dev (limit ${DEFAULT_LOOKUPS.toLocaleString()} per run), so their licenses and advisories are not checked yet. Direct and runtime packages, and those closest to them, were checked first.`);
+    } else if (capped) {
+        state.warnings.push(`Stopped listing at ${packages.length.toLocaleString()} packages; the list is incomplete.`);
+    }
     const failedLookups = packages.filter(p => p.status === 'error').length;
     if (failedLookups) state.warnings.push(`${failedLookups} license lookup(s) failed; they are listed as unknown.`);
     if (dom.includeTransitive.checked && !dom.includeDev.checked && state.lockfiles.some(l => /(^|\/)Cargo\.lock$/.test(l))) {
@@ -665,7 +700,7 @@ async function resolve(signal, myGen) {
     progress(100);
     fillEcosystemFilter();
     dom.statPackages.textContent = packages.length.toLocaleString();
-    renderBanner(dom.warningBanner, state.warnings.map(w => ({ level: 'warn', text: w })));
+    renderWarnings();
     setAppState('loaded');
     renderAll();
     log(`[SUCCESS] ${packages.length} packages checked in ${((Date.now() - t0) / 1000).toFixed(1)}s.`);
@@ -678,9 +713,10 @@ function rerunResolve() {
     controller = new AbortController();
     const myGen = ++generation;
     log('[INFO] Updating the package list...');
+    const myStatus = depsStatus = status.begin('Updating the package list…', { percent: 0 });
     resolve(controller.signal, myGen).catch(err => {
         if (err.name !== 'AbortError') { log(`[ERROR] ${err.message}`); showToast(err.message, 'error'); }
-    });
+    }).finally(() => status.end(myStatus));
 }
 
 async function openZip(file) {
@@ -731,7 +767,8 @@ dom.logToggleBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     logOpen = !logOpen;
     dom.log.style.display = logOpen ? 'block' : 'none';
-    dom.logToggleBtn.textContent = logOpen ? 'Hide log' : 'Details';
+    dom.logToggleBtn.textContent = logOpen ? 'Hide log' : 'Activity log';
+    dom.logToggleBtn.setAttribute('aria-expanded', logOpen ? 'true' : 'false');
 });
 dom.logHeader.addEventListener('click', () => dom.logToggleBtn.click());
 
@@ -854,8 +891,6 @@ if (dom.togglePreviewBtn) {
 }
 dom.wrapToggleBtn.addEventListener('click', () => {
     const wrapped = dom.previewArea.classList.toggle('wrap');
-    dom.wrapToggleBtn.classList.toggle('primary', wrapped);
-    dom.wrapToggleBtn.classList.toggle('secondary', !wrapped);
     dom.wrapToggleBtn.setAttribute('aria-pressed', wrapped ? 'true' : 'false');
 });
 
@@ -928,3 +963,4 @@ if (VALID_FORMATS.includes(params.get('format'))) {
 resetView();
 renderPolicyEditor();
 setAppState('empty');
+status.initTokenLinks(showTokenPanel);

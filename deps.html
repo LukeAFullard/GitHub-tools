@@ -5,7 +5,8 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.github.com https://raw.githubusercontent.com https://api.deps.dev; worker-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="referrer" content="no-referrer">
-    <title>Dependency License Report</title>
+    <title>Dependencies: licenses, advisories and SBOM for a GitHub repo · GitDoco</title>
+    <meta name="description" content="Check the licenses and known security advisories of a repo&#x27;s npm, Python, Go and Rust dependencies, apply a license policy, compare branches or pull requests, and export CSV or a CycloneDX SBOM.">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/issues.css">
@@ -48,7 +49,7 @@
                 </svg>
             </button>
 
-            <button id="shareUrlBtn" class="secondary btn-sm" title="Copy Deep-Link URL">
+            <button id="shareUrlBtn" class="secondary btn-sm" title="Copy a link to this page with the repo and your settings (never your token)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
                     <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
@@ -73,7 +74,7 @@
                 <li><strong>Versions:</strong> exact when a lockfile is present; otherwise estimated from the manifest's ranges. Go's indirect modules come from go.mod and have no "via" path; Cargo.lock doesn't mark dev-only crates.</li>
             </ul>
         </details>
-        <p class="hero-zip-hint">Private repo without a token? Use <strong>Open .zip</strong>. The archive is read locally and never uploaded.</p>
+        <p class="hero-zip-hint">Public repos work without a token. For a private repo, <button type="button" class="link-btn" data-show-token>add a GitHub token</button> (kept only in this tab, never saved) or use <strong>Open .zip</strong>. A .zip is read locally and never uploaded.</p>
         <div id="exampleRepos" class="example-repos">
             <span>Try:</span>
             <button type="button" data-repo="expressjs/express">expressjs/express</button>
@@ -292,9 +293,8 @@
             <div class="pane-header">
                 <span class="pane-title">Output</span>
                 <div style="display: flex; align-items: center; gap: 0.4rem;">
-                    <button id="wrapToggleBtn" class="primary btn-sm" aria-pressed="true" title="Toggle line wrapping">Wrap</button>
                     <button id="copyBtn" class="primary btn-sm" disabled>Copy</button>
-                    <button id="downloadBtn" class="secondary btn-sm" disabled>Download</button>
+                    <button id="downloadBtn" class="secondary btn-sm" disabled title="Save the output as a file">Download</button>
                 </div>
             </div>
             <div class="output-viewport">
@@ -309,8 +309,9 @@
                     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
                     <p>The report appears here once dependencies are loaded.</p>
                 </div>
-                <div class="preview-toolbar" style="padding: 0.5rem 0.85rem 0; display: flex; align-items: center;">
+                <div class="preview-toolbar">
                     <button id="togglePreviewBtn" type="button" class="secondary btn-sm" aria-expanded="false" style="display: none;">Show preview</button>
+                    <button id="wrapToggleBtn" type="button" class="secondary btn-sm toggle-btn" aria-pressed="true" title="Wrap long lines in the preview (the copied text is not changed)">Wrap lines</button>
                 </div>
                 <textarea id="previewArea" class="preview wrap" readonly style="display: none;"></textarea>
             </div>
@@ -320,8 +321,8 @@
     <!-- Activity Log -->
     <section id="logCard" class="log-card workspace-section">
         <div id="logHeader" class="log-header">
-            <span id="logSummary" class="log-summary-text">Ready</span>
-            <button id="logToggleBtn" class="secondary btn-xs" type="button">Details</button>
+            <span id="logSummary" class="log-summary-text" role="status" aria-live="polite">Ready</span>
+            <button id="logToggleBtn" class="secondary btn-xs" type="button" aria-expanded="false" aria-controls="log" title="Show every step and request">Activity log</button>
         </div>
         <div class="progress-track" id="progressTrack" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
             <div class="progress-fill" id="progressFill"></div>

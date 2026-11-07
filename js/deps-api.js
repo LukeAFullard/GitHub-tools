@@ -279,8 +279,14 @@ export const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'unknown'];
  *   license: {expression, group, notes}, advisories: string[],
  *   advisoryDetails: [{ id, title, score, severity, aliases, url }], maxSeverity,
  *   latest, outdated, upgradeClears, health: { scorecard, maintained, stars, openIssues, project,
- *   projectLicense }, healthFlags: string[], deprecated, status: 'ok'|'not-found'|'error', error? }
+ *   projectLicense }, healthFlags: string[], deprecated,
+ *   status: 'ok'|'not-found'|'error'|'not-checked', error? }
  * (latest/outdated/health only for direct dependencies.)
+ *
+ * Every package found is returned. Only the first `maxLookups` are looked up on deps.dev (direct
+ * first, then runtime, then those closest to a direct dependency); the rest have status
+ * 'not-checked'. Lookups are cached, so calling again with a higher limit only fetches the new ones.
+ * @returns {Promise<{ packages: object[], unchecked: number, capped: boolean }>}
  */
 export async function resolveLicenses(directDeps, options = {}) {
     const {
@@ -288,7 +294,8 @@ export async function resolveLicenses(directDeps, options = {}) {
         includeDev = false,
         locks = [],
         details = true,
-        maxPackages = 1500,
+        maxLookups = 5000,
+        maxPackages = 50000,
         concurrency = 8,
         signal,
         onProgress
@@ -423,10 +430,17 @@ export async function resolveLicenses(directDeps, options = {}) {
         }, signal);
     }
 
-    // 3. Licenses and advisories for every package.
+    // 3. Licenses and advisories, most important packages first, up to the lookup limit.
     const all = [...packages.values()];
-    total += all.length;
-    await pool(all, concurrency, async (rec) => {
+    const order = p => [p.relation === 'direct' ? 0 : 1, p.dev ? 1 : 0, p.path ? p.path.length : 1];
+    const ranked = [...all].sort((a, b) => {
+        const x = order(a), y = order(b);
+        return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
+    });
+    const toCheck = ranked.slice(0, Math.max(0, maxLookups));
+    for (const rec of ranked.slice(toCheck.length)) rec.status = 'not-checked';
+    total += toCheck.length;
+    await pool(toCheck, concurrency, async (rec) => {
         try {
             let info = rec.version ? await depsDevGet(`${pkgPath(rec.ecosystem, rec.name)}/versions/${encodeURIComponent(rec.version)}`, signal) : null;
             if (!info && rec.versionKind !== 'exact') {
@@ -455,8 +469,9 @@ export async function resolveLicenses(directDeps, options = {}) {
         tick();
     }, signal);
 
-    if (details) await addDetails(all, { concurrency, signal, onTick: () => tick(), onTotal: n => { total += n; } });
-    return { packages: all, capped };
+    if (details) await addDetails(toCheck, { concurrency, signal, onTick: () => tick(), onTotal: n => { total += n; } });
+    const unchecked = all.length - toCheck.length;
+    return { packages: all, unchecked, capped: capped || unchecked > 0 };
 }
 
 /**

@@ -27,6 +27,7 @@ import { buildTabHref } from './nav.js';
 import { parseZipArchive } from './zip-loader.js';
 import { githubFileUrl } from './links.js';
 import { confirmFirstUse } from './first-use.js';
+import * as status from './ui-status.js';
 import {
     parseRepoInput,
     isSafeBranchName,
@@ -429,7 +430,8 @@ if (dom.logToggleBtn && dom.log) {
         e.stopPropagation();
         logOpen = !logOpen;
         dom.log.style.display = logOpen ? 'block' : 'none';
-        dom.logToggleBtn.textContent = logOpen ? 'Hide log' : 'Details';
+        dom.logToggleBtn.textContent = logOpen ? 'Hide log' : 'Activity log';
+    dom.logToggleBtn.setAttribute('aria-expanded', logOpen ? 'true' : 'false');
     });
 }
 if (dom.logHeader) {
@@ -438,10 +440,10 @@ if (dom.logHeader) {
     });
 }
 
-function updateProgressBar(percent) {
-    const val = Math.min(100, Math.max(0, Math.round(percent)));
-    if (dom.progressFill) dom.progressFill.style.width = `${val}%`;
-    if (dom.progressTrack) dom.progressTrack.setAttribute('aria-valuenow', val.toString());
+// The work shown in the status bar now (js/ui-status.js).
+let codeStatus = 0;
+function updateProgressBar(percent, message) {
+    status.progress(codeStatus, { percent, message });
 }
 
 function log(msg) {
@@ -560,13 +562,9 @@ if (dom.wrapToggleBtn && dom.previewArea) {
         const isWrapped = dom.previewArea.classList.contains('wrap');
         if (isWrapped) {
             dom.previewArea.classList.remove('wrap');
-            dom.wrapToggleBtn.classList.remove('primary');
-            dom.wrapToggleBtn.classList.add('secondary');
             dom.wrapToggleBtn.setAttribute('aria-pressed', 'false');
         } else {
             dom.previewArea.classList.add('wrap');
-            dom.wrapToggleBtn.classList.add('primary');
-            dom.wrapToggleBtn.classList.remove('secondary');
             dom.wrapToggleBtn.setAttribute('aria-pressed', 'true');
         }
     });
@@ -891,6 +889,7 @@ if (initialParams.has('format')) {
 updateSettingsSummary();
 updateCopyBtnLabel();
 setAppState('empty');
+status.initTokenLinks(showTokenPanel);
 
 // Settings drawer token link
 if (dom.drawerTokenLink) {
@@ -1466,9 +1465,10 @@ async function loadSource(zipArchive = null) {
     abortController = new AbortController();
     dom.packBtn.disabled = true;
     dom.abortBtn.style.display = 'inline-flex';
-    dom.progressTrack.style.display = 'block';
-    updateProgressBar(0);
     dom.log.textContent = '';
+    const listStatus = codeStatus = status.begin(zipArchive
+        ? `Reading ${zipArchive.fileName}…`
+        : `Reading the file list of ${repoInfo.owner}/${repoInfo.repo}…`, { button: zipArchive ? dom.uploadZipBtn : dom.packBtn });
     if (dom.outputEmptyState) dom.outputEmptyState.style.display = 'flex';
     if (dom.previewArea) dom.previewArea.style.display = 'none';
 
@@ -1726,7 +1726,7 @@ async function loadSource(zipArchive = null) {
                 localStorage.setItem('cfg_lastRepo', `${repoInfo.owner}/${repoInfo.repo}`);
             } catch (_) {}
         }
-        showToast(`Loaded ${zipArchive ? zipArchive.fileName : 'manifest'}: ${processable.length} files.`, 'info');
+        showToast(`${zipArchive ? `Opened ${zipArchive.fileName}` : 'Listed the repository'}: ${processable.length} files.`, 'info');
 
         let hasDownloaded = false;
 
@@ -1771,8 +1771,7 @@ async function loadSource(zipArchive = null) {
                 }
                 const signal = abortController.signal;
                 incrementActiveFetches();
-                dom.progressTrack.style.display = 'block';
-                updateProgressBar(0);
+                const deltaStatus = codeStatus = status.begin(`Downloading ${missingNodes.length} newly checked file(s)…`, { percent: 0 });
                 let completedDelta = 0;
                 let deltaFailedCount = 0;
 
@@ -1814,7 +1813,7 @@ async function loadSource(zipArchive = null) {
                             }
 
                             completedDelta++;
-                            updateProgressBar((completedDelta / missingNodes.length) * 100);
+                            updateProgressBar((completedDelta / missingNodes.length) * 100, `Downloading newly checked files… ${completedDelta} of ${missingNodes.length}`);
 
                             if (throttleMs > 0) {
                                 await sleep(throttleMs, signal);
@@ -1840,6 +1839,7 @@ async function loadSource(zipArchive = null) {
                         }
                     }
                 } finally {
+                    status.end(deltaStatus);
                     decrementActiveFetches();
                 }
             }).catch((err) => {
@@ -1852,6 +1852,8 @@ async function loadSource(zipArchive = null) {
             return deltaFetchQueue;
         }
 
+        // The file list is on screen; the download starts when the user clicks Build context.
+        status.end(listStatus, `${processable.length} files listed. Choose what to include, then Build context.`);
         await new Promise((resolve, reject) => {
             const onStart = async () => {
                 if (isDownloading) {
@@ -1865,13 +1867,15 @@ async function loadSource(zipArchive = null) {
                     resolve();
                 } else {
                     isDownloading = true;
+                    const rebuildStatus = codeStatus = status.begin('Building context…', { button: dom.startDownloadBtn });
                     try {
                         if (currentActiveSelection && currentActiveSelection.length > 0) {
                             await fetchSelectedFilesDelta(currentActiveSelection);
                         }
-                        repackBundleInMemory(currentActiveSelection);
+                        await repackBundleInMemory(currentActiveSelection);
                     } finally {
                         isDownloading = false;
+                        status.end(rebuildStatus);
                     }
                 }
             };
@@ -1899,6 +1903,7 @@ async function loadSource(zipArchive = null) {
         }
 
         log(`[FETCH] Starting download for ${selectionSnapshot.length} selected file(s)...`);
+        const downloadStatus = codeStatus = status.begin(`Downloading ${selectionSnapshot.length} file(s)…`, { button: dom.startDownloadBtn, percent: 0 });
 
         const results = new Array(selectionSnapshot.length);
         let emptyCount = 0;
@@ -1954,7 +1959,7 @@ async function loadSource(zipArchive = null) {
                 }
 
                 completedCount++;
-                updateProgressBar((completedCount / selectionSnapshot.length) * 100);
+                updateProgressBar((completedCount / selectionSnapshot.length) * 100, `Downloading files… ${completedCount} of ${selectionSnapshot.length}`);
 
                 if (throttleMs > 0) {
                     await sleep(throttleMs, abortController.signal);
@@ -1998,7 +2003,9 @@ async function loadSource(zipArchive = null) {
             await fetchSelectedFilesDelta(currentActiveSelection);
         }
 
+        status.progress(downloadStatus, { message: 'Building context…' });
         await repackBundleInMemory();
+        status.end(downloadStatus);
 
     } catch (err) {
         if (err.name === 'AbortError') {
@@ -2010,6 +2017,8 @@ async function loadSource(zipArchive = null) {
             showToast(`Error: ${err.message}`, "error");
         }
     } finally {
+        // Whatever was running for this load (listing or downloading) has stopped.
+        status.end(codeStatus);
         if (thisGen === currentGeneration) {
             isDownloading = false;
             dom.packBtn.disabled = false;

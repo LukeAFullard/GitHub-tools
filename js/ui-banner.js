@@ -73,6 +73,14 @@ export function renderBanner(el, items = []) {
         const div = document.createElement('div');
         div.className = `banner-item ${item.level}`;
         div.textContent = item.text;
+        if (item.action && typeof item.action.onClick === 'function') {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'secondary btn-xs banner-action';
+            btn.textContent = item.action.label;
+            btn.addEventListener('click', item.action.onClick);
+            div.appendChild(btn);
+        }
         el.appendChild(div);
     }
 }

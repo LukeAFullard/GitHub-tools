@@ -5,7 +5,8 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.github.com https://raw.githubusercontent.com https://api.deps.dev; worker-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="referrer" content="no-referrer">
-    <title>GitHub Repo Context Packer</title>
+    <title>Code: pack a GitHub repo into one file for your AI · GitDoco</title>
+    <meta name="description" content="Pick files from any GitHub repo or a local .zip, see live token counts, hide secrets, and copy one clean file for Claude, ChatGPT or Gemini. Runs in your browser.">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/issues.css">
@@ -56,7 +57,7 @@
                 </svg>
             </button>
 
-            <button id="shareUrlBtn" class="secondary btn-sm" title="Copy Deep-Link URL">
+            <button id="shareUrlBtn" class="secondary btn-sm" title="Copy a link to this page with the repo and your settings (never your token)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
                     <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
@@ -86,8 +87,8 @@
     <!-- First Screen Hero -->
     <section id="heroBlock" class="hero-block">
         <h2>Turn a GitHub repo into one file for your AI</h2>
-        <p>Paste a repo, choose what to include, copy the result. Runs in your browser. Your token is never stored.</p>
-        <p class="hero-zip-hint">No token? Use <strong>Open .zip</strong> or drop a repo's .zip anywhere on this page. It is read locally and never uploaded.</p>
+        <p>Paste a repo, choose what to include, copy the result. Runs in your browser.</p>
+        <p class="hero-zip-hint">Public repos work without a token. For a private repo, <button type="button" class="link-btn" data-show-token>add a GitHub token</button> (kept only in this tab, never saved) or use <strong>Open .zip</strong>; you can also drop a repo's .zip anywhere on this page. A .zip is read locally and never uploaded.</p>
         <div id="exampleRepos" class="example-repos">
             <span>Try:</span>
             <button type="button" data-repo="anthropics/claude-code">anthropics/claude-code</button>
@@ -287,8 +288,8 @@
             <div class="tree-toolbar">
                 <button id="selectAllBtn" class="secondary btn-xs">Select all</button>
                 <button id="deselectAllBtn" class="secondary btn-xs">Deselect all</button>
-                <button id="expandAllBtn" class="secondary btn-xs">Expand</button>
-                <button id="collapseAllBtn" class="secondary btn-xs">Collapse</button>
+                <button id="expandAllBtn" class="secondary btn-xs" title="Open every folder">Expand all</button>
+                <button id="collapseAllBtn" class="secondary btn-xs" title="Close every folder">Collapse all</button>
 
                 <div class="threshold-group">
                     <button id="deselectLargeBtn" class="secondary btn-xs" title="Uncheck files larger than threshold">Uncheck files over</button>
@@ -323,10 +324,9 @@
                 </div>
 
                 <div style="display: flex; align-items: center; gap: 0.4rem;">
-                    <button id="wrapToggleBtn" class="primary btn-sm" aria-pressed="true" title="Toggle line wrapping">Wrap</button>
                     <button id="copyBtn" class="primary btn-sm">Copy</button>
                     <button id="nextPartBtn" class="secondary btn-sm" style="display:none;" title="Advance to next part">Next part</button>
-                    <button id="downloadBtn" class="secondary btn-sm">Download</button>
+                    <button id="downloadBtn" class="secondary btn-sm" title="Save the output as a file">Download</button>
                     <button id="downloadAllBtn" class="secondary btn-sm" style="display:none;">Download all parts</button>
                 </div>
             </div>
@@ -377,8 +377,9 @@
                     </svg>
                     <p>Build the context to see it here.</p>
                 </div>
-                <div class="preview-toolbar" style="padding: 0.5rem 0.85rem 0; display: flex; align-items: center;">
+                <div class="preview-toolbar">
                     <button id="togglePreviewBtn" type="button" class="secondary btn-sm" aria-expanded="false" style="display: none;">Show preview</button>
+                    <button id="wrapToggleBtn" type="button" class="secondary btn-sm toggle-btn" aria-pressed="true" title="Wrap long lines in the preview (the copied text is not changed)">Wrap lines</button>
                 </div>
                 <textarea id="previewArea" class="preview wrap" readonly style="display: none;"></textarea>
             </div>
@@ -388,8 +389,8 @@
     <!-- Terminal Activity Log -->
     <section id="logCard" class="log-card workspace-section">
         <div id="logHeader" class="log-header">
-            <span id="logSummary" class="log-summary-text">Ready</span>
-            <button id="logToggleBtn" class="secondary btn-xs" type="button">Details</button>
+            <span id="logSummary" class="log-summary-text" role="status" aria-live="polite">Ready</span>
+            <button id="logToggleBtn" class="secondary btn-xs" type="button" aria-expanded="false" aria-controls="log" title="Show every step and request">Activity log</button>
         </div>
         <div class="progress-track" id="progressTrack" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
             <div class="progress-fill" id="progressFill"></div>
