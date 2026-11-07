@@ -33,9 +33,22 @@ export function installFakeGithub({ issueCount = 120, mode = 'normal' } = {}) {
     globalThis.fetch = async (url) => {
         const u = new URL(url);
         calls.push(u.pathname + u.search);
-        const page = Number(u.searchParams.get('page') || 1);
+        // Like GitHub on a large repository: later pages come from the Link header's cursor URL,
+        // and asking for page 2+ by number is refused with 422.
+        if (Number(u.searchParams.get('page') || 1) > 1) {
+            return new Response(JSON.stringify({ message: 'Pagination with the page parameter is not supported for large datasets, please use cursor based pagination (after/before)' }), { status: 422, headers: hdr() });
+        }
+        const start = u.searchParams.get('after') ? Number(u.searchParams.get('after')) : 0;
         const per = Number(u.searchParams.get('per_page') || 30);
-        const send = (list) => new Response(JSON.stringify(list.slice((page - 1) * per, page * per)), { status: 200, headers: hdr() });
+        const send = (list) => {
+            const headers = hdr();
+            if (start + per < list.length) {
+                const next = new URL(u.href);
+                next.searchParams.set('after', String(start + per));
+                headers.link = `<${next.href}>; rel="next"`;
+            }
+            return new Response(JSON.stringify(list.slice(start, start + per)), { status: 200, headers });
+        };
         const isComments = /\/issues\/comments$|\/issues\/\d+\/comments$/.test(u.pathname);
         if (isComments && mode === 'primary-limit') {
             return new Response('{"message":"API rate limit exceeded"}', { status: 403, headers: { 'x-ratelimit-limit': '60', 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3000) } });
