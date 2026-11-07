@@ -31,6 +31,22 @@ A zero-install, 100% client-side web application that fetches, filters, cleans, 
 - **API Limits & Pacing:** Uses the GitHub Git Trees API (recursive) to minimize rate consumption, respecting secondary rate limits with automatic `Retry-After` handling.
 - **Zero Build Dependencies:** Built with vanilla HTML/CSS and native ES Modules. No bundlers or npm packages needed.
 
+## GitHub URL shortcut
+
+In any GitHub repository URL, replace `github.com` with GitDoco's domain to open it in the matching tool:
+
+| GitDoco URL | Opens |
+| --- | --- |
+| `/owner/repo` | A page to choose a tool |
+| `/owner/repo/issues`, `/pulls` | Issues (issues, or pull requests only) |
+| `/owner/repo/pull/123` | Dependencies, comparing pull request #123 with its base |
+| `/owner/repo/compare/main...feature` | Dependencies, comparing `feature` |
+| `/owner/repo/discussions` | Discussions |
+| `/owner/repo/tree/<branch>/<folder>`, `/blob/...`, `/commit/<sha>` | Code, at that branch and folder |
+| `/owner/repo/network/dependencies`, `/security` | Dependencies |
+
+The site is static: the host serves `404.html` for these paths (Cloudflare Pages, Netlify and GitHub Pages all do), and `js/not-found.js` sends the browser on. The tool then starts loading the repo, after the one-time notice on a first visit.
+
 ## Output Formats
 
 | Format | Description | Extension |
@@ -72,7 +88,7 @@ The site is static: no build step is needed to run it. To publish only the site 
 
 - **Repository content is untrusted input to your AI.** Code, issues, discussions and package metadata can contain text written to steer an AI (prompt injection). Review the output before sending it, especially for private or sensitive work.
 - **Secrets:** known token and key formats are hidden by default; generic passwords and tokens in code are flagged, and hidden only with "Strict". Files such as `.env`, private keys, key stores, `.npmrc`/`.netrc` and Terraform state are replaced entirely.
-- **No tracking.** No cookies, analytics, third-party scripts, fonts or images; the IBM Plex fonts are bundled. Opening a page contacts nothing; the browser only talks to `api.github.com`, `raw.githubusercontent.com` and (Dependencies tab) `api.deps.dev` once you use a tool, without a `Referer` header or cookies. `tests/privacy.test.js` guards all of this; `privacy.html` explains it to users and has a button that clears everything GitDoco stores.
+- **No tracking.** No cookies, analytics, third-party scripts, fonts or images; the IBM Plex fonts are bundled. Opening a page contacts nothing (except a GitDoco shortcut link that names a repo, which starts loading it); the browser only talks to `api.github.com`, `raw.githubusercontent.com` and (Dependencies tab) `api.deps.dev` once you use a tool, without a `Referer` header or cookies. `tests/privacy.test.js` guards all of this; `privacy.html` explains it to users and has a button that clears everything GitDoco stores.
 - **First use:** before a tool first contacts GitHub or deps.dev, a one-time notice says who the browser will connect to and asks the user to accept the [Terms](terms.html) and acknowledge the [Privacy notice](privacy.html). Nothing is requested until they do.
 - **What GitDoco cannot control** (GitHub, deps.dev, AI services, hosting logs, browser extensions) is spelled out in `privacy.html`.
 - **Tokens** stay in memory and are only sent to `api.github.com`. Repository names loaded with a token are not remembered between visits.
@@ -122,7 +138,9 @@ The site is static: no build step is needed to run it. To publish only the site 
     ├── license-policy.js # License policy (allow / review / block) and .gitdoco-policy.json
     ├── links.js        # Safe outbound links (GitHub, registries, deps.dev, advisories)
     ├── nlp-text.js     # Shared text tokenizing for topics and topic search
+    ├── not-found.js    # 404 page: GitHub-style repo paths open the matching tool
     ├── privacy.js      # Privacy page: lists and clears what GitDoco stores
+    ├── repo-route.js   # GitHub URL shortcut: /owner/repo/issues, /pull/123, /tree/... -> tool links
     ├── deps-compare.js # Comparing two refs or a pull request
     ├── deps-export.js  # CSV and CycloneDX SBOM export
     ├── lockfiles.js    # Lockfile readers (npm, yarn, pnpm, poetry, uv, Pipfile, Cargo) -> dependency graphs

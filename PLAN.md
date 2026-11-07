@@ -281,3 +281,16 @@ findings, and SPDX (tag-value or JSON) as a second SBOM format.
 - [x] Page titles and descriptions name GitDoco; a 404 page; the status line is announced to screen
       readers; toasts sit above the status bar; the output header wraps on phones.
 
+
+## Phase 11: Focus and the GitHub URL shortcut (done)
+
+- [x] Landing page leads with the two tools with least competition: "Check any GitHub repo's licenses
+      and security, and triage its issues with your AI". "Check dependencies" and "Triage issues"
+      are the main actions; cards and tool tabs run Dependencies, Issues, Discussions, Code.
+- [x] GitHub URL shortcut (`js/repo-route.js`, `404.html`, `js/not-found.js`): swap `github.com` for
+      GitDoco's domain. `/issues`, `/pulls`, `/discussions`, `/tree/...` open the matching tool; a pull
+      request opens its dependency changes; a bare `/owner/repo` offers a choice. Links carry `go=1`
+      so the tool starts loading (the first-use notice still comes first), and `go` is then removed
+      from the address bar.
+- Later: a GitHub Action that fails a pull request on new policy findings or advisories; a scheduled
+  live check against large public repositories (would have caught the 422 pagination change).

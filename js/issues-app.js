@@ -17,7 +17,7 @@ import { TARGETS, detectTarget } from './targets.js';
 import { buildSettingsSummary } from './settings-summary.js';
 import { commentCostHint } from './comment-cost.js';
 import { buildSummaryLines } from './ui-summary.js';
-import { buildTabHref } from './nav.js';
+import { buildTabHref, startFromShortcut } from './nav.js';
 import { externalLink, isGithubUrl } from './links.js';
 import { searchTopic } from './topic-search.js';
 import { confirmFirstUse } from './first-use.js';
@@ -1998,6 +1998,7 @@ updateSettingsSummary();
 updateCopyBtnLabel(0);
 setAppState('empty');
 initTokenLinks(showTokenPanel);
+startFromShortcut(dom.loadIssuesBtn, dom.repoUrl);
 // The token field starts open on the Discussions page; its help text explains why (official API).
 if (IS_DISCUSSIONS) showTokenPanel('');
 

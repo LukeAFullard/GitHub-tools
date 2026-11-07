@@ -23,7 +23,7 @@ import { TARGETS, detectTarget } from './targets.js';
 import { buildSettingsSummary } from './settings-summary.js';
 import { defaultExcludedPaths, rankSuggestions } from './suggestions.js';
 import { buildSummaryLines } from './ui-summary.js';
-import { buildTabHref } from './nav.js';
+import { buildTabHref, startFromShortcut } from './nav.js';
 import { parseZipArchive } from './zip-loader.js';
 import { githubFileUrl } from './links.js';
 import { confirmFirstUse } from './first-use.js';
@@ -890,6 +890,7 @@ updateSettingsSummary();
 updateCopyBtnLabel();
 setAppState('empty');
 status.initTokenLinks(showTokenPanel);
+startFromShortcut(dom.packBtn, dom.repoUrl);
 
 // Settings drawer token link
 if (dom.drawerTokenLink) {

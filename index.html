@@ -5,22 +5,22 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.github.com https://raw.githubusercontent.com https://api.deps.dev; worker-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="referrer" content="no-referrer">
-    <title>GitDoco: Turn a GitHub Repo into One File for Your AI</title>
-    <meta name="description" content="GitDoco packs a GitHub repository's code, issues, discussions and dependency licenses into one clean file for Claude, ChatGPT or Gemini. Free, no account, runs entirely in your browser.">
+    <title>GitDoco: check a GitHub repo's dependencies and triage its issues with your AI</title>
+    <meta name="description" content="Check any GitHub repository's dependency licenses and security advisories, triage its issues and discussions, or pack its code into one file for Claude, ChatGPT or Gemini. Free, no account, runs entirely in your browser.">
     <link rel="canonical" href="https://gitdoco.timedoco.com/">
     <meta name="theme-color" content="#10161C">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
 
-    <meta property="og:title" content="GitDoco: hand your AI the whole repo">
-    <meta property="og:description" content="Code, issues, discussions and dependency licenses from any GitHub repo, packed into one file for your AI. Free, no account, runs in your browser.">
+    <meta property="og:title" content="GitDoco: check any GitHub repo's licenses, security and issues">
+    <meta property="og:description" content="Dependency licenses and security advisories, issue triage and code packing for any GitHub repo, ready for your AI. Free, no account, runs in your browser.">
     <meta property="og:image" content="https://gitdoco.timedoco.com/assets/og-image.jpg">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
     <meta property="og:url" content="https://gitdoco.timedoco.com/">
     <meta property="og:type" content="website">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="GitDoco: hand your AI the whole repo">
-    <meta name="twitter:description" content="Code, issues, discussions and dependency licenses from any GitHub repo, packed into one file for your AI.">
+    <meta name="twitter:title" content="GitDoco: check any GitHub repo's licenses, security and issues">
+    <meta name="twitter:description" content="Dependency licenses and security advisories, issue triage and code packing for any GitHub repo, ready for your AI.">
     <meta name="twitter:image" content="https://gitdoco.timedoco.com/assets/og-image.jpg">
 
     <link rel="stylesheet" href="css/landing.css">
@@ -36,7 +36,7 @@
             <a href="#tools">Tools</a>
             <a href="privacy.html">Privacy</a>
             <a href="#faq">FAQ</a>
-            <a class="btn btn-dark" href="code.html">Open GitDoco</a>
+            <a class="btn btn-dark" href="deps.html">Open GitDoco</a>
         </nav>
     </div>
 </header>
@@ -44,21 +44,21 @@
 <main>
     <section class="hero wrap">
         <div class="hero-text">
-            <div class="pill"><span class="dot" aria-hidden="true"></span> Repo in. AI-ready file out.</div>
-            <h1>Hand your AI the whole repo: code, issues, discussions and dependencies.</h1>
-            <p class="lead">GitDoco turns any GitHub repository into one clean file that Claude, ChatGPT or Gemini can read. Choose what to include, see the token count, copy. It runs entirely in your browser: free, no account, and your token is never stored.</p>
+            <div class="pill"><span class="dot" aria-hidden="true"></span> No install. No account. In your browser.</div>
+            <h1>Check any GitHub repo's licenses and security, and triage its issues with your AI.</h1>
+            <p class="lead">Paste a repository. GitDoco checks its dependencies' licenses and known security advisories, turns its issues and discussions into a clean, clustered brief, or packs its code into one file, ready for Claude, ChatGPT or Gemini. Free, and nothing is uploaded.</p>
 
             <form id="quickStart" class="quick-start" autocomplete="off">
                 <label for="quickRepo">Try it with a repository</label>
                 <div class="quick-row">
                     <input type="text" id="quickRepo" placeholder="owner/repo or a GitHub URL" spellcheck="false">
-                    <button type="submit" class="btn btn-signal" data-page="code">Pack the code</button>
+                    <button type="submit" class="btn btn-signal" data-page="deps">Check dependencies</button>
+                    <button type="button" class="btn btn-outline" data-page="issues">Triage issues</button>
                 </div>
                 <div class="quick-more">
                     <span>or open it in</span>
-                    <button type="button" class="link-btn" data-page="issues">Issues</button>
                     <button type="button" class="link-btn" data-page="discussions">Discussions</button>
-                    <button type="button" class="link-btn" data-page="deps">Dependencies</button>
+                    <button type="button" class="link-btn" data-page="code">Code</button>
                 </div>
                 <p id="quickError" class="quick-error" role="alert" hidden>Enter a repo as owner/name or a GitHub URL.</p>
                 <div class="examples">
@@ -68,29 +68,30 @@
                     <button type="button" class="chip" data-repo="astral-sh/ruff">astral-sh/ruff</button>
                 </div>
             </form>
+            <p class="shortcut-tip"><strong>Shortcut:</strong> in any GitHub repo URL, replace <code>github.com</code> with <code>gitdoco.timedoco.com</code>. A pull request's link opens its dependency changes; <code>/issues</code> opens issue triage.</p>
         </div>
         <figure class="hero-shot">
-            <img src="assets/screenshot-code.jpg" width="1280" height="800" alt="GitDoco's Code tool: a repository's file tree with token sizes on the left and the packed output on the right" fetchpriority="high">
+            <img src="assets/screenshot-deps.jpg" width="1280" height="800" alt="GitDoco's Dependencies tool comparing a pull request: packages marked New, Updated or Blocked by the license policy, with security advisories, next to the report for your AI" fetchpriority="high">
         </figure>
     </section>
 
     <section id="tools" class="wrap section">
-        <h2>Four tools, one workflow</h2>
-        <p class="section-lead">Load a repo, pick what matters, copy one file. Every tool uses the same targets, token budgets and output formats.</p>
+        <h2>Four tools for any GitHub repo</h2>
+        <p class="section-lead">Start with a dependency check or issue triage. Every tool shares the same AI targets, token budgets and output formats, and switching tools keeps your repo.</p>
         <div class="tool-grid">
-            <article class="tool-card tool-code">
-                <a class="tool-head" href="code.html">
-                    <span class="tool-icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg></span>
-                    <span class="tool-head-text"><h3>Code</h3><span class="tool-tag">Pack a repo&rsquo;s source files</span></span>
+            <article class="tool-card tool-deps">
+                <a class="tool-head" href="deps.html">
+                    <span class="tool-icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.3 7 12 12 20.7 7"></polyline><line x1="12" y1="22" x2="12" y2="12"></line></svg></span>
+                    <span class="tool-head-text"><h3>Dependencies</h3><span class="tool-tag">Check licenses and advisories</span></span>
                 </a>
-                <img src="assets/screenshot-code.jpg" width="1280" height="800" alt="Screenshot of the Code tool" loading="lazy">
+                <img src="assets/screenshot-deps.jpg" width="1280" height="800" alt="Screenshot of the Dependencies tool" loading="lazy">
                 <div class="tool-body">
-                    <p>Pick folders and files from an interactive tree with live token counts. Optional minifying, secret hiding, and splitting into parts that fit your AI's context window.</p>
+                    <p>Read the repo's manifests, look up every package's license and known security advisories, and group them for review: permissive, copyleft, restricted, unknown.</p>
                     <ul>
-                        <li>Skips build output, lockfiles and binaries by default</li>
-                        <li>Works on private repos, or on a local <code>.zip</code> without a token</li>
+                        <li>npm, Python, Go and Rust, with exact versions from lockfiles</li>
+                        <li>Presets for license review, attribution files and advisories</li>
                     </ul>
-                    <a class="tool-link" href="code.html">Open Code &rarr;</a>
+                    <a class="tool-link" href="deps.html">Open Dependencies &rarr;</a>
                 </div>
             </article>
             <article class="tool-card tool-issues">
@@ -123,19 +124,19 @@
                     <a class="tool-link" href="discussions.html">Open Discussions &rarr;</a>
                 </div>
             </article>
-            <article class="tool-card tool-deps">
-                <a class="tool-head" href="deps.html">
-                    <span class="tool-icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.3 7 12 12 20.7 7"></polyline><line x1="12" y1="22" x2="12" y2="12"></line></svg></span>
-                    <span class="tool-head-text"><h3>Dependencies</h3><span class="tool-tag">Check licenses and advisories</span></span>
+            <article class="tool-card tool-code">
+                <a class="tool-head" href="code.html">
+                    <span class="tool-icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg></span>
+                    <span class="tool-head-text"><h3>Code</h3><span class="tool-tag">Pack a repo&rsquo;s source files</span></span>
                 </a>
-                <img src="assets/screenshot-deps.jpg" width="1280" height="800" alt="Screenshot of the Dependencies tool" loading="lazy">
+                <img src="assets/screenshot-code.jpg" width="1280" height="800" alt="Screenshot of the Code tool" loading="lazy">
                 <div class="tool-body">
-                    <p>Read the repo's manifests, look up every package's license and known security advisories, and group them for review: permissive, copyleft, restricted, unknown.</p>
+                    <p>Pick folders and files from an interactive tree with live token counts. Optional minifying, secret hiding, and splitting into parts that fit your AI's context window.</p>
                     <ul>
-                        <li>npm, Python, Go and Rust, with exact versions from lockfiles</li>
-                        <li>Presets for license review, attribution files and advisories</li>
+                        <li>Skips build output, lockfiles and binaries by default</li>
+                        <li>Works on private repos, or on a local <code>.zip</code> without a token</li>
                     </ul>
-                    <a class="tool-link" href="deps.html">Open Dependencies &rarr;</a>
+                    <a class="tool-link" href="code.html">Open Code &rarr;</a>
                 </div>
             </article>
         </div>
@@ -168,13 +169,14 @@
         <details><summary>Which AI tools does it work with?</summary><p>Any that accept text. Presets for Claude, ChatGPT and Gemini set the output format and token budget; Custom lets you choose Claude XML, Markdown, generic XML or JSON and your own split size.</p></details>
         <details><summary>What if the repo is too big?</summary><p>Deselect folders, minify code, or split the output into parts that each fit your AI's context window. The token meter shows where you stand before you copy.</p></details>
         <details><summary>Can I use it on a private repo without giving it a token?</summary><p>Yes: download the repo as a <code>.zip</code> and open it in the Code or Dependencies tool. The archive is read in your browser and never uploaded.</p></details>
+        <details><summary>Can I open a repo straight from GitHub?</summary><p>Yes. In any GitHub repository URL, replace <code>github.com</code> with <code>gitdoco.timedoco.com</code>. <code>/owner/repo/issues</code> opens issue triage, <code>/pulls</code> pull requests, <code>/discussions</code> discussions, and a branch or folder (<code>/tree/...</code>) the Code tool. A pull request (<code>/pull/123</code>) opens the dependency check, comparing what it adds with its base. Just <code>/owner/repo</code> lets you choose.</p></details>
         <details><summary>Is the license report legal advice?</summary><p>No. It groups licenses to show what deserves a closer look, and leaves the conclusions to you (or your lawyer).</p></details>
     </section>
 
     <section class="wrap section about">
         <h2>About</h2>
         <p>GitDoco is part of <strong>In Your Own Browser</strong>: small, privacy-first tools that run entirely on your device. If you track time for clients, try its sibling <a href="https://timedoco.com/" target="_blank" rel="noopener noreferrer">TimeDoco</a>. Feedback, bug reports and ideas are very welcome on <a href="https://github.com/LukeAFullard/GitHub-tools" target="_blank" rel="noopener noreferrer">GitHub</a>.</p>
-        <a class="btn btn-signal" href="code.html">Open GitDoco</a>
+        <a class="btn btn-signal" href="deps.html">Open GitDoco</a>
     </section>
 </main>
 

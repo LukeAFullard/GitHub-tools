@@ -18,3 +18,23 @@ export function buildTabHref(page, repoText) {
     }
     return `${base}?repo=${encodeURIComponent(trimmed)}`;
 }
+
+/**
+ * A GitDoco shortcut link (github.com swapped for GitDoco's domain, see js/repo-route.js) carries
+ * go=1: start loading the repo straight away. The one-time notice before the first request still
+ * comes first (the load button shows it). "go" is then dropped from the address bar, so reloading
+ * or sharing the page doesn't load again unasked.
+ */
+export function startFromShortcut(loadButton, repoInput) {
+    if (typeof window === 'undefined' || !window.location) return false;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('go') !== '1') return false;
+    params.delete('go');
+    try {
+        const query = params.toString();
+        window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
+    } catch (_) {}
+    if (!loadButton || !repoInput || !String(repoInput.value || '').trim()) return false;
+    setTimeout(() => loadButton.click(), 0);
+    return true;
+}
