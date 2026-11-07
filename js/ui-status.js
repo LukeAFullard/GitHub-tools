@@ -125,3 +125,36 @@ export function initTokenLinks(showTokenPanel) {
         });
     });
 }
+
+/**
+ * Clicking the status bar header toggles the activity log (via its button), except when the click
+ * is on a link in it ("Report a problem").
+ */
+export function bindLogHeader(header, toggleButton) {
+    if (!header || !toggleButton) return;
+    header.addEventListener('click', (e) => {
+        if (e.target && typeof e.target.closest === 'function' && e.target.closest('a')) return;
+        toggleButton.click();
+    });
+}
+
+/**
+ * Called on every app state change. Once results exist, the repo bar shrinks to one line
+ * (body.has-results, see css/style.css), and the first time a load produces results the page
+ * scrolls to them, so they are the first thing on screen rather than the intro and settings.
+ */
+export function showResults(previous, next) {
+    if (typeof document === 'undefined' || !document.body) return;
+    document.body.classList.toggle('has-results', next !== 'empty');
+    if (previous !== 'empty' || next === 'empty') return;
+    if (typeof window === 'undefined' || typeof window.getComputedStyle !== 'function' || typeof window.requestAnimationFrame !== 'function') return;
+    const reduce = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // Look for the target a frame later: the results only appear once the page leaves the empty
+    // state, which the caller does right after this.
+    window.requestAnimationFrame(() => {
+        const target = ['nlpBanner', 'budgetBanner', 'workspacePanes']
+            .map(id => document.getElementById(id))
+            .find(el => el && el.offsetParent && window.getComputedStyle(el).display !== 'none');
+        if (target && typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
+    });
+}

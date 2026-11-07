@@ -2,7 +2,7 @@
  * Controller for the Dependencies tab (deps.html): finds manifests in a GitHub repo or a local
  * .zip, looks up licenses on deps.dev, groups them for review and packs a report for an AI.
  */
-import { parseRepoInput } from './github-api.js';
+import { parseRepoInput, isSafeBranchName } from './github-api.js';
 import { parseCompareInput, diffPackages, summarizeDiff } from './deps-compare.js';
 import { fetchPullRequest, fetchRepoInfo, fetchRepoManifests, readZipManifests, collectDirectDependencies, resolveLicenses } from './deps-api.js';
 import { classifyLicense, guessLicenseFromText, LICENSE_GROUPS, GROUP_LABELS, GROUP_HINTS } from './license-classify.js';
@@ -15,11 +15,13 @@ import { estimateTokensAsync } from './tokenizer.js';
 import { TARGETS, detectTarget } from './targets.js';
 import { switchTab } from './ui-tabs.js';
 import { renderBanner } from './ui-banner.js';
-import { buildTabHref } from './nav.js';
+import { buildTabHref, startFromShortcut } from './nav.js';
 import { externalLink, registryUrl, depsDevUrl, advisoryUrl } from './links.js';
 import { confirmFirstUse } from './first-use.js';
 import * as status from './ui-status.js';
+import { showCopyHint, hideCopyHint, initShortcuts } from './ui-actions.js';
 import { toCsv, toCycloneDx } from './deps-export.js';
+import { toHtmlReport, toThirdPartyNotices } from './deps-report.js';
 import { unsupportedText } from './manifest-parsers.js';
 import { DEFAULT_POLICY, normalizePolicy, parsePolicyFile, policyToFile, evaluatePolicy, describePolicy, POLICY_FILE } from './license-policy.js';
 
@@ -40,7 +42,7 @@ const dom = {
     attentionFilter: $('attentionFilter'), repoPolicyNote: $('repoPolicyNote'), useRepoPolicy: $('useRepoPolicy'),
     useRepoPolicyLabel: $('useRepoPolicyLabel'), policyBlock: $('policyBlock'), policyAllow: $('policyAllow'),
     policyPackages: $('policyPackages'), policyResetBtn: $('policyResetBtn'), policyDownloadBtn: $('policyDownloadBtn'),
-    policyEditor: $('policyEditor'), compareInput: $('compareInput'), exportBar: $('exportBar'), csvBtn: $('csvBtn'), sbomBtn: $('sbomBtn'), matchCount: $('matchCount'), depsEmptyState: $('depsEmptyState'),
+    policyEditor: $('policyEditor'), compareInput: $('compareInput'), exportBar: $('exportBar'), csvBtn: $('csvBtn'), sbomBtn: $('sbomBtn'), htmlReportBtn: $('htmlReportBtn'), noticesBtn: $('noticesBtn'), matchCount: $('matchCount'), depsEmptyState: $('depsEmptyState'),
     depsList: $('depsList'), outputScopeNote: $('outputScopeNote'),
     wrapToggleBtn: $('wrapToggleBtn'), copyBtn: $('copyBtn'), downloadBtn: $('downloadBtn'),
     warningBanner: $('warningBanner'), summaryCard: $('summaryCard'), outputEmptyState: $('outputEmptyState'),
@@ -124,6 +126,7 @@ function copyLabel() {
 }
 
 function setAppState(next) {
+    status.showResults(state.appState, next);
     state.appState = next;
     if (document.body) document.body.classList.toggle('is-empty', next === 'empty');
     if (dom.step1) dom.step1.classList.toggle('active', next === 'empty');
@@ -392,11 +395,9 @@ function renderList() {
 }
 
 let outputGen = 0;
-async function rebuildOutput() {
-    if (state.appState !== 'loaded') return;
-    const myGen = ++outputGen;
-    const visible = filteredPackages();
-    const out = buildDepsOutput(dom.format.value, {
+/** What the reports describe: the packages shown, with the load's context. */
+function reportContext(visible = filteredPackages()) {
+    return {
         repoName: state.repoName,
         source: state.sourceText,
         repoLicense: state.repoLicense,
@@ -410,7 +411,14 @@ async function rebuildOutput() {
         compactPermissive: dom.compactPermissive.checked,
         warnings: state.warnings,
         instructions: dom.aiInstructions.value
-    });
+    };
+}
+
+async function rebuildOutput() {
+    if (state.appState !== 'loaded') return;
+    const myGen = ++outputGen;
+    const visible = filteredPackages();
+    const out = buildDepsOutput(dom.format.value, reportContext(visible));
     state.output = out;
     dom.previewArea.value = out.text.slice(0, 45000) + (out.text.length > 45000 ? '\n\n... [Truncated for preview] ...' : '');
     dom.outputEmptyState.style.display = 'none';
@@ -438,26 +446,53 @@ async function rebuildOutput() {
     const outdated = directs.filter(p => p.outdated).length;
     const fixable = directs.filter(p => p.upgradeClears).length;
     const health = directs.filter(p => p.healthFlags && p.healthFlags.length).length;
+    const blocked = visible.filter(p => p.policy && p.policy.verdict === 'block').length;
+    const toReview = visible.filter(p => p.policy && p.policy.verdict === 'review').length;
+    // A part is plain text, or [text, filter]: clicking it filters the package list ("Show" menu).
+    const f = (text, filter, count) => (count ? [text, filter] : text);
     dom.summaryCard.innerHTML = '';
-    for (const line of [
-        `${visible.length} package${visible.length === 1 ? '' : 's'} · about ${tokens.toLocaleString()} tokens`,
-        `${review} to review (copyleft or restricted) · ${counts.unknown} unknown`,
+    for (const parts of [
+        [`${visible.length} package${visible.length === 1 ? '' : 's'} · about ${tokens.toLocaleString()} tokens`],
+        [`${review} to review (copyleft or restricted) · ${counts.unknown} unknown`],
         totalAdv
-            ? `${totalAdv} security advisor${totalAdv === 1 ? 'y' : 'ies'}: ${sev.critical} critical, ${sev.high} high, ${sev.medium} medium, ${sev.low + sev.unknown} low or unrated`
-            : 'No known security advisories',
-        `Direct: ${outdated} outdated${fixable ? ` (${fixable} fixed by upgrading)` : ''} · ${health} with health warnings`,
-        state.lockfiles.length
+            ? [f(`${totalAdv} security advisor${totalAdv === 1 ? 'y' : 'ies'}`, 'advisories', totalAdv), ': ',
+                f(`${sev.critical} critical, ${sev.high} high`, 'high', sev.critical + sev.high), `, ${sev.medium} medium, ${sev.low + sev.unknown} low or unrated`]
+            : ['No known security advisories'],
+        ['Direct: ', f(`${outdated} outdated`, 'outdated', outdated), fixable ? ` (${fixable} fixed by upgrading)` : '', ' · ', f(`${health} with health warnings`, 'health', health)],
+        [state.lockfiles.length
             ? `Exact versions from ${state.lockfiles.join(', ')}${state.packages.some(p => p.versionKind && p.versionKind !== 'locked') ? '; others estimated' : ''}`
-            : 'No lockfile: versions estimated from manifest ranges',
-        ...(state.diff ? [`Compared with ${state.compare.baseLabel}: ${summarizeDiff(state.diff)}`] : []),
-        `Policy: ${visible.filter(p => p.policy && p.policy.verdict === 'block').length} blocked · ${visible.filter(p => p.policy && p.policy.verdict === 'review').length} to review (${usingRepoPolicy() ? POLICY_FILE : 'your settings'})`
+            : 'No lockfile: versions estimated from manifest ranges'],
+        ...(state.diff ? [[`Compared with ${state.compare.baseLabel}: `, f(summarizeDiff(state.diff), 'changed', state.diff.added.length + state.diff.updated.length)]] : []),
+        ['Policy: ', f(`${blocked} blocked`, 'blocked', blocked), ' · ', f(`${toReview} to review`, 'policy-review', toReview), ` (${usingRepoPolicy() ? POLICY_FILE : 'your settings'})`]
     ]) {
         const el = document.createElement('div');
-        el.textContent = line;
+        for (const part of parts) {
+            if (typeof part === 'string') { el.appendChild(document.createTextNode(part)); continue; }
+            const [text, filter] = part;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'summary-filter';
+            btn.textContent = text;
+            const on = dom.attentionFilter.value === filter;
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+            btn.title = on ? 'Showing only these packages. Click to show all.' : 'Show only these packages';
+            btn.addEventListener('click', () => applyAttentionFilter(on ? '' : filter));
+            el.appendChild(btn);
+        }
         dom.summaryCard.appendChild(el);
     }
     dom.summaryCard.hidden = false;
     dom.exportBar.hidden = false;
+}
+
+/** Sets the "Show" filter (from a summary line) and brings the package list into view. */
+function applyAttentionFilter(value) {
+    dom.attentionFilter.value = value;
+    dom.attentionFilter.dispatchEvent(new Event('change'));
+    if (value && dom.depsList && typeof dom.depsList.scrollIntoView === 'function') {
+        const viewport = dom.depsList.closest ? dom.depsList.closest('.tree-viewport') : null;
+        if (viewport) viewport.scrollTop = 0;
+    }
 }
 
 function renderAll() {
@@ -473,6 +508,7 @@ function fillEcosystemFilter() {
 }
 
 function resetView() {
+    hideCopyHint();
     state.packages = [];
     state.maxLookups = DEFAULT_LOOKUPS;
     state.unchecked = 0;
@@ -559,10 +595,12 @@ async function load(source) {
                 state.compare = { baseLabel: `${pr.baseRef} (base of #${pr.number})`, headLabel: `pull request #${pr.number}${pr.title ? ` "${pr.title}"` : ''} (${pr.headLabel}, ${pr.headSha.slice(0, 7)})` };
                 state.sourceText += ` (pull request #${pr.number} into ${pr.baseRef})`;
             } else if (compare && compare.kind === 'ref') {
-                base = { owner: source.owner, repo: source.repo, ref: info.branch };
+                // The base is the default branch unless the page was opened with ?base= (a compare link).
+                const baseRef = state.compareBase || info.branch;
+                base = { owner: source.owner, repo: source.repo, ref: baseRef };
                 head = { owner: source.owner, repo: source.repo, ref: compare.ref };
-                state.compare = { baseLabel: info.branch, headLabel: compare.ref };
-                state.sourceText += ` (${compare.ref}, compared with ${info.branch})`;
+                state.compare = { baseLabel: baseRef, headLabel: compare.ref };
+                state.sourceText += ` (${compare.ref}, compared with ${baseRef})`;
             } else {
                 state.sourceText += ` (branch ${info.branch})`;
             }
@@ -741,6 +779,7 @@ dom.loadBtn.addEventListener('click', () => {
     load({ kind: 'github', owner: info.owner, repo: info.repo });
 });
 dom.repoUrl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); dom.loadBtn.click(); } });
+dom.compareInput.addEventListener('input', () => { state.compareBase = null; });
 dom.compareInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); dom.loadBtn.click(); } });
 
 // The repo form never submits (Enter is handled by the buttons); kept out of HTML for the CSP.
@@ -770,7 +809,7 @@ dom.logToggleBtn.addEventListener('click', (e) => {
     dom.logToggleBtn.textContent = logOpen ? 'Hide log' : 'Activity log';
     dom.logToggleBtn.setAttribute('aria-expanded', logOpen ? 'true' : 'false');
 });
-dom.logHeader.addEventListener('click', () => dom.logToggleBtn.click());
+status.bindLogHeader(dom.logHeader, dom.logToggleBtn);
 
 if (dom.targetBar) {
     dom.targetBar.addEventListener('click', (e) => {
@@ -830,6 +869,14 @@ dom.sbomBtn.addEventListener('click', () => {
     saveFile(JSON.stringify(bom, null, 2), `${fileBase()}-sbom.cdx.json`, 'application/vnd.cyclonedx+json');
     showToast('Downloaded the CycloneDX SBOM.', 'info');
 });
+dom.htmlReportBtn.addEventListener('click', () => {
+    saveFile(toHtmlReport(reportContext()), `${fileBase()}-dependency-report.html`, 'text/html');
+    showToast('Downloaded the report. Open it in a browser to read or print it.', 'info');
+});
+dom.noticesBtn.addEventListener('click', () => {
+    saveFile(toThirdPartyNotices({ repoName: state.repoName, packages: filteredPackages() }), 'THIRD_PARTY_NOTICES.md', 'text/markdown');
+    showToast('Downloaded THIRD_PARTY_NOTICES.md. Add each package\'s copyright and license text before publishing it.', 'info');
+});
 
 let instTimer = null;
 dom.aiInstructions.addEventListener('input', () => {
@@ -864,6 +911,7 @@ dom.copyBtn.addEventListener('click', async () => {
         await navigator.clipboard.writeText(state.output.text);
         showToast('Copied the dependency report.', 'info');
         dom.copyBtn.textContent = 'Copied!';
+        showCopyHint(dom.copyBtn, state.targetKey);
         setTimeout(() => { dom.copyBtn.textContent = copyLabel(); }, 2000);
     } catch (_) {
         showToast('Unable to copy automatically.', 'error');
@@ -923,6 +971,7 @@ if (dom.shareUrlBtn) {
         if (repo) url.searchParams.set('repo', repo);
         const compare = dom.compareInput.value.trim();
         if (compare) url.searchParams.set('compare', compare);
+        if (compare && state.compareBase) url.searchParams.set('base', state.compareBase);
         try { await navigator.clipboard.writeText(url.toString()); showToast('Deep-link URL copied!', 'info'); } catch (_) {}
     });
 }
@@ -950,6 +999,8 @@ if (dom.exampleRepos) {
 const params = new URLSearchParams(window.location.search);
 if (params.get('repo')) dom.repoUrl.value = params.get('repo');
 if (params.get('compare') && dom.compareInput) dom.compareInput.value = params.get('compare').slice(0, 300);
+// ?base= (from a GitHub compare link): compare with that branch instead of the default one.
+if (params.get('base') && isSafeBranchName(params.get('base'))) state.compareBase = params.get('base');
 else { const last = store.get('cfg_lastRepo'); if (last && !dom.repoUrl.value) dom.repoUrl.value = last; }
 loadSettings();
 // ?format= wins (lands on "Custom"); else the target saved on any tab; else Claude.
@@ -964,3 +1015,5 @@ resetView();
 renderPolicyEditor();
 setAppState('empty');
 status.initTokenLinks(showTokenPanel);
+startFromShortcut(dom.loadBtn, dom.repoUrl);
+initShortcuts({ main: () => dom.loadBtn, copy: dom.copyBtn, mainButtons: [dom.loadBtn] });

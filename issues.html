@@ -22,7 +22,7 @@
                 <span class="brand-title">Git<span class="brand-accent">Doco</span></span>
             </a>
 
-            <nav class="page-tabs" aria-label="Tools"><a id="tabCodeLink" href="code.html">Code</a><a id="tabIssuesLink" href="issues.html" class="active" aria-current="page">Issues</a><a id="tabDiscussionsLink" href="discussions.html">Discussions</a><a id="tabDepsLink" href="deps.html">Dependencies</a></nav>
+            <nav class="page-tabs" aria-label="Tools"><a id="tabDepsLink" href="deps.html">Dependencies</a><a id="tabIssuesLink" href="issues.html" class="active" aria-current="page">Issues</a><a id="tabDiscussionsLink" href="discussions.html">Discussions</a><a id="tabCodeLink" href="code.html">Code</a></nav>
             <nav class="mode-switcher" aria-label="Tool mode" style="display: none;">
                 <a href="code.html" id="switchToCodeLink" class="mode-tab">Code Packer</a>
                 <a href="issues.html" class="mode-tab active" aria-current="page">Issues Explorer</a>
@@ -479,7 +479,7 @@
     <section id="logCard" class="log-card workspace-section">
         <div id="logHeader" class="log-header">
             <span id="logSummary" class="log-summary-text" role="status" aria-live="polite">Ready</span>
-            <button id="logToggleBtn" class="secondary btn-xs" type="button" aria-expanded="false" aria-controls="log" title="Show every step and request">Activity log</button>
+            <span class="log-actions"><a class="feedback-link" href="https://github.com/LukeAFullard/GitHub-tools/issues/new?template=bug_report.yml&amp;tool=Issues" target="_blank" rel="noopener noreferrer" title="Opens a GitHub issue form. Nothing is sent from GitDoco.">Report a problem</a><button id="logToggleBtn" class="secondary btn-xs" type="button" aria-expanded="false" aria-controls="log" title="Show every step and request">Activity log</button></span>
         </div>
         <div class="progress-track" id="progressTrack" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
             <div class="progress-fill" id="progressFill"></div>

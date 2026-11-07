@@ -44,6 +44,9 @@ globalThis.fetch = async (url) => {
 
 const app = await import('../../js/deps-app.js');
 const out = () => el('previewArea').value || '';
+// Summary lines hold text and buttons; the stub DOM doesn't join child text like a browser does.
+const nodeText = n => (n.children && n.children.length ? n.children.map(nodeText).join('') : n.textContent || '');
+const summaryText = () => el('summaryCard').children.map(nodeText).join('\n');
 
 test('loads a GitHub repo, reads manifests (skipping examples) and checks licenses', async () => {
     el('repoUrl').value = 'o/r';
@@ -94,7 +97,7 @@ test('a repository policy file is used and blocks a package', async () => {
     assert.match(out(), /^- \*\*Policy:\*\* Policy from the repository's \.gitdoco-policy\.json\. block: restricted, strong copyleft;/m);
     assert.match(out(), /^\| Blocked \| pyqt5@5\.15\.10 \|/m);
     assert.doesNotMatch(out(), /\*\*Manifests:\*\*[^\n]*gitdoco-policy/, 'the policy file is not listed as a manifest');
-    assert.match(el('summaryCard').children.map(c => c.textContent).join('\n'), /Policy: 2 blocked · 0 to review \(\.gitdoco-policy\.json\)/);
+    assert.match(summaryText(), /Policy: 2 blocked · 0 to review \(\.gitdoco-policy\.json\)/);
     delete files['.gitdoco-policy.json'];
 });
 
@@ -122,7 +125,16 @@ test('comparing with a pull request shows what it adds and removes', async () =>
     assert.match(o, /<added package="npm:newlib@1\.0\.0"/);
     assert.match(o, /<removed package="pypi:pyqt5@5\.15\.10"/);
     assert.match(o, /<new_advisory id="GHSA-n"[^>]*package="npm:newlib@1\.0\.0"/);
-    assert.match(el('summaryCard').children.map(c => c.textContent).join('\n'), /Compared with main \(base of #7\): 1 added, 0 updated, 1 removed; 1 new advisory/);
+    assert.match(summaryText(), /Compared with main \(base of #7\): 1 added, 0 updated, 1 removed; 1 new advisory/);
+    // Summary counts filter the list: "1 added, ..." shows only the changed packages.
+    const changedBtn = el('summaryCard').children.flatMap(c => c.children || []).find(b => b.className === 'summary-filter' && /added/.test(b.textContent));
+    assert.ok(changedBtn, 'the comparison count is a filter button');
+    await changedBtn.click();
+    await wait(50);
+    assert.equal(el('attentionFilter').value, 'changed');
+    el('attentionFilter').value = '';
+    await fire('attentionFilter', 'change');
+    await wait(50);
     el('compareInput').value = '';
 });
 

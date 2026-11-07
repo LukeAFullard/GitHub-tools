@@ -10,7 +10,7 @@ A zero-install, 100% client-side web application that fetches, filters, cleans, 
 - **Links out:** every issue and discussion row links to the thread on GitHub, every file in the code tree to the file on GitHub, and every package to its registry page (npm, PyPI, pkg.go.dev, crates.io), its deps.dev page and its security advisories.
 - **Your own topic:** in Issues and Discussions, type a topic (words or an exact "phrase") to filter to the threads that mention it, plus related threads that discuss the same thing in other words (TF-IDF similarity). Related ones are marked.
 - **Four Tools:** Switch between **Code Packer** (source tree packaging), **Issues Explorer** (issue thread triage & context packaging), **Discussions Explorer** (GitHub Discussions Q&A and ideas) and **Dependencies** (dependency licenses and advisories).
-- **Dependencies:** Reads `package.json`, `requirements*.txt`, `pyproject.toml`, `Pipfile`, `go.mod` and `Cargo.toml` from a GitHub repo or a local `.zip` (with exact versions and the real dependency tree from `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `uv.lock`, `Pipfile.lock` or `Cargo.lock` when present, including workspace members), looks up each package's license, known security advisories and (for npm, PyPI and Cargo) transitive dependencies on [deps.dev](https://deps.dev), and groups licenses for review: permissive, weak copyleft, strong copyleft, restricted (source-available or non-commercial) and unknown. Advisories show their severity (CVSS) and title; direct dependencies show whether they are outdated, whether upgrading clears their advisories, and project health (OpenSSF Scorecard, maintenance activity, deprecated or yanked releases). The groups are a guide for review, not legal advice. Package names and versions are sent to deps.dev; nothing else is. It also explains why each transitive package is there (the path from a direct dependency), applies a **license policy** (allow / review / block per group, with allow and block lists, saved in the browser or committed as `.gitdoco-policy.json`), **compares** a branch, tag, commit or pull request with its base (added, updated and removed packages, new advisories, new policy findings), and **exports** CSV or a CycloneDX 1.5 SBOM. Not supported yet: Maven, Gradle, Ruby, PHP, .NET, Swift and Dart (the report warns when it finds their manifests). It never sees code copied into the repo, git submodules or system/container packages, and only advisories known to deps.dev are listed.
+- **Dependencies:** Reads `package.json`, `requirements*.txt`, `pyproject.toml`, `Pipfile`, `go.mod` and `Cargo.toml` from a GitHub repo or a local `.zip` (with exact versions and the real dependency tree from `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `uv.lock`, `Pipfile.lock` or `Cargo.lock` when present, including workspace members), looks up each package's license, known security advisories and (for npm, PyPI and Cargo) transitive dependencies on [deps.dev](https://deps.dev), and groups licenses for review: permissive, weak copyleft, strong copyleft, restricted (source-available or non-commercial) and unknown. Advisories show their severity (CVSS) and title; direct dependencies show whether they are outdated, whether upgrading clears their advisories, and project health (OpenSSF Scorecard, maintenance activity, deprecated or yanked releases). The groups are a guide for review, not legal advice. Package names and versions are sent to deps.dev; nothing else is. It also explains why each transitive package is there (the path from a direct dependency), applies a **license policy** (allow / review / block per group, with allow and block lists, saved in the browser or committed as `.gitdoco-policy.json`), **compares** a branch, tag, commit or pull request with its base (added, updated and removed packages, new advisories, new policy findings), and **exports** a printable HTML report (for readers who don't use AI), a `THIRD_PARTY_NOTICES.md` attribution file, CSV or a CycloneDX 1.5 SBOM. Clicking a count in the summary (advisories, outdated, blocked, ...) filters the list to those packages. Not supported yet: Maven, Gradle, Ruby, PHP, .NET, Swift and Dart (the report warns when it finds their manifests). It never sees code copied into the repo, git submodules or system/container packages, and only advisories known to deps.dev are listed.
 - **Discussions Explorer:** Filter by category and by answered / unanswered questions, then pack the question only, the accepted answer only, the answer plus the author's and maintainers' replies, or the full thread. Accepted answers and threaded replies are marked in every output format.
   - **With a token** it uses GitHub's official GraphQL API (about 10 discussion threads per request). For public repos a token with no permissions is enough.
   - **Without a token** it falls back to GitHub's REST discussions endpoints. These are not in GitHub's published API documentation, so they may change without notice.
@@ -30,6 +30,28 @@ A zero-install, 100% client-side web application that fetches, filters, cleans, 
   - **JSON**: Structured JSON output.
 - **API Limits & Pacing:** Uses the GitHub Git Trees API (recursive) to minimize rate consumption, respecting secondary rate limits with automatic `Retry-After` handling.
 - **Zero Build Dependencies:** Built with vanilla HTML/CSS and native ES Modules. No bundlers or npm packages needed.
+
+## Keyboard shortcuts
+
+- **Ctrl/⌘ + Enter:** the next step: Load, or Build context once a repo is loaded.
+- **Ctrl/⌘ + Shift + Enter:** Copy the output (then paste it into your AI; a hint links to it).
+- **/** (Issues and Discussions): jump to the search box.
+
+## GitHub URL shortcut
+
+In any GitHub repository URL, replace `github.com` with GitDoco's domain to open it in the matching tool:
+
+| GitDoco URL | Opens |
+| --- | --- |
+| `/owner/repo` | A page to choose a tool |
+| `/owner/repo/issues`, `/pulls` | Issues (issues, or pull requests only) |
+| `/owner/repo/pull/123` | Dependencies, comparing pull request #123 with its base |
+| `/owner/repo/compare/main...feature` | Dependencies, comparing `feature` |
+| `/owner/repo/discussions` | Discussions |
+| `/owner/repo/tree/<branch>/<folder>`, `/blob/...`, `/commit/<sha>` | Code, at that branch and folder |
+| `/owner/repo/network/dependencies`, `/security` | Dependencies |
+
+The site is static: the host serves `404.html` for these paths (Cloudflare Pages, Netlify and GitHub Pages all do), and `js/not-found.js` sends the browser on. The tool then starts loading the repo, after the one-time notice on a first visit.
 
 ## Output Formats
 
@@ -66,13 +88,21 @@ Navigate to `http://localhost:8000` in your web browser.
 
 The site is static: no build step is needed to run it. To publish only the site files (not tests or tooling), run `npm run build` and serve `dist/`. On Cloudflare Pages: build command `node scripts/build-site.mjs`, output directory `dist`, no framework preset; `_headers` sets the security headers. The suggested address is `gitdoco.timedoco.com` (see `PLAN.md`).
 
+**Moving to the InYourOwnBrowser organisation.** The repository will move to [github.com/InYourOwnBrowser](https://github.com/InYourOwnBrowser) and deploy from there to Cloudflare Pages. GitHub redirects a transferred repository's old URLs (including the issue forms), so nothing breaks at the move. Afterwards, point the links at the new home (15 links in the HTML pages: footer, feedback, licence and "Report a problem"), replacing `NEW-NAME` with the repository's name there:
+
+```bash
+grep -rl "LukeAFullard/GitHub-tools" --include=*.html . | xargs sed -i "s#LukeAFullard/GitHub-tools#InYourOwnBrowser/NEW-NAME#g"
+```
+
+Then check `.github/ISSUE_TEMPLATE/config.yml` and this README. The shortcut links (`/owner/repo/...`) need GitDoco on its own domain (e.g. `gitdoco.timedoco.com`), where Cloudflare Pages serves `404.html` for unknown paths.
+
 **Keep the host from adding scripts.** The privacy promises below depend on the site serving only its own files. In the Cloudflare dashboard, leave these off for the GitDoco project/zone: Web Analytics (automatic setup), Zaraz, Rocket Loader, Email Address Obfuscation and Browser Insights. Some of them inject scripts from the site's own origin (`/cdn-cgi/`), which the CSP's `script-src 'self'` would allow.
 
 ## Security & Privacy
 
 - **Repository content is untrusted input to your AI.** Code, issues, discussions and package metadata can contain text written to steer an AI (prompt injection). Review the output before sending it, especially for private or sensitive work.
 - **Secrets:** known token and key formats are hidden by default; generic passwords and tokens in code are flagged, and hidden only with "Strict". Files such as `.env`, private keys, key stores, `.npmrc`/`.netrc` and Terraform state are replaced entirely.
-- **No tracking.** No cookies, analytics, third-party scripts, fonts or images; the IBM Plex fonts are bundled. Opening a page contacts nothing; the browser only talks to `api.github.com`, `raw.githubusercontent.com` and (Dependencies tab) `api.deps.dev` once you use a tool, without a `Referer` header or cookies. `tests/privacy.test.js` guards all of this; `privacy.html` explains it to users and has a button that clears everything GitDoco stores.
+- **No tracking.** No cookies, analytics, third-party scripts, fonts or images; the IBM Plex fonts are bundled. Opening a page contacts nothing (except a GitDoco shortcut link that names a repo, which starts loading it); the browser only talks to `api.github.com`, `raw.githubusercontent.com` and (Dependencies tab) `api.deps.dev` once you use a tool, without a `Referer` header or cookies. `tests/privacy.test.js` guards all of this; `privacy.html` explains it to users and has a button that clears everything GitDoco stores.
 - **First use:** before a tool first contacts GitHub or deps.dev, a one-time notice says who the browser will connect to and asks the user to accept the [Terms](terms.html) and acknowledge the [Privacy notice](privacy.html). Nothing is requested until they do.
 - **What GitDoco cannot control** (GitHub, deps.dev, AI services, hosting logs, browser extensions) is spelled out in `privacy.html`.
 - **Tokens** stay in memory and are only sent to `api.github.com`. Repository names loaded with a token are not remembered between visits.
@@ -96,6 +126,7 @@ The site is static: no build step is needed to run it. To publish only the site 
 ├── code.html           # Code Packer Web interface
 ├── _headers            # Security headers for Cloudflare Pages / Netlify
 ├── scripts/build-site.mjs # Copies the public site into dist/ (no dependencies)
+├── scripts/og-image.html  # Source of assets/og-image.jpg, the image shown when GitDoco is shared
 ├── issues.html         # GitHub Issues Explorer Web interface
 ├── discussions.html    # GitHub Discussions Explorer Web interface
 ├── deps.html           # Dependencies & licenses Web interface
@@ -122,9 +153,12 @@ The site is static: no build step is needed to run it. To publish only the site 
     ├── license-policy.js # License policy (allow / review / block) and .gitdoco-policy.json
     ├── links.js        # Safe outbound links (GitHub, registries, deps.dev, advisories)
     ├── nlp-text.js     # Shared text tokenizing for topics and topic search
+    ├── not-found.js    # 404 page: GitHub-style repo paths open the matching tool
     ├── privacy.js      # Privacy page: lists and clears what GitDoco stores
+    ├── repo-route.js   # GitHub URL shortcut: /owner/repo/issues, /pull/123, /tree/... -> tool links
     ├── deps-compare.js # Comparing two refs or a pull request
     ├── deps-export.js  # CSV and CycloneDX SBOM export
+    ├── deps-report.js  # Printable HTML report and THIRD_PARTY_NOTICES.md
     ├── lockfiles.js    # Lockfile readers (npm, yarn, pnpm, poetry, uv, Pipfile, Cargo) -> dependency graphs
     ├── manifest-parsers.js # package.json, requirements, pyproject, Pipfile, go.mod, Cargo.toml readers
     ├── minifier.js     # Code minification & comment stripping engine
@@ -135,6 +169,7 @@ The site is static: no build step is needed to run it. To publish only the site 
     ├── topic-search.js # "Your own topic" search: direct matches plus related threads
     ├── tree.js         # File tree rendering & selection state management
     ├── ui-status.js    # Status bar: what is running, progress, spinners, "done" messages
+    ├── ui-actions.js   # After-copy hint ("paste it into Claude") and keyboard shortcuts
     └── zip-loader.js   # Local .zip reader (central directory + on-demand Deflate)
 ```
 

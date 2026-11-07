@@ -17,11 +17,12 @@ import { TARGETS, detectTarget } from './targets.js';
 import { buildSettingsSummary } from './settings-summary.js';
 import { commentCostHint } from './comment-cost.js';
 import { buildSummaryLines } from './ui-summary.js';
-import { buildTabHref } from './nav.js';
+import { buildTabHref, startFromShortcut } from './nav.js';
 import { externalLink, isGithubUrl } from './links.js';
 import { searchTopic } from './topic-search.js';
 import { confirmFirstUse } from './first-use.js';
-import { begin, progress, end, isCurrent, initTokenLinks } from './ui-status.js';
+import { begin, progress, end, isCurrent, initTokenLinks, bindLogHeader, showResults } from './ui-status.js';
+import { showCopyHint, hideCopyHint, initShortcuts } from './ui-actions.js';
 
 export const KIND = globalThis.__THREAD_EXPLORER_KIND__ === 'discussions' ? 'discussions' : 'issues';
 const IS_DISCUSSIONS = KIND === 'discussions';
@@ -230,6 +231,7 @@ export function showTokenField(reason = '') {
 }
 
 function setAppState(state) {
+    showResults(currentAppState, state);
     currentAppState = state;
     if (document.body) {
         document.body.classList.toggle('is-empty', state === 'empty');
@@ -552,7 +554,7 @@ dom.logToggleBtn.addEventListener('click', (e) => {
     dom.logToggleBtn.textContent = logOpen ? 'Hide log' : 'Activity log';
     dom.logToggleBtn.setAttribute('aria-expanded', logOpen ? 'true' : 'false');
 });
-dom.logHeader.addEventListener('click', () => dom.logToggleBtn.click());
+bindLogHeader(dom.logHeader, dom.logToggleBtn);
 
 dom.toggleNlpCollapseBtn.addEventListener('click', () => {
     const hidden = dom.nlpBody.style.display === 'none';
@@ -1266,6 +1268,7 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
 });
 
 function clearOutputState() {
+    hideCopyHint();
     generatedChunks = [];
     activeChunkIndex = 0;
     packedOutputText = '';
@@ -1925,6 +1928,7 @@ dom.copyBtn.addEventListener('click', async () => {
             showToast(`Copied ${W.noun} context to clipboard!`, 'info');
         }
         dom.copyBtn.textContent = 'Copied!';
+        showCopyHint(dom.copyBtn, currentTargetKey, { part: activeChunkIndex + 1, parts: Math.max(1, numParts) });
         setTimeout(() => updateCopyBtnLabel(activeChunkIndex), 2000);
     } catch (_) {
         showToast('Unable to copy automatically.', 'error');
@@ -1998,6 +2002,12 @@ updateSettingsSummary();
 updateCopyBtnLabel(0);
 setAppState('empty');
 initTokenLinks(showTokenPanel);
+startFromShortcut(dom.loadIssuesBtn, dom.repoUrl);
+initShortcuts({
+    main: () => (currentAppState === 'empty' ? dom.loadIssuesBtn : dom.buildContextBtn),
+    copy: dom.copyBtn,
+    mainButtons: [dom.loadIssuesBtn, dom.buildContextBtn]
+});
 // The token field starts open on the Discussions page; its help text explains why (official API).
 if (IS_DISCUSSIONS) showTokenPanel('');
 

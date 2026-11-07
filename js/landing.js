@@ -34,7 +34,7 @@ function go(page) {
 if (form) {
     form.addEventListener('submit', (e) => {
         e.preventDefault();
-        go('code');
+        go('deps');
     });
     form.querySelectorAll('button[data-page]').forEach(btn => {
         if (btn.type === 'submit') return;

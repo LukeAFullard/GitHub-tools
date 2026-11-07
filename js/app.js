@@ -23,11 +23,12 @@ import { TARGETS, detectTarget } from './targets.js';
 import { buildSettingsSummary } from './settings-summary.js';
 import { defaultExcludedPaths, rankSuggestions } from './suggestions.js';
 import { buildSummaryLines } from './ui-summary.js';
-import { buildTabHref } from './nav.js';
+import { buildTabHref, startFromShortcut } from './nav.js';
 import { parseZipArchive } from './zip-loader.js';
 import { githubFileUrl } from './links.js';
 import { confirmFirstUse } from './first-use.js';
 import * as status from './ui-status.js';
+import { showCopyHint, hideCopyHint, initShortcuts } from './ui-actions.js';
 import {
     parseRepoInput,
     isSafeBranchName,
@@ -434,11 +435,7 @@ if (dom.logToggleBtn && dom.log) {
     dom.logToggleBtn.setAttribute('aria-expanded', logOpen ? 'true' : 'false');
     });
 }
-if (dom.logHeader) {
-    dom.logHeader.addEventListener('click', () => {
-        if (dom.logToggleBtn) dom.logToggleBtn.click();
-    });
-}
+status.bindLogHeader(dom.logHeader, dom.logToggleBtn);
 
 // The work shown in the status bar now (js/ui-status.js).
 let codeStatus = 0;
@@ -475,6 +472,7 @@ export function showTokenField(reason = '') {
 
 // --- App State & Sequence Steps ---
 function setAppState(state, note = '') {
+    status.showResults(currentAppState, state);
     currentAppState = state;
     if (document.body) {
         document.body.classList.toggle('is-empty', state === 'empty');
@@ -733,6 +731,7 @@ function hidePersistentWarning() {
 }
 
 function clearOutputState() {
+    hideCopyHint();
     generatedChunks = [];
     activeChunkIndex = 0;
     packedOutputText = "";
@@ -890,6 +889,12 @@ updateSettingsSummary();
 updateCopyBtnLabel();
 setAppState('empty');
 status.initTokenLinks(showTokenPanel);
+startFromShortcut(dom.packBtn, dom.repoUrl);
+initShortcuts({
+    main: () => (currentAppState === 'empty' ? dom.packBtn : dom.startDownloadBtn),
+    copy: dom.copyBtn,
+    mainButtons: [dom.packBtn, dom.startDownloadBtn]
+});
 
 // Settings drawer token link
 if (dom.drawerTokenLink) {
@@ -2117,6 +2122,7 @@ dom.copyBtn.addEventListener('click', async () => {
             showToast('Copied context to clipboard!', "info");
         }
         dom.copyBtn.textContent = 'Copied!';
+        showCopyHint(dom.copyBtn, currentTargetKey, { part: activeChunkIndex + 1, parts: Math.max(1, numParts) });
         setTimeout(() => updateCopyBtnLabel(activeChunkIndex), 2000);
     } catch (_) {
         showToast('Unable to copy automatically. Please copy directly from preview.', 'error');

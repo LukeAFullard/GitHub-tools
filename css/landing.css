@@ -98,6 +98,8 @@ h1, h2, h3 { color: var(--heading); line-height: 1.2; margin: 0; }
 .btn-dark:hover { opacity: 0.9; }
 .btn-signal { background: var(--signal); color: var(--ink); font-weight: 700; }
 .btn-signal:hover { background: #E2B35C; }
+.btn-outline { background: transparent; color: var(--heading); border: 1px solid var(--line); }
+.btn-outline:hover { border-color: var(--signal); }
 .btn:focus-visible, .link-btn:focus-visible, .chip:focus-visible, input:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 
 /* Hero */
@@ -237,3 +239,14 @@ h1, h2, h3 { color: var(--heading); line-height: 1.2; margin: 0; }
 .clear-status { margin: 0.6rem 0 0 !important; font-weight: 600; color: var(--text) !important; }
 .footer-text-link { color: var(--muted); }
 .header-nav a[aria-current="page"] { color: var(--accent-text); }
+
+/* GitHub URL shortcut tip under the quick start */
+.shortcut-tip { margin: 1rem 0 0; font-size: 0.875rem; color: var(--muted); }
+.shortcut-tip code { font-size: 0.85em; }
+
+/* Quick start: the repo field gets its own row, the two main actions sit side by side under it. */
+.quick-row input { flex: 1 1 100%; }
+.quick-row .btn { flex: 1 1 0; }
+
+/* 404 page while a possible repository shortcut is being routed (js/route-early.js) */
+.routing main { visibility: hidden; }
