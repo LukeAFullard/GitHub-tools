@@ -126,6 +126,7 @@ Then check `.github/ISSUE_TEMPLATE/config.yml` and this README. The shortcut lin
 ├── code.html           # Code Packer Web interface
 ├── _headers            # Security headers for Cloudflare Pages / Netlify
 ├── scripts/build-site.mjs # Copies the public site into dist/ (no dependencies)
+├── scripts/og-image.html  # Source of assets/og-image.jpg, the image shown when GitDoco is shared
 ├── issues.html         # GitHub Issues Explorer Web interface
 ├── discussions.html    # GitHub Discussions Explorer Web interface
 ├── deps.html           # Dependencies & licenses Web interface
