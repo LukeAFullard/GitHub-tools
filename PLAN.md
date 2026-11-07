@@ -123,7 +123,7 @@ What was built:
 - [x] `js/license-classify.js`: SPDX expression parser and grouping, LICENSE-file detection for
       `.zip` sources.
 - [x] `js/deps-api.js`: GitHub repo licence, tree and manifests, or a local `.zip`; deps.dev
-      lookups with caching, retries, a concurrency limit and a 1,500-package cap. Ranges are checked
+      lookups with caching, retries, a concurrency limit and a lookup limit per run (now 5,000, most important packages first, with "Check the remaining" for the rest). Ranges are checked
       at their lowest version (or the latest release when unpinned), and the output says so.
 - [x] `deps.html` + `js/deps-app.js`: group pills, ecosystem / direct-transitive / advisories
       filters, dev and transitive toggles, target bar, instruction presets (review licences,
@@ -256,4 +256,28 @@ consent to nothing would be meaningless. When that changes:
 
 Next candidates: more ecosystems (.NET, Ruby, Maven), a CI-friendly mode that fails on new policy
 findings, and SPDX (tag-value or JSON) as a second SBOM format.
+
+## Phase 10: Usability and polish (done)
+
+- [x] Landing page: each tool card opens with its own icon, colour, large title and one-line purpose.
+- [x] Page intros say plainly that public repos need no token, and offer "add a GitHub token" (and
+      Open .zip on Code and Dependencies) for private repos. The Issues intro was a copy of Code's.
+- [x] Status bar (`js/ui-status.js`): shown as soon as anything loads (it was hidden before the
+      first load), with a spinner, the current step, and a progress bar that slides when the total is
+      unknown instead of showing a made-up percentage (it used to stop at e.g. 3% for 10 of "up to
+      300"). It completes and hides when done, and the button that started the work spins.
+- [x] Topic clustering says when it starts ("Finding topics…") and when it is done ("Found 5 topics
+      and 14 common phrases"); a background result never overwrites a running build's status.
+- [x] Desktop layout: the panes fill the window and scroll inside, so Build context is always on
+      screen; the header and status bar stay put (`overflow-x: clip`, not `hidden`, which broke
+      `position: sticky`). Sections are cards on a grey background so panes no longer blend.
+- [x] Labels: "Wrap lines" is a toggle in the preview toolbar (it looked like a primary action),
+      "Activity log", "Expand all", tooltips on Share link and Download, consistent step names.
+- [x] Dark mode: text on blue and red fills is dark, not white (contrast was about 2.5:1).
+- [x] Empty results explain themselves ("No issues found in o/r. It may only have pull requests.")
+      with a one-click fix, instead of "Loaded 0 issues. No clear topics found".
+- [x] Dependencies: nothing is dropped at a package limit any more. Every package is listed; up to
+      5,000 are looked up per run, most important first, and "Check the remaining N" does the rest.
+- [x] Page titles and descriptions name GitDoco; a 404 page; the status line is announced to screen
+      readers; toasts sit above the status bar; the output header wraps on phones.
 

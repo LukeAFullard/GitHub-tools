@@ -84,6 +84,7 @@ function versionBasis(p) {
 function packageNotes(p) {
     const notes = [...(p.license.notes || [])];
     if (p.status === 'not-found') notes.push('not found on deps.dev');
+    if (p.status === 'not-checked') notes.push('not looked up on deps.dev (lookup limit), so license and advisories are unknown');
     if (p.status === 'error') notes.push(`lookup failed: ${p.error || 'error'}`);
     if (p.healthFlags && p.healthFlags.length) notes.push(...p.healthFlags);
     else if (p.deprecated) notes.push('deprecated or yanked');

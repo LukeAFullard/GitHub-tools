@@ -173,7 +173,8 @@ html, body {
     font-size: 14px;
     line-height: 1.45;
     -webkit-font-smoothing: antialiased;
-    overflow-x: hidden;
+    /* clip, not hidden: hidden makes body a scroll container, which breaks the sticky header and status bar. */
+    overflow-x: clip;
 }
 
 /* Container */
@@ -456,7 +457,7 @@ a.brand-home {
 .target-bar button[aria-pressed="true"] {
     background: var(--cobalt);
     border-color: var(--cobalt);
-    color: #FFFFFF;
+    color: var(--on-cobalt);
 }
 
 /* Options Drawer */
@@ -1173,7 +1174,7 @@ button {
 
 button.primary {
     background-color: var(--cobalt);
-    color: #FFFFFF;
+    color: var(--on-cobalt);
 }
 
 button.primary:hover:not(:disabled) {
@@ -1193,7 +1194,7 @@ button.secondary:hover:not(:disabled) {
 
 button.danger {
     background-color: var(--over);
-    color: #FFFFFF;
+    color: var(--on-over);
 }
 
 button.btn-full {
@@ -1703,3 +1704,150 @@ body.zip-drag-over::after {
 .deps-limits summary { cursor: pointer; color: var(--cobalt); font-weight: 600; }
 .deps-limits ul { margin: 0.5rem 0 0; padding-left: 1.1rem; display: grid; gap: 0.3rem; }
 .deps-limits strong { color: var(--ink); }
+
+/* --- Workspace layout, status bar and loading states ---------------------------------------
+ * The controls sit on a white sheet under the header; the work area below is grey, with each
+ * section (topics, budget, the two panes) as its own card. On desktop the panes fill the
+ * viewport and scroll inside, so a pane's main button (Build context) stays on screen. The
+ * status bar stays at the bottom of the window and appears as soon as anything starts loading.
+ */
+:root {
+    --header-h: 49px;
+    --status-h: 46px;
+    --pane-head: #F6F7F9;
+    --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.05);
+    /* Text on a cobalt or red fill: white on the light theme's dark fills, near-black on the dark theme's light ones. */
+    --on-cobalt: #FFFFFF;
+    --on-over: #FFFFFF;
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --pane-head: #1C242D; --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45); --on-cobalt: #0B1020; --on-over: #1F0707; }
+}
+[data-theme="dark"] { --pane-head: #1C242D; --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45); --on-cobalt: #0B1020; --on-over: #1F0707; }
+[data-theme="light"] { --on-cobalt: #FFFFFF; --on-over: #FFFFFF; --pane-head: #F6F7F9; --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.05); }
+
+.source-bar, .target-bar { box-shadow: none; }
+.budget-banner, .nlp-banner {
+    margin: 0.75rem 1.25rem 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-card);
+}
+.workspace-panes {
+    gap: 0.75rem;
+    padding: 0.75rem 1.25rem;
+    background: var(--page);
+}
+.pane {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-card);
+}
+.pane-header { background: var(--pane-head); }
+.pane-title { font-size: 1rem; }
+.pane-footer { background: var(--pane-head); }
+
+@media (min-width: 1100px) {
+    .workspace-panes {
+        height: calc(100dvh - var(--header-h) - var(--status-h));
+        min-height: 540px;
+        grid-template-rows: minmax(0, 1fr);
+        flex: none; /* as a flex item it would otherwise grow to its content's height */
+    }
+    .pane { height: 100%; min-height: 0; }
+}
+
+/* Status bar */
+.log-card {
+    position: sticky;
+    bottom: 0;
+    z-index: 15;
+    min-height: var(--status-h);
+    box-shadow: 0 -2px 8px rgba(16, 24, 40, 0.06);
+}
+body.is-busy .log-card { display: block !important; }
+.log-summary-text { display: inline-flex; align-items: center; gap: 0.5rem; }
+.log-card.is-busy .log-summary-text { color: var(--ink); }
+
+@keyframes gd-spin { to { transform: rotate(360deg); } }
+@keyframes gd-slide { from { transform: translateX(-110%); } to { transform: translateX(310%); } }
+
+.log-card.is-busy .log-summary-text::before,
+button.is-loading::before,
+.nlp-banner.is-pending #nlpMetaBadge::before,
+.loading-spinner {
+    content: '';
+    display: inline-block;
+    flex: none;
+    width: 0.9em;
+    height: 0.9em;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: gd-spin 0.7s linear infinite;
+}
+button.is-loading:disabled { opacity: 0.85; cursor: progress; }
+
+.progress-track.indeterminate .progress-fill {
+    width: 32%;
+    animation: gd-slide 1.15s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    .progress-track.indeterminate .progress-fill { width: 100%; opacity: 0.45; animation: none; }
+}
+
+.nlp-banner.is-pending #nlpMetaBadge { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--cobalt); }
+
+/* Phones: the bottom action bar is the sticky element; the status bar sits just above it while busy. */
+@media (max-width: 720px) {
+    .budget-banner, .nlp-banner { margin: 0.5rem 0.75rem 0; }
+    .workspace-panes { padding: 0.5rem 0.75rem; }
+    .log-card { position: static; }
+    body.is-busy:not(.is-empty) .log-card {
+        position: sticky;
+        bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+    }
+}
+
+/* "Add a GitHub token" in the intro: a button that reads as a link. */
+.link-btn {
+    display: inline;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--cobalt);
+    font: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+    white-space: normal;
+}
+.link-btn:hover { color: var(--cobalt-hover); }
+/* An inline text link inside a sentence: not stretched to the 44px touch size used for buttons. */
+button.link-btn { min-height: 0 !important; padding: 0 !important; display: inline !important; font-size: inherit; }
+
+/* Preview toolbar: "Wrap lines" only matters while the preview is open. */
+.preview-toolbar { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.85rem 0; }
+.preview-toolbar #wrapToggleBtn { display: none; }
+.preview-toolbar #togglePreviewBtn[aria-expanded="true"] ~ #wrapToggleBtn { display: inline-flex; }
+.toggle-btn[aria-pressed="true"] { border-color: var(--cobalt); color: var(--cobalt); background: var(--cobalt-subtle); }
+.toggle-btn[aria-pressed="true"]::before { content: '\2713'; font-weight: 700; }
+
+/* Flex children must be allowed to shrink, or a long file list pushes the pane footer off screen. */
+.tree-viewport, .output-viewport, .issues-list-viewport { min-height: 0; }
+
+/* A warning that offers a fix ("Check the remaining 1,234") */
+.banner-item .banner-action { margin-left: 0.6rem; vertical-align: middle; }
+.empty-state .empty-action { margin-top: 0.6rem; }
+
+/* Toasts sit above the pinned status bar (and above the phone action bar). */
+.toast-container { bottom: calc(var(--status-h) + 0.9rem); }
+@media (max-width: 720px) {
+    .toast-container { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); right: 0.75rem; left: 0.75rem; }
+}
+@media (max-width: 720px) {
+    /* The output header (part picker and up to four buttons) wraps rather than running off screen. */
+    .pane-header { flex-wrap: wrap; row-gap: 0.4rem; }
+    .pane-header > div { flex-wrap: wrap; row-gap: 0.4rem; }
+}

@@ -143,7 +143,7 @@
 .nlp-pill.active {
     background: var(--cobalt);
     border-color: var(--cobalt);
-    color: #FFFFFF;
+    color: var(--on-cobalt);
 }
 
 .nlp-pill-count {
@@ -157,7 +157,7 @@
 
 .nlp-pill.active .nlp-pill-count {
     background: rgba(255, 255, 255, 0.2);
-    color: #FFFFFF;
+    color: var(--on-cobalt);
 }
 
 /* --- Multi-Dimensional Issue Filters --- */
@@ -484,7 +484,7 @@ button.issue-label-pill[aria-pressed="true"] {
 .license-restricted { color: var(--merged); background: var(--merged-bg); }
 .license-unknown { color: var(--ink-soft); background: var(--page); }
 .nlp-pill.license-pill { border-color: currentColor; }
-.nlp-pill.license-pill.active { color: #FFFFFF; background: var(--cobalt); border-color: var(--cobalt); }
+.nlp-pill.license-pill.active { color: var(--on-cobalt); background: var(--cobalt); border-color: var(--cobalt); }
 .nlp-pill.license-pill:disabled { opacity: 0.45; cursor: default; }
 .dep-item { cursor: default; }
 .dep-advisory { color: var(--over); border-color: var(--over); }
@@ -535,7 +535,7 @@ a.issue-link { color: var(--ink-soft); }
 }
 
 /* Dependencies: advisory severity, upgrades, health */
-.dep-advisory.sev-critical, .dep-advisory.sev-high { color: #fff; background: var(--over); border-color: var(--over); }
+.dep-advisory.sev-critical, .dep-advisory.sev-high { color: var(--on-over); background: var(--over); border-color: var(--over); }
 .dep-advisory.sev-medium { color: var(--near); border-color: var(--near); background: var(--near-bg); }
 .dep-advisory.sev-low, .dep-advisory.sev-unknown { color: var(--ink-soft); border-color: var(--line); }
 .dep-outdated { color: var(--cobalt); border-color: var(--cobalt); }
@@ -547,7 +547,7 @@ a.issue-link { color: var(--ink-soft); }
 .policy-groups { display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem; margin-bottom: 0.25rem; }
 .policy-groups label { display: flex; flex-direction: column; font-size: 0.75rem; color: var(--ink-soft); gap: 0.15rem; }
 .policy-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.25rem; }
-.policy-badge.policy-block { color: #fff; background: var(--over); border: 1px solid var(--over); }
+.policy-badge.policy-block { color: var(--on-over); background: var(--over); border: 1px solid var(--over); }
 .policy-badge.policy-review { color: var(--near); background: var(--near-bg); border: 1px solid var(--near); }
 
 .export-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.4rem 0.85rem; font-size: 0.8125rem; color: var(--ink-soft); border-bottom: 1px solid var(--line); }
@@ -561,5 +561,8 @@ a.issue-link { color: var(--ink-soft); }
     padding: 0.4rem 0.7rem; color: var(--ink); font-size: 0.875rem; font-family: inherit;
 }
 .compare-row input:focus { border-color: var(--cobalt); }
-.change-badge.change-added { color: #fff; background: var(--cobalt); border: 1px solid var(--cobalt); }
+.change-badge.change-added { color: var(--on-cobalt); background: var(--cobalt); border: 1px solid var(--cobalt); }
 .change-badge.change-updated { color: var(--cobalt); background: var(--cobalt-subtle); border: 1px solid var(--cobalt); text-transform: none; }
+
+/* The collapsed "Common phrases" box is only as tall as its title. */
+.nlp-body { align-items: start; }

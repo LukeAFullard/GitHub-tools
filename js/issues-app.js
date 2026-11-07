@@ -21,6 +21,7 @@ import { buildTabHref } from './nav.js';
 import { externalLink, isGithubUrl } from './links.js';
 import { searchTopic } from './topic-search.js';
 import { confirmFirstUse } from './first-use.js';
+import { begin, progress, end, isCurrent, initTokenLinks } from './ui-status.js';
 
 export const KIND = globalThis.__THREAD_EXPLORER_KIND__ === 'discussions' ? 'discussions' : 'issues';
 const IS_DISCUSSIONS = KIND === 'discussions';
@@ -201,20 +202,15 @@ function showToast(message, type = 'info') {
     }, 3500);
 }
 
-function log(msg) {
+/** Adds a line to the activity log and, unless summary is false, shows it in the status bar. */
+function log(msg, { summary = true } = {}) {
     if (dom.log) {
         dom.log.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
         dom.log.scrollTop = dom.log.scrollHeight;
     }
-    if (dom.logSummary) {
+    if (summary && dom.logSummary) {
         dom.logSummary.textContent = msg.replace(/^\[[A-Z]+\]\s*/, '');
     }
-}
-
-function updateProgressBar(percent) {
-    const val = Math.min(100, Math.max(0, Math.round(percent)));
-    if (dom.progressFill) dom.progressFill.style.width = `${val}%`;
-    if (dom.progressTrack) dom.progressTrack.setAttribute('aria-valuenow', val.toString());
 }
 
 // --- Token On Demand & Workspace Visibility ---
@@ -553,7 +549,8 @@ dom.logToggleBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     logOpen = !logOpen;
     dom.log.style.display = logOpen ? 'block' : 'none';
-    dom.logToggleBtn.textContent = logOpen ? 'Hide log' : 'Details';
+    dom.logToggleBtn.textContent = logOpen ? 'Hide log' : 'Activity log';
+    dom.logToggleBtn.setAttribute('aria-expanded', logOpen ? 'true' : 'false');
 });
 dom.logHeader.addEventListener('click', () => dom.logToggleBtn.click());
 
@@ -950,6 +947,17 @@ document.addEventListener('keydown', (e) => {
 });
 
 let currentNlpRequestId = 0;
+let nlpPending = false;
+let nlpStatus = 0;
+
+/** Finishes the topic step: says how many topics were found, in the log and the status bar. */
+function finishNlp(message) {
+    nlpPending = false;
+    const ok = isCurrent(nlpStatus);
+    log(message, { summary: ok });
+    if (ok) end(nlpStatus);
+    renderNlpBanner();
+}
 
 function runNlpAnalysis(issues) {
     if (!nlpWorker) {
@@ -957,14 +965,21 @@ function runNlpAnalysis(issues) {
         nlpWorker.onmessage = (e) => {
             if (!e.data || e.data.id !== currentNlpRequestId) return;
             nlpResults = e.data || { clusters: [], ngrams: [], similarMap: {} };
-            renderNlpBanner();
+            const c = nlpResults.clusters.length;
+            const n = nlpResults.ngrams.length;
+            finishNlp(c || n
+                ? `[DONE] Loaded ${allIssues.length} ${W.noun}. Found ${c} topic${c === 1 ? '' : 's'} and ${n} common phrase${n === 1 ? '' : 's'}.`
+                : `[DONE] Loaded ${allIssues.length} ${W.noun}. No clear topics found; search for your own topic instead.`);
             renderIssuesList();
         };
         nlpWorker.onerror = (err) => {
-            log(`[WARN] NLP worker error: ${err.message || String(err)}`);
+            finishNlp(`[WARN] Topic clustering failed (${err.message || String(err)}). Filtering and packing still work.`);
         };
     }
     currentNlpRequestId++;
+    nlpPending = true;
+    nlpStatus = begin(`Loaded ${issues.length} ${W.noun}. Finding topics…`);
+    renderNlpBanner();
     nlpWorker.postMessage({
         id: currentNlpRequestId,
         issues: issues.map(i => ({ number: i.number, title: i.title, body: i.body }))
@@ -977,7 +992,12 @@ function renderNlpBanner() {
         return;
     }
     dom.nlpBanner.style.display = 'flex';
-    dom.nlpMetaBadge.textContent = `${nlpResults.clusters.length} clusters, ${nlpResults.ngrams.length} key phrases across ${allIssues.length} ${W.noun}`;
+    dom.nlpBanner.classList.toggle('is-pending', nlpPending);
+    dom.nlpMetaBadge.textContent = nlpPending
+        ? `Finding topics in ${allIssues.length} ${W.noun}…`
+        : nlpResults.clusters.length || nlpResults.ngrams.length
+            ? `${nlpResults.clusters.length} topic${nlpResults.clusters.length === 1 ? '' : 's'}, ${nlpResults.ngrams.length} common phrase${nlpResults.ngrams.length === 1 ? '' : 's'} across ${allIssues.length} ${W.noun}`
+            : `No clear topics in ${allIssues.length} ${W.noun}; search for your own below`;
 
     dom.topicClustersContainer.innerHTML = '';
     if (activeTopicFilter && activeTopicFilter.type === 'custom') {
@@ -1138,6 +1158,7 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
     nlpResults = { clusters: [], ngrams: [], similarMap: {} };
     if (dom.customTopicInput) dom.customTopicInput.value = '';
     currentNlpRequestId++;
+    nlpPending = false;
     renderNlpBanner();
     // Drop the previous repo's output so Copy/Download cannot hand it out for this repo.
     if (currentAppState === 'built') setAppState('loaded');
@@ -1145,15 +1166,15 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
 
     dom.loadIssuesBtn.disabled = true;
     dom.abortBtn.style.display = 'inline-flex';
-    dom.progressTrack.style.display = 'block';
-    updateProgressBar(5);
+    const loadStatus = begin(`Loading ${W.noun} from ${repoInfo.owner}/${repoInfo.repo}…`, { button: dom.loadIssuesBtn });
 
     const maxItems = parseInt(dom.maxIssuesLimit.value, 10) || 300;
     const itemType = IS_DISCUSSIONS ? 'discussions' : dom.includePrs.value;
     const pat = dom.pat.value.trim();
 
     try {
-        log(`[FETCH] Loading up to ${maxItems} ${itemType} from ${repoInfo.owner}/${repoInfo.repo}...`);
+        const itemLabel = { issues: 'issues', prs: 'pull requests', both: 'issues and pull requests', discussions: 'discussions' }[itemType] || itemType;
+        log(`[FETCH] Loading up to ${maxItems} ${itemLabel} from ${repoInfo.owner}/${repoInfo.repo}...`);
         const fetchManifest = IS_DISCUSSIONS ? fetchDiscussionsManifest : fetchIssuesManifest;
         const manifest = await fetchManifest(repoInfo.owner, repoInfo.repo, {
             maxItems,
@@ -1161,7 +1182,8 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
             pat,
             signal: loadController.signal,
             onHeaders: updateRateLimitUI,
-            onProgress: (loaded, total) => updateProgressBar((loaded / total) * 100)
+            // The total is only a cap ("up to 300"), so show the count found rather than a percentage.
+            onProgress: (loaded) => progress(loadStatus, { message: `Loading ${W.noun} from ${repoInfo.owner}/${repoInfo.repo}… ${loaded} found` })
         });
         if (IS_DISCUSSIONS) {
             log(manifest.source === 'graphql'
@@ -1190,7 +1212,6 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
             sortedLabels.map(([l, cnt]) => `<option value="${escapeXml(l)}">${escapeXml(l)} (${cnt})</option>`).join('');
 
         renderIssuesList();
-        runNlpAnalysis(allIssues);
         setAppState('loaded');
         // Remember the repo for next time, but not one loaded with a token: it may be private.
         try {
@@ -1207,10 +1228,20 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
                 showRetryBtn: true,
                 onRetry: () => dom.loadIssuesBtn.click()
             });
-        } else {
-            log(`[SUCCESS] Loaded ${allIssues.length} items. Running background NLP topic clustering...`);
-            showToast(`Loaded ${allIssues.length} items.`, 'info');
+        } else if (allIssues.length > 0) {
+            log(`[SUCCESS] Loaded ${allIssues.length} ${itemLabel}.`);
+            showToast(`Loaded ${allIssues.length} ${itemLabel}.`, 'info');
         }
+        if (allIssues.length === 0) {
+            const message = emptyResultMessage(repoInfo, itemType);
+            log(`[INFO] ${message.text}`);
+            showEmptyResult(message);
+            end(loadStatus);
+            return;
+        }
+        end(loadStatus);
+        // Topic clustering runs in a background worker; the status bar says when it is done.
+        runNlpAnalysis(allIssues);
     } catch (err) {
         if (err.name === 'AbortError') {
             log('[CANCEL] Manifest load cancelled.');
@@ -1228,6 +1259,7 @@ dom.loadIssuesBtn.addEventListener('click', async () => {
             showToast(err.message, 'error');
         }
     } finally {
+        end(loadStatus);
         dom.loadIssuesBtn.disabled = false;
         dom.abortBtn.style.display = 'none';
     }
@@ -1271,8 +1303,42 @@ function clearOutputState() {
     updateBudgetMeterUI(0, 1, true);
 }
 
+/** Why a load found nothing, and the one-click fix when there is one. */
+function emptyResultMessage(repoInfo, itemType) {
+    const repo = `${repoInfo.owner}/${repoInfo.repo}`;
+    if (IS_DISCUSSIONS) return { text: `${repo} has no discussions, or Discussions are turned off for it.` };
+    if (itemType === 'issues') {
+        return { text: `No issues found in ${repo}. It may only have pull requests.`, action: 'Load pull requests too', apply: () => { dom.includePrs.value = 'both'; } };
+    }
+    if (itemType === 'prs') {
+        return { text: `No pull requests found in ${repo}.`, action: 'Load issues too', apply: () => { dom.includePrs.value = 'both'; } };
+    }
+    return { text: `No issues or pull requests found in ${repo}.` };
+}
+
+function showEmptyResult(message) {
+    const p = document.getElementById('issuesEmptyText');
+    if (p) {
+        p.textContent = message.text;
+        if (message.action) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.id = 'emptyResultAction';
+            btn.className = 'secondary btn-sm empty-action';
+            btn.textContent = message.action;
+            btn.addEventListener('click', () => { message.apply(); dom.loadIssuesBtn.click(); });
+            p.appendChild(document.createElement('br'));
+            p.appendChild(btn);
+        }
+    }
+    showToast(message.text, 'info');
+}
+
 async function buildSelectedContext(summaryOnly = false) {
-    if (!currentRepoInfo || allIssues.length === 0) return;
+    if (!currentRepoInfo || allIssues.length === 0) {
+        showToast(allIssues.length === 0 && currentRepoInfo ? `There are no ${W.noun} to pack. Load another repository.` : `Load a repository first.`, 'warn');
+        return;
+    }
 
     lastBuildSummaryOnly = summaryOnly;
     lastFetchRateLimited = false;
@@ -1304,8 +1370,7 @@ async function buildSelectedContext(summaryOnly = false) {
             const myController = buildController;
             dom.abortBtn.style.display = 'inline-flex';
             dom.buildContextBtn.disabled = true;
-            dom.progressTrack.style.display = 'block';
-            updateProgressBar(0);
+            const buildStatus = begin(`Fetching comments for ${missingComments.length} ${W.one}(s)…`, { button: dom.buildContextBtn, percent: 0 });
 
             try {
                 log(`[FETCH] Fetching comment threads for ${missingComments.length} ${W.one}(s)...`);
@@ -1315,7 +1380,7 @@ async function buildSelectedContext(summaryOnly = false) {
                     signal: buildController.signal,
                     universe: allIssues,
                     onHeaders: updateRateLimitUI,
-                    onProgress: (done, total) => updateProgressBar((done / total) * 100),
+                    onProgress: (done, total) => progress(buildStatus, { message: `Fetching comments… ${done} of ${total} ${W.noun}`, percent: (done / Math.max(total, 1)) * 100 }),
                     onThread: (num, comms) => {
                         if (thisBuildGen !== buildGeneration || myController.signal.aborted) return;
                         cachedCommentsByIssue.set(num, comms);
@@ -1358,6 +1423,7 @@ async function buildSelectedContext(summaryOnly = false) {
                 log(`[ERROR] Comment fetch error: ${err.message}`);
                 showToast(err.message, 'error');
             } finally {
+                end(buildStatus);
                 if (buildController === myController && thisBuildGen === buildGeneration) {
                     dom.buildContextBtn.disabled = false;
                     dom.abortBtn.style.display = 'none';
@@ -1884,8 +1950,6 @@ if (dom.togglePreviewBtn && dom.previewArea) {
 
 dom.wrapToggleBtn.addEventListener('click', () => {
     const isWrapped = dom.previewArea.classList.toggle('wrap');
-    dom.wrapToggleBtn.classList.toggle('primary', isWrapped);
-    dom.wrapToggleBtn.classList.toggle('secondary', !isWrapped);
     dom.wrapToggleBtn.setAttribute('aria-pressed', isWrapped ? 'true' : 'false');
 });
 
@@ -1933,6 +1997,7 @@ if (VALID_FORMATS.includes(urlParams.get('format'))) {
 updateSettingsSummary();
 updateCopyBtnLabel(0);
 setAppState('empty');
+initTokenLinks(showTokenPanel);
 // The token field starts open on the Discussions page; its help text explains why (official API).
 if (IS_DISCUSSIONS) showTokenPanel('');
 

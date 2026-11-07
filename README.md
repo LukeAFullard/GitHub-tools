@@ -92,6 +92,7 @@ The site is static: no build step is needed to run it. To publish only the site 
 ├── index.html          # Landing page
 ├── privacy.html        # Privacy notice + "clear saved data" button
 ├── terms.html          # Terms of Use
+├── 404.html            # "Page not found", with links to the tools
 ├── code.html           # Code Packer Web interface
 ├── _headers            # Security headers for Cloudflare Pages / Netlify
 ├── scripts/build-site.mjs # Copies the public site into dist/ (no dependencies)
@@ -133,6 +134,7 @@ The site is static: no build step is needed to run it. To publish only the site 
     ├── tokenizer.worker.js # Web Worker background tokenization
     ├── topic-search.js # "Your own topic" search: direct matches plus related threads
     ├── tree.js         # File tree rendering & selection state management
+    ├── ui-status.js    # Status bar: what is running, progress, spinners, "done" messages
     └── zip-loader.js   # Local .zip reader (central directory + on-demand Deflate)
 ```
 

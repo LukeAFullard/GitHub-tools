@@ -10,7 +10,7 @@ import path from 'node:path';
  */
 const ROOT = new URL('../', import.meta.url).pathname;
 const read = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
-const PAGES = ['index.html', 'privacy.html', 'terms.html', 'code.html', 'issues.html', 'discussions.html', 'deps.html'];
+const PAGES = ['index.html', 'privacy.html', 'terms.html', '404.html', 'code.html', 'issues.html', 'discussions.html', 'deps.html'];
 const JS = fs.readdirSync(path.join(ROOT, 'js')).filter(f => f.endsWith('.js')).map(f => `js/${f}`);
 const CSS = fs.readdirSync(path.join(ROOT, 'css')).filter(f => f.endsWith('.css')).map(f => `css/${f}`);
 const ALLOWED_CONNECT = ['https://api.github.com', 'https://raw.githubusercontent.com', 'https://api.deps.dev'];

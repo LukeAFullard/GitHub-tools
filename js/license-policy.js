@@ -102,6 +102,7 @@ function evalNode(node, policy) {
 export function evaluatePolicy(pkg, policyInput) {
     const policy = normalizePolicy(policyInput);
     if (packageAllowed(pkg, policy.allowPackages)) return { verdict: 'allow', reason: 'package is on the approved list' };
+    if (pkg.status === 'not-checked') return { verdict: 'review', reason: 'license not checked yet (deps.dev lookup limit)' };
     const expr = pkg.license && pkg.license.expression ? pkg.license.expression : '';
     if (!expr) {
         const v = policy.groups.unknown;

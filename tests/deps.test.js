@@ -305,3 +305,22 @@ test('the versions line says when only some packages come from a lockfile', asyn
     assert.equal(lockText({ lockfiles: ['Cargo.lock'], packages: [{ versionKind: 'locked' }, { versionKind: 'range-min' }] }),
         'Exact versions from lockfiles: Cargo.lock; packages not in a lockfile have estimated versions');
 });
+
+test('packages past the lookup limit are listed as not checked, most important first, and can be checked later', async () => {
+    clearDepsDevCache();
+    installFakeDepsDev();
+    const { deps } = collectDirectDependencies([{ path: 'package.json', text: JSON.stringify({ dependencies: { express: '4.18.2' }, devDependencies: { 'gpl-lib': '2.0.0' } }) }]);
+    const first = await resolveLicenses(deps, { includeDev: true, maxLookups: 1 });
+    assert.ok(first.packages.length >= 2, 'nothing is dropped from the list');
+    assert.equal(first.unchecked, first.packages.length - 1);
+    assert.equal(first.capped, true);
+    const checked = first.packages.filter(p => p.status !== 'not-checked');
+    assert.deepEqual(checked.map(p => p.name), ['express'], 'a direct runtime dependency is checked first');
+    const rest = first.packages.find(p => p.status === 'not-checked');
+    assert.equal(rest.license.group, 'unknown');
+    const { evaluatePolicy } = await import('../js/license-policy.js');
+    assert.deepEqual(evaluatePolicy(rest, {}), { verdict: 'review', reason: 'license not checked yet (deps.dev lookup limit)' });
+    const all = await resolveLicenses(deps, { includeDev: true, maxLookups: Infinity });
+    assert.equal(all.unchecked, 0);
+    assert.ok(all.packages.every(p => p.status !== 'not-checked'));
+});
