@@ -435,7 +435,8 @@ if (dom.logToggleBtn && dom.log) {
     });
 }
 if (dom.logHeader) {
-    dom.logHeader.addEventListener('click', () => {
+    dom.logHeader.addEventListener('click', (e) => {
+        if (e.target && e.target.closest && e.target.closest('a')) return;
         if (dom.logToggleBtn) dom.logToggleBtn.click();
     });
 }

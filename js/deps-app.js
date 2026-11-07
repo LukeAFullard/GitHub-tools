@@ -770,7 +770,7 @@ dom.logToggleBtn.addEventListener('click', (e) => {
     dom.logToggleBtn.textContent = logOpen ? 'Hide log' : 'Activity log';
     dom.logToggleBtn.setAttribute('aria-expanded', logOpen ? 'true' : 'false');
 });
-dom.logHeader.addEventListener('click', () => dom.logToggleBtn.click());
+dom.logHeader.addEventListener('click', (e) => { if (e.target && e.target.closest && e.target.closest('a')) return; dom.logToggleBtn.click(); });
 
 if (dom.targetBar) {
     dom.targetBar.addEventListener('click', (e) => {

@@ -1851,3 +1851,9 @@ button.link-btn { min-height: 0 !important; padding: 0 !important; display: inli
     .pane-header { flex-wrap: wrap; row-gap: 0.4rem; }
     .pane-header > div { flex-wrap: wrap; row-gap: 0.4rem; }
 }
+
+/* Status bar: "Report a problem" next to "Activity log" */
+.log-actions { display: inline-flex; align-items: center; gap: 0.75rem; flex: none; }
+.feedback-link { font-size: 0.75rem; color: var(--ink-soft); text-decoration: underline; text-underline-offset: 2px; }
+.feedback-link:hover { color: var(--cobalt); }
+@media (max-width: 480px) { .feedback-link { display: none; } }
